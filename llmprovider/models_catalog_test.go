@@ -11,12 +11,14 @@ func TestIsUsableGeminiTextModel(t *testing.T) {
 		id   string
 		want bool
 	}{
+		{"gemini-3.7-flash", true},
+		{"gemini-3.6-flash", true},
+		{"gemini-3.5-flash", true},
+		{"gemini-3.5-flash-lite", true},
 		{"gemini-2.5-flash", true},
 		{"gemini-2.5-flash-lite", true},
 		{"gemini-2.5-pro", true},
-		{"gemini-3.5-flash", true},
-		{"gemini-3.1-flash-lite", true},
-		{"models/gemini-2.5-flash", true},
+		{"models/gemini-3.7-flash", true},
 		// Specialty / non-production
 		{"gemini-2.5-flash-image", false},
 		{"gemini-2.5-flash-preview-tts", false},
@@ -35,7 +37,7 @@ func TestIsUsableGeminiTextModel(t *testing.T) {
 			t.Errorf("isUsableGeminiTextModel(%q)=%v want %v", tc.id, got, tc.want)
 		}
 	}
-	if isUsableGeminiTextModel("gemini-2.5-flash", []string{"embedContent"}) {
+	if isUsableGeminiTextModel("gemini-3.7-flash", []string{"embedContent"}) {
 		t.Error("must require generateContent")
 	}
 }
@@ -62,12 +64,13 @@ func TestCurateFromCatalog_Gemini(t *testing.T) {
 	// API returns noise + good models
 	available := []string{
 		"gemini-2.5-flash-image",
-		"gemini-2.5-flash",
-		"gemini-2.5-pro",
+		"gemini-3.7-flash",
+		"gemini-3.6-flash",
 		"gemini-2.5-flash-preview-09-2025",
-		"gemini-2.5-flash-lite",
-		"gemini-embedding-001",
 		"gemini-3.5-flash",
+		"gemini-embedding-001",
+		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
 		"gemini-2.0-flash", // shut down-ish; still text if not denied by filter
 	}
 	// Filter first as listGemini does
@@ -92,9 +95,9 @@ func TestCurateFromCatalog_Gemini(t *testing.T) {
 			t.Errorf("junk leaked into menu: %s", m)
 		}
 	}
-	// Catalog order preference: lite before pro when both present
-	if idxLite, idxPro := indexOf(out, "gemini-2.5-flash-lite"), indexOf(out, "gemini-2.5-pro"); idxLite >= 0 && idxPro >= 0 && idxLite > idxPro {
-		t.Errorf("expected flash-lite before pro in catalog order: %v", out)
+	// Catalog order preference: 3.7-flash before 2.5-flash when both present
+	if idx37, idx25 := indexOf(out, "gemini-3.7-flash"), indexOf(out, "gemini-2.5-flash"); idx37 >= 0 && idx25 >= 0 && idx37 > idx25 {
+		t.Errorf("expected 3.7-flash before 2.5-flash in catalog order: %v", out)
 	}
 }
 
@@ -121,19 +124,31 @@ func TestCurateFromCatalog_EmptyAvailableUsesNothingThenFallback(t *testing.T) {
 }
 
 func TestStaticModels_NoShutDownGemini20(t *testing.T) {
+	if len(StaticGemini) > MaxListedModels {
+		t.Errorf("StaticGemini should not exceed MaxListedModels (%d), got %d", MaxListedModels, len(StaticGemini))
+	}
 	for _, m := range StaticGemini {
 		if strings.Contains(m, "2.0") {
 			t.Errorf("static catalog should not recommend shut-down 2.0 models: %s", m)
 		}
+		if strings.Contains(m, "1.5") {
+			t.Errorf("static catalog should not recommend shut-down 1.5 models: %s", m)
+		}
 		if strings.Contains(m, "preview") {
 			t.Errorf("static catalog must not include preview: %s", m)
+		}
+		if strings.Contains(m, "pro") {
+			t.Errorf("static catalog must not include slow reasoning pro models: %s", m)
 		}
 	}
 }
 
 func TestRankGeminiModel_PrefersFlashLite(t *testing.T) {
-	if RankGeminiModel("gemini-2.5-flash-lite") <= RankGeminiModel("gemini-2.5-pro") {
-		t.Error("flash-lite should rank above pro for hook latency")
+	if RankGeminiModel("gemini-3.7-flash") <= RankGeminiModel("gemini-2.5-pro") {
+		t.Error("3.7 flash should rank above pro for hook latency")
+	}
+	if RankGeminiModel("gemini-3.7-flash") <= RankGeminiModel("gemini-2.5-flash") {
+		t.Error("newer 3.7 generation should rank above 2.5")
 	}
 	if RankGeminiModel("gemini-2.5-flash-preview-09-2025") >= RankGeminiModel("gemini-2.5-flash") {
 		t.Error("preview should rank far below stable flash")

@@ -23,14 +23,15 @@ const methodGenerateContent = "generateContent"
 //
 //nolint:goconst // catalog IDs are intentionally repeated in tests and filters
 var (
-	// StaticGemini: stable GA text models only. gemini-2.0-* is shut down (2026).
-	// Prefer Flash / Flash-Lite for latency-sensitive hooks; Pro last.
+	// StaticGemini: stable fast text models only. gemini-2.0-* and 1.5-* are shut down.
+	// Prioritizes low-latency Flash and Flash-Lite models for fast Git hook execution.
 	StaticGemini = []string{
-		"gemini-2.5-flash-lite",
-		"gemini-2.5-flash",
-		"gemini-3.1-flash-lite",
+		"gemini-3.7-flash",
+		"gemini-3.6-flash",
 		"gemini-3.5-flash",
-		"gemini-2.5-pro",
+		"gemini-3.5-flash-lite",
+		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
 	}
 
 	// StaticOpenAI: chat-capable defaults; mini/nano first for cost.
@@ -163,9 +164,9 @@ func isUsableClaudeTextModel(id string) bool {
 }
 
 // curateFromCatalog returns catalog models that appear in available (case-sensitive
-// match first, then case-insensitive). Preserves catalog order. Caps at MaxListedModels.
-// If nothing from the catalog is available, falls back to filtering `available` with
-// rankFn (optional) and returns up to MaxListedModels.
+// match first, then case-insensitive). Preserves catalog order. If catalog hits do not
+// fill MaxListedModels, dynamically backfills with top-ranked usable models from available.
+// If nothing from the catalog is available, falls back to filtering `available` with rankFn.
 func curateFromCatalog(catalog, available []string, usable func(string) bool, rankFn func(string) int) []string {
 	avail := make(map[string]string, len(available)) // lower -> canonical
 	for _, a := range available {
@@ -196,25 +197,34 @@ func curateFromCatalog(catalog, available []string, usable func(string) bool, ra
 		}
 	}
 
-	if len(out) > 0 {
-		return out
+	// Backfill with remaining usable models from available if catalog hits < MaxListedModels.
+	if len(available) > 0 {
+		var remaining []string
+		for _, a := range available {
+			key := strings.ToLower(strings.TrimSpace(a))
+			if usable != nil && !usable(a) {
+				continue
+			}
+			if _, dup := seen[key]; !dup {
+				remaining = append(remaining, a)
+			}
+		}
+		if rankFn != nil {
+			sortByRankDesc(remaining, rankFn)
+		}
+		for _, r := range remaining {
+			if len(out) >= MaxListedModels {
+				break
+			}
+			key := strings.ToLower(r)
+			if _, dup := seen[key]; !dup {
+				seen[key] = struct{}{}
+				out = append(out, r)
+			}
+		}
 	}
 
-	// Catalog miss (old key / regional): return best filtered available.
-	var fallback []string
-	for _, a := range available {
-		if usable != nil && !usable(a) {
-			continue
-		}
-		fallback = append(fallback, a)
-	}
-	if rankFn != nil {
-		sortByRankDesc(fallback, rankFn)
-	}
-	if len(fallback) > MaxListedModels {
-		fallback = fallback[:MaxListedModels]
-	}
-	return fallback
+	return out
 }
 
 // sortByRankDesc sorts ids by rankFn descending (stable enough via simple insertion).
@@ -230,7 +240,8 @@ func sortByRankDesc(ids []string, rankFn func(string) int) {
 }
 
 // RankGeminiModel scores a Gemini model name for sorting by preference.
-// Higher is better. Prefers stable Flash/Lite for hook latency.
+// Higher is better. Prioritizes low-latency Flash and Flash-Lite models for fast Git hook execution,
+// while penalizing heavy reasoning (Pro) models and deprecated generations.
 func RankGeminiModel(m string) int {
 	score := 0
 	sm := strings.ToLower(m)
@@ -238,12 +249,12 @@ func RankGeminiModel(m string) int {
 	if strings.Contains(sm, "flash-lite") || strings.HasSuffix(sm, "lite") {
 		score += 200
 	} else if strings.Contains(sm, "flash") {
-		score += 150
+		score += 180
 	} else if strings.Contains(sm, "pro") {
-		score += 80
+		score -= 500 // Penalize heavy reasoning models for Git hook latency
 	}
 
-	if strings.Contains(sm, "preview") || strings.Contains(sm, "exp") {
+	if strings.Contains(sm, "preview") || strings.Contains(sm, "exp") || strings.Contains(sm, "deep-research") {
 		score -= 1000
 	}
 	if datedOrSnapshotGemini.MatchString(sm) {
@@ -252,18 +263,18 @@ func RankGeminiModel(m string) int {
 
 	// Version weights (newer generations first).
 	switch {
+	case strings.Contains(sm, "3.7"):
+		score += 100
+	case strings.Contains(sm, "3.6"):
+		score += 90
 	case strings.Contains(sm, "3.5"):
-		score += 50
-	case strings.Contains(sm, "3.1"):
-		score += 45
-	case strings.Contains(sm, "3.0") || strings.Contains(sm, "gemini-3-"):
+		score += 80
+	case strings.Contains(sm, "3.1") || strings.Contains(sm, "3.0") || strings.Contains(sm, "gemini-3-"):
 		score += 40
 	case strings.Contains(sm, "2.5"):
 		score += 30
-	case strings.Contains(sm, "2.0"):
-		score += 5 // largely shut down
-	case strings.Contains(sm, "1.5"):
-		score += 0
+	case strings.Contains(sm, "2.0") || strings.Contains(sm, "1.5"):
+		score -= 2000 // Deprecated / shut down
 	}
 
 	return score
