@@ -107,6 +107,7 @@ var ProviderEnvVars = map[string]string{
 	ProviderGemini: "GEMINI_API_KEY",
 	ProviderClaude: "CLAUDE_API_KEY",
 	ProviderOpenAI: "OPENAI_API_KEY",
+	ProviderGrok:   "XAI_API_KEY",
 }
 
 // GenerateWithRetry executes a Generate call with the specified number of retries
@@ -158,6 +159,55 @@ func GenerateWithRetry(ctx context.Context, p Provider, prompt string, retries i
 	return "", fmt.Errorf("failed after %d attempts: %w", retries+1, lastErr)
 }
 
+// GenerateItemsWithRetry executes a GenerateItems call with the specified number of retries
+// and jittered delay. It will stop retrying if the context is cancelled.
+func GenerateItemsWithRetry(ctx context.Context, p ItemProvider, input []Item, retries int, delay time.Duration) (*Response, error) {
+	const maxBackoff = 30 * time.Second
+	var lastErr error
+	for i := 0; i <= retries; i++ {
+		if i > 0 {
+			base := delay << (i - 1) // exponential
+			if base <= 0 || base > maxBackoff {
+				base = maxBackoff
+			}
+			jitteredDelay := base
+			if base/4 > 0 {
+				//nolint:gosec // G404: non-crypto jitter for retry backoff spacing
+				jitteredDelay += rand.N(base / 4)
+			}
+			// Honor a server-directed Retry-After when present (capped at maxBackoff).
+			var rl *RateLimitError
+			if errors.As(lastErr, &rl) && rl.RetryAfter > 0 {
+				jitteredDelay = min(rl.RetryAfter, maxBackoff)
+			}
+			slog.Warn("llm: retrying items after failure",
+				"attempt", i,
+				"max_attempts", retries+1,
+				"delay", jitteredDelay,
+			)
+			retryTimer := time.NewTimer(jitteredDelay)
+			select {
+			case <-ctx.Done():
+				retryTimer.Stop()
+				return nil, ctx.Err()
+			case <-retryTimer.C:
+				// Ready for next attempt
+			}
+		}
+
+		res, err := p.GenerateItems(ctx, input...)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+		// Non-retryable errors will never succeed — stop immediately.
+		if errors.Is(err, ErrAuthFailure) || errors.Is(err, ErrInvalidRequest) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("failed after %d attempts: %w", retries+1, lastErr)
+}
+
 // NewProvider creates a Provider by canonical name. Accepts variadic ProviderOption
 // for shared http.Client injection and configuration.
 func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, error) {
@@ -168,6 +218,8 @@ func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, 
 		return NewClaude(apiKey, model, opts...)
 	case ProviderOpenAI:
 		return NewOpenAI(apiKey, model, opts...)
+	case ProviderGrok:
+		return NewGrok(apiKey, model, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}
