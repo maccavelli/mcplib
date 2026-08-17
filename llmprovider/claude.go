@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
-// ClaudeProvider implements Provider using the Anthropic Claude API via standard http client.
+// ClaudeProvider implements Provider using the Anthropic Claude Messages API via standard http client.
+//
+// ClaudeProvider does NOT implement Continuer. Anthropic's Messages API is
+// stateless (no response-ID chaining, no server-managed history). This is a
+// permanent limitation of Anthropic's current API design, not a TODO.
+// Callers must replay prior items as messages on every call.
 type ClaudeProvider struct {
 	apiKey         string
 	model          string
@@ -51,13 +55,70 @@ func (p *ClaudeProvider) Name() string {
 
 // Generate sends a prompt to Anthropic's Messages API and returns the generated text.
 func (p *ClaudeProvider) Generate(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, false)
+	resp, err := p.GenerateItems(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
 }
 
 // GenerateThinking runs Generate with Anthropic extended thinking enabled, satisfying
-// ThinkingProvider. Used for heavy-reasoning tasks routed to the thinking tier.
+// ThinkingProvider.
 func (p *ClaudeProvider) GenerateThinking(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, true)
+	resp, err := p.GenerateItemsThinking(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
+}
+
+// GenerateWithTool sends a prompt to Anthropic's Messages API, forcing it to use a specific tool, and returns the JSON arguments.
+func (p *ClaudeProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithTool(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("claude returned no tool_use content")
+}
+
+// GenerateWithToolThinking runs GenerateWithTool with extended thinking enabled,
+// satisfying ThinkingToolProvider.
+func (p *ClaudeProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithToolThinking(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("claude returned no tool_use content")
+}
+
+// GenerateItems sends items to Anthropic's Messages API and returns typed output items.
+func (p *ClaudeProvider) GenerateItems(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, false)
+}
+
+// GenerateItemsWithTool sends items to Anthropic's Messages API with a tool specified.
+func (p *ClaudeProvider) GenerateItemsWithTool(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, false)
+}
+
+// GenerateItemsThinking sends items to Anthropic's Messages API with thinking enabled.
+func (p *ClaudeProvider) GenerateItemsThinking(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, true)
+}
+
+// GenerateItemsWithToolThinking sends items with both tool calling and thinking enabled.
+func (p *ClaudeProvider) GenerateItemsWithToolThinking(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, true)
 }
 
 // thinkingParams returns the budget and the effective max_tokens for a thinking request.
@@ -74,131 +135,78 @@ func (p *ClaudeProvider) thinkingParams() (budget, maxTokens int) {
 	return budget, maxTokens
 }
 
-func (p *ClaudeProvider) doGenerate(ctx context.Context, prompt string, thinking bool) (string, error) {
-	body := map[string]any{
-		jsonKeyModel: p.model,
-		"max_tokens": p.maxTokens,
-		jsonKeyMessages: []map[string]string{
-			{jsonKeyRole: jsonRoleUser, jsonKeyContent: prompt},
-		},
+func claudeItemsToMessages(items []Item) []map[string]any {
+	var messages []map[string]any
+	for _, item := range items {
+		switch v := item.(type) {
+		case MessageItem:
+			role := v.Role
+			if role == "" || role == jsonRoleUser {
+				role = jsonRoleUser
+			} else {
+				role = jsonRoleAssistant
+			}
+			messages = append(messages, map[string]any{
+				jsonKeyRole:    role,
+				jsonKeyContent: v.Text,
+			})
+		case FunctionCallOutputItem:
+			messages = append(messages, map[string]any{
+				jsonKeyRole: jsonRoleUser,
+				jsonKeyContent: []map[string]any{
+					{
+						jsonKeyType:    "tool_result",
+						"tool_use_id":  v.CallID,
+						jsonKeyContent: v.Output,
+					},
+				},
+			})
+		}
 	}
+	return messages
+}
+
+func (p *ClaudeProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool) (*Response, error) {
+	maxTokens := p.maxTokens
+	body := map[string]any{
+		jsonKeyModel:    p.model,
+		"max_tokens":    maxTokens,
+		jsonKeyMessages: claudeItemsToMessages(input),
+	}
+
 	if thinking {
-		budget, maxTokens := p.thinkingParams()
-		body["max_tokens"] = maxTokens
+		budget, effMax := p.thinkingParams()
+		body["max_tokens"] = effMax
 		body["thinking"] = map[string]any{jsonKeyType: jsonKeyEnabled, "budget_tokens": budget}
 	}
-	reqBody, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("claude: marshal request: %w", err)
-	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", p.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer closeResponseBody(resp)
-
-	// Response size limit: 1MB to prevent OOM on runaway model output.
-	// Applied BEFORE status check so error response bodies are also bounded.
-	limitedBody := io.LimitReader(resp.Body, 1<<20)
-
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrAuthFailure, resp.StatusCode)
-		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
-	}
-
-	var result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
-	}
-
-	if len(result.Content) == 0 {
-		return "", fmt.Errorf("claude returned empty content")
-	}
-
-	// Concatenate all text blocks. A leading thinking/tool_use block has empty
-	// Text, so returning Content[0].Text alone would drop the real answer.
-	var sb strings.Builder
-	for _, b := range result.Content {
-		if b.Type == jsonKeyText || (b.Type == "" && b.Text != "") {
-			sb.WriteString(b.Text)
-		}
-	}
-	out := sb.String()
-	if out == "" {
-		return "", fmt.Errorf("claude returned no text content")
-	}
-	return out, nil
-}
-
-// GenerateWithTool sends a prompt to Anthropic's Messages API, forcing it to use a specific tool, and returns the JSON arguments.
-func (p *ClaudeProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, false)
-}
-
-// GenerateWithToolThinking runs GenerateWithTool with extended thinking enabled,
-// satisfying ThinkingToolProvider. Anthropic forbids a forced tool_choice while
-// thinking is enabled, so the request steers toward the tool via "auto" rather than
-// forcing it; the response parser still extracts the tool_use block when present.
-func (p *ClaudeProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, true)
-}
-
-func (p *ClaudeProvider) doGenerateWithTool(ctx context.Context, prompt string, tool Tool, thinking bool) (string, error) {
-	body := map[string]any{
-		jsonKeyModel: p.model,
-		"max_tokens": p.maxTokens,
-		jsonKeyMessages: []map[string]string{
-			{jsonKeyRole: jsonRoleUser, jsonKeyContent: prompt},
-		},
-		jsonKeyTools: []map[string]any{
+	if tool != nil {
+		body[jsonKeyTools] = []map[string]any{
 			{
 				jsonKeyName:        tool.Name,
 				jsonKeyDescription: tool.Description,
 				"input_schema":     tool.Schema,
 			},
-		},
-		"tool_choice": map[string]any{
-			jsonKeyType: "tool",
-			jsonKeyName: tool.Name,
-		},
+		}
+		if thinking {
+			// Extended thinking is incompatible with a forced tool_choice; steer via "auto".
+			body["tool_choice"] = map[string]any{jsonKeyType: "auto"}
+		} else {
+			body["tool_choice"] = map[string]any{
+				jsonKeyType: "tool",
+				jsonKeyName: tool.Name,
+			}
+		}
 	}
-	if thinking {
-		budget, maxTokens := p.thinkingParams()
-		body["max_tokens"] = maxTokens
-		body["thinking"] = map[string]any{jsonKeyType: jsonKeyEnabled, "budget_tokens": budget}
-		// Extended thinking is incompatible with a forced tool_choice; steer via "auto".
-		body["tool_choice"] = map[string]any{jsonKeyType: "auto"}
-	}
+
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("claude: marshal tool request: %w", err)
+		return nil, fmt.Errorf("claude: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
@@ -206,7 +214,7 @@ func (p *ClaudeProvider) doGenerateWithTool(ctx context.Context, prompt string, 
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
@@ -215,37 +223,73 @@ func (p *ClaudeProvider) doGenerateWithTool(ctx context.Context, prompt string, 
 	if resp.StatusCode != http.StatusOK {
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
+			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrAuthFailure, resp.StatusCode)
+			return nil, fmt.Errorf("%w: claude HTTP %d", ErrAuthFailure, resp.StatusCode)
 		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrProviderUnavailable, resp.StatusCode)
+			return nil, fmt.Errorf("%w: claude HTTP %d", ErrProviderUnavailable, resp.StatusCode)
 		default:
-			return "", fmt.Errorf("%w: claude HTTP %d", ErrInvalidRequest, resp.StatusCode)
+			return nil, fmt.Errorf("%w: claude HTTP %d", ErrInvalidRequest, resp.StatusCode)
 		}
 	}
 
+	return decodeClaudeResponse(limitedBody)
+}
+
+func decodeClaudeResponse(body io.Reader) (*Response, error) {
 	var result struct {
 		Content []struct {
-			Type  string         `json:"type"`
-			Input map[string]any `json:"input"`
+			Type     string         `json:"type"`
+			Text     string         `json:"text"`
+			Thinking string         `json:"thinking"`
+			ID       string         `json:"id"`
+			Name     string         `json:"name"`
+			Input    map[string]any `json:"input"`
 		} `json:"content"`
 	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
+	if err := json.NewDecoder(body).Decode(&result); err != nil {
+		return nil, err
 	}
 
-	for _, c := range result.Content {
-		if c.Type == "tool_use" && c.Input != nil {
-			argsBytes, err := json.Marshal(c.Input)
-			if err != nil {
-				return "", fmt.Errorf("failed to marshal claude tool input: %w", err)
+	if len(result.Content) == 0 {
+		return nil, fmt.Errorf("claude returned empty content")
+	}
+
+	res := &Response{ID: ""} // Claude Messages API is stateless
+	for _, b := range result.Content {
+		switch b.Type {
+		case "thinking":
+			text := b.Thinking
+			if text == "" {
+				text = b.Text
 			}
-			return string(argsBytes), nil
+			res.Output = append(res.Output, ReasoningItem{Text: text})
+		case jsonKeyText, "":
+			if b.Text != "" {
+				res.Output = append(res.Output, MessageItem{Role: jsonRoleAssistant, Text: b.Text})
+			}
+		case "tool_use":
+			var argsStr string
+			if b.Input != nil {
+				argsBytes, err := json.Marshal(b.Input)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal claude tool input: %w", err)
+				}
+				argsStr = string(argsBytes)
+			}
+			res.Output = append(res.Output, FunctionCallItem{
+				CallID:    b.ID,
+				Name:      b.Name,
+				Arguments: argsStr,
+			})
 		}
 	}
 
-	return "", fmt.Errorf("claude returned no tool_use content")
+	if len(res.Output) == 0 {
+		return nil, fmt.Errorf("claude returned no usable content")
+	}
+
+	return res, nil
 }
 
 // DiscoverModels returns curated Claude text models (Models API + catalog),
