@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-// OpenAIProvider implements Provider using the OpenAI API via standard http client.
+// OpenAIProvider implements Provider using the OpenAI Responses API via standard http client.
 type OpenAIProvider struct {
 	apiKey          string
 	model           string
@@ -20,7 +20,7 @@ type OpenAIProvider struct {
 }
 
 // defaultOpenAIReasoningEffort is used by GenerateThinking when none is configured.
-const defaultOpenAIReasoningEffort = "medium"
+const defaultOpenAIReasoningEffort = effortMedium
 
 // NewOpenAI creates a new OpenAI provider instance.
 // Accepts variadic ProviderOption for shared http.Client injection.
@@ -43,148 +43,129 @@ func NewOpenAI(apiKey, model string, opts ...ProviderOption) (*OpenAIProvider, e
 // Name returns the provider's unique identifier "openai".
 func (p *OpenAIProvider) Name() string { return ProviderOpenAI }
 
-// Generate sends a prompt to the OpenAI chat completion API and returns the generated text.
+// Generate sends a prompt to the OpenAI Responses API and returns the generated text.
 func (p *OpenAIProvider) Generate(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, false)
+	resp, err := p.GenerateItems(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
 }
 
 // GenerateThinking runs Generate with OpenAI reasoning enabled, satisfying
-// ThinkingProvider. Reasoning models reject "max_tokens" and require
-// "max_completion_tokens", so the thinking path swaps the token key and adds
-// "reasoning_effort".
+// ThinkingProvider.
 func (p *OpenAIProvider) GenerateThinking(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, true)
+	resp, err := p.GenerateItemsThinking(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
 }
 
-// applyTokenAndReasoning sets the correct token-limit key (and reasoning_effort) on an
-// OpenAI request body depending on whether the reasoning path is requested.
-func (p *OpenAIProvider) applyTokenAndReasoning(body map[string]any, thinking bool) {
+// GenerateWithTool sends a prompt to the OpenAI Responses API, forcing it to use a specific tool, and returns the tool arguments.
+func (p *OpenAIProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithTool(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("openai returned no function call")
+}
+
+// GenerateWithToolThinking runs GenerateWithTool with reasoning enabled, satisfying
+// ThinkingToolProvider.
+func (p *OpenAIProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithToolThinking(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("openai returned no function call")
+}
+
+// GenerateItems sends items to the OpenAI Responses API and returns typed output items.
+func (p *OpenAIProvider) GenerateItems(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, false, "")
+}
+
+// GenerateItemsWithTool sends items to the OpenAI Responses API with a forced tool call.
+func (p *OpenAIProvider) GenerateItemsWithTool(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, false, "")
+}
+
+// GenerateItemsThinking sends items to the OpenAI Responses API with reasoning enabled.
+func (p *OpenAIProvider) GenerateItemsThinking(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, true, "")
+}
+
+// GenerateItemsWithToolThinking sends items with both tool calling and reasoning enabled.
+func (p *OpenAIProvider) GenerateItemsWithToolThinking(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, true, "")
+}
+
+// Continue sends items to the OpenAI Responses API, chaining from a previous response.
+func (p *OpenAIProvider) Continue(ctx context.Context, previousResponseID string, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, false, previousResponseID)
+}
+
+func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
+	body := map[string]any{
+		jsonKeyModel:        p.model,
+		jsonKeyInput:        itemsToInput(input),
+		"max_output_tokens": p.maxTokens,
+	}
+
+	if tool != nil {
+		body[jsonKeyTools] = []map[string]any{
+			{
+				jsonKeyType:        jsonKeyFunction,
+				jsonKeyName:        tool.Name,
+				jsonKeyDescription: tool.Description,
+				jsonKeyParameters:  tool.Schema,
+			},
+		}
+		body["tool_choice"] = map[string]any{
+			jsonKeyType: jsonKeyFunction,
+			jsonKeyName: tool.Name,
+		}
+	}
+
 	if thinking {
-		body["max_completion_tokens"] = p.maxTokens
 		effort := p.reasoningEffort
 		if effort == "" {
 			effort = defaultOpenAIReasoningEffort
 		}
-		body["reasoning_effort"] = effort
-		return
+		body["reasoning"] = map[string]any{"effort": effort}
 	}
-	body["max_tokens"] = p.maxTokens
-}
 
-func (p *OpenAIProvider) doGenerate(ctx context.Context, prompt string, thinking bool) (string, error) {
-	body := map[string]any{
-		jsonKeyModel: p.model,
-		jsonKeyMessages: []map[string]string{
-			{jsonKeyRole: jsonRoleUser, jsonKeyContent: prompt},
-		},
+	if prevResponseID != "" {
+		body["previous_response_id"] = prevResponseID
 	}
-	p.applyTokenAndReasoning(body, thinking)
+
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("openai: marshal request: %w", err)
+		return nil, fmt.Errorf("openai: marshal request: %w", err)
 	}
 
-	url := p.baseURL + "/chat/completions"
+	url := p.baseURL + "/responses"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", err
-	}
-	defer closeResponseBody(resp)
-
-	// Response size limit: 1MB to prevent OOM on runaway model output.
-	// Applied BEFORE status check so error response bodies are also bounded.
-	limitedBody := io.LimitReader(resp.Body, 1<<20)
-
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrAuthFailure, resp.StatusCode)
-		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("openai returned no choices")
-	}
-
-	return result.Choices[0].Message.Content, nil
-}
-
-// GenerateWithTool sends a prompt to the OpenAI chat completion API, forcing it to use a specific tool, and returns the tool arguments.
-func (p *OpenAIProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, false)
-}
-
-// GenerateWithToolThinking runs GenerateWithTool with reasoning enabled, satisfying
-// ThinkingToolProvider. OpenAI reasoning models support forced tool_choice; only the
-// token-limit key and reasoning_effort change.
-func (p *OpenAIProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, true)
-}
-
-func (p *OpenAIProvider) doGenerateWithTool(ctx context.Context, prompt string, tool Tool, thinking bool) (string, error) {
-	body := map[string]any{
-		jsonKeyModel: p.model,
-		jsonKeyMessages: []map[string]string{
-			{jsonKeyRole: jsonRoleUser, jsonKeyContent: prompt},
-		},
-		jsonKeyTools: []map[string]any{
-			{
-				jsonKeyType: jsonKeyFunction,
-				jsonKeyFunction: map[string]any{
-					jsonKeyName:        tool.Name,
-					jsonKeyDescription: tool.Description,
-					"parameters":       tool.Schema,
-				},
-			},
-		},
-		"tool_choice": map[string]any{
-			jsonKeyType: jsonKeyFunction,
-			jsonKeyFunction: map[string]string{
-				jsonKeyName: tool.Name,
-			},
-		},
-	}
-	p.applyTokenAndReasoning(body, thinking)
-	reqBody, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("openai: marshal tool request: %w", err)
-	}
-
-	url := p.baseURL + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
@@ -193,36 +174,17 @@ func (p *OpenAIProvider) doGenerateWithTool(ctx context.Context, prompt string, 
 	if resp.StatusCode != http.StatusOK {
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
+			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrAuthFailure, resp.StatusCode)
+			return nil, fmt.Errorf("%w: openai HTTP %d", ErrAuthFailure, resp.StatusCode)
 		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrProviderUnavailable, resp.StatusCode)
+			return nil, fmt.Errorf("%w: openai HTTP %d", ErrProviderUnavailable, resp.StatusCode)
 		default:
-			return "", fmt.Errorf("%w: openai HTTP %d", ErrInvalidRequest, resp.StatusCode)
+			return nil, fmt.Errorf("%w: openai HTTP %d", ErrInvalidRequest, resp.StatusCode)
 		}
 	}
 
-	var result struct {
-		Choices []struct {
-			Message struct {
-				ToolCalls []struct {
-					Function struct {
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
-	}
-
-	if len(result.Choices) == 0 || len(result.Choices[0].Message.ToolCalls) == 0 {
-		return "", fmt.Errorf("openai returned no tool calls")
-	}
-
-	return result.Choices[0].Message.ToolCalls[0].Function.Arguments, nil
+	return decodeResponsesAPIOutput(limitedBody)
 }
 
 // DiscoverModels returns curated chat models available to this key, with an

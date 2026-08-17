@@ -46,14 +46,14 @@ func bodyCapture(t *testing.T, resp string) (*httptest.Server, *map[string]any) 
 
 // TestOpenAI_WithMaxTokens is the regression: WithMaxTokens must reach the body.
 func TestOpenAI_WithMaxTokens(t *testing.T) {
-	srv, body := bodyCapture(t, `{"choices":[{"message":{"content":"ok"}}]}`)
+	srv, body := bodyCapture(t, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
 	defer srv.Close()
 	p, _ := NewOpenAI("k", "gpt-x", WithBaseURL(srv.URL), WithMaxTokens(123))
 	if _, err := p.Generate(context.Background(), "hi"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if mt, ok := (*body)["max_tokens"].(float64); !ok || int(mt) != 123 {
-		t.Errorf("max_tokens not sent: %v", (*body)["max_tokens"])
+	if mt, ok := (*body)["max_output_tokens"].(float64); !ok || int(mt) != 123 {
+		t.Errorf("max_output_tokens not sent: %v", (*body)["max_output_tokens"])
 	}
 }
 
