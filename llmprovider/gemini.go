@@ -59,35 +59,152 @@ func (p *GeminiProvider) Name() string { return ProviderGemini }
 
 // Generate sends a prompt to the Gemini API and returns the generated text.
 func (p *GeminiProvider) Generate(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, false)
+	resp, err := p.GenerateItems(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
 }
 
 // GenerateThinking runs Generate with Gemini thinking enabled, satisfying
-// ThinkingProvider. includeThoughts is left off, so the returned parts contain only the
-// final answer and the existing response parser needs no change.
+// ThinkingProvider.
 func (p *GeminiProvider) GenerateThinking(ctx context.Context, prompt string) (string, error) {
-	return p.doGenerate(ctx, prompt, true)
+	resp, err := p.GenerateItemsThinking(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	return resp.OutputText(), nil
 }
 
-func (p *GeminiProvider) doGenerate(ctx context.Context, prompt string, thinking bool) (string, error) {
-	reqBody, err := json.Marshal(map[string]any{
-		"contents": []map[string]any{
-			{
+// GenerateWithTool sends a prompt to the Gemini API, forcing it to use a specific tool, and returns the JSON arguments.
+func (p *GeminiProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithTool(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("gemini returned no function call args")
+}
+
+// GenerateWithToolThinking runs GenerateWithTool with Gemini thinking enabled,
+// satisfying ThinkingToolProvider.
+func (p *GeminiProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
+	resp, err := p.GenerateItemsWithToolThinking(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
+	if err != nil {
+		return "", err
+	}
+	for _, item := range resp.Output {
+		if fc, ok := item.(FunctionCallItem); ok {
+			return fc.Arguments, nil
+		}
+	}
+	return "", fmt.Errorf("gemini returned no function call args")
+}
+
+// GenerateItems sends items to the Gemini API and returns typed output items.
+func (p *GeminiProvider) GenerateItems(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, false, "")
+}
+
+// GenerateItemsWithTool sends items to the Gemini API with a forced tool call.
+func (p *GeminiProvider) GenerateItemsWithTool(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, false, "")
+}
+
+// GenerateItemsThinking sends items to the Gemini API with thinking enabled.
+func (p *GeminiProvider) GenerateItemsThinking(ctx context.Context, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, true, "")
+}
+
+// GenerateItemsWithToolThinking sends items with both tool calling and thinking enabled.
+func (p *GeminiProvider) GenerateItemsWithToolThinking(ctx context.Context, tool Tool, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, &tool, true, "")
+}
+
+// Continue sends items to the Gemini API, chaining from a previous interaction.
+func (p *GeminiProvider) Continue(ctx context.Context, previousInteractionID string, input ...Item) (*Response, error) {
+	return p.doGenerateItems(ctx, input, nil, false, previousInteractionID)
+}
+
+func geminiItemsToContents(items []Item) []map[string]any {
+	var contents []map[string]any
+	for _, item := range items {
+		switch v := item.(type) {
+		case MessageItem:
+			role := v.Role
+			if role == "" || role == jsonRoleUser {
+				role = jsonRoleUser
+			} else {
+				role = "model"
+			}
+			contents = append(contents, map[string]any{
+				jsonKeyRole: role,
 				"parts": []map[string]string{
-					{jsonKeyText: prompt},
+					{jsonKeyText: v.Text},
+				},
+			})
+		case FunctionCallOutputItem:
+			contents = append(contents, map[string]any{
+				jsonKeyRole: "function",
+				"parts": []map[string]any{
+					{
+						"functionResponse": map[string]any{
+							jsonKeyName: v.CallID,
+							"response": map[string]any{
+								jsonKeyOutput: v.Output,
+							},
+						},
+					},
+				},
+			})
+		}
+	}
+	return contents
+}
+
+func (p *GeminiProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevInteractionID string) (*Response, error) {
+	body := map[string]any{
+		"contents":         geminiItemsToContents(input),
+		"generationConfig": p.genConfig(thinking),
+	}
+
+	if tool != nil {
+		body[jsonKeyTools] = []map[string]any{
+			{
+				"functionDeclarations": []map[string]any{
+					{
+						jsonKeyName:        tool.Name,
+						jsonKeyDescription: tool.Description,
+						jsonKeyParameters:  tool.Schema,
+					},
 				},
 			},
-		},
-		"generationConfig": p.genConfig(thinking),
-	})
+		}
+		body["toolConfig"] = map[string]any{
+			"functionCallingConfig": map[string]any{
+				"mode":                 "ANY",
+				"allowedFunctionNames": []string{tool.Name},
+			},
+		}
+	}
+
+	if prevInteractionID != "" {
+		body["previous_interaction_id"] = prevInteractionID
+	}
+
+	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("gemini: marshal request: %w", err)
+		return nil, fmt.Errorf("gemini: marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/models/%s:generateContent", p.baseURL, p.model)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Key in a header (not the URL) so it can't leak via *url.Error in logs.
@@ -95,7 +212,7 @@ func (p *GeminiProvider) doGenerate(ctx context.Context, prompt string, thinking
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
@@ -106,135 +223,71 @@ func (p *GeminiProvider) doGenerate(ctx context.Context, prompt string, thinking
 	if resp.StatusCode != http.StatusOK {
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
+			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrAuthFailure, resp.StatusCode)
+			return nil, fmt.Errorf("%w: gemini HTTP %d", ErrAuthFailure, resp.StatusCode)
 		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrProviderUnavailable, resp.StatusCode)
+			return nil, fmt.Errorf("%w: gemini HTTP %d", ErrProviderUnavailable, resp.StatusCode)
 		default:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrInvalidRequest, resp.StatusCode)
+			return nil, fmt.Errorf("%w: gemini HTTP %d", ErrInvalidRequest, resp.StatusCode)
 		}
 	}
 
-	var result struct {
-		Candidates []struct {
+	return decodeGeminiResponse(limitedBody)
+}
+
+func decodeGeminiResponse(body io.Reader) (*Response, error) {
+	var raw struct {
+		ID            string `json:"id"`
+		InteractionID string `json:"interaction_id"`
+		Candidates    []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
-	}
-
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("gemini returned no content")
-	}
-
-	return result.Candidates[0].Content.Parts[0].Text, nil
-}
-
-// GenerateWithTool sends a prompt to the Gemini API, forcing it to use a specific tool, and returns the JSON arguments.
-func (p *GeminiProvider) GenerateWithTool(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, false)
-}
-
-// GenerateWithToolThinking runs GenerateWithTool with Gemini thinking enabled,
-// satisfying ThinkingToolProvider. Forced function-calling (mode ANY) is compatible
-// with thinkingConfig, so only generationConfig changes.
-func (p *GeminiProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
-	return p.doGenerateWithTool(ctx, prompt, tool, true)
-}
-
-func (p *GeminiProvider) doGenerateWithTool(ctx context.Context, prompt string, tool Tool, thinking bool) (string, error) {
-	reqBody, err := json.Marshal(map[string]any{
-		"contents": []map[string]any{
-			{
-				"parts": []map[string]string{
-					{jsonKeyText: prompt},
-				},
-			},
-		},
-		jsonKeyTools: []map[string]any{
-			{
-				"functionDeclarations": []map[string]any{
-					{
-						jsonKeyName:        tool.Name,
-						jsonKeyDescription: tool.Description,
-						"parameters":       tool.Schema,
-					},
-				},
-			},
-		},
-		"toolConfig": map[string]any{
-			"functionCallingConfig": map[string]any{
-				"mode":                 "ANY",
-				"allowedFunctionNames": []string{tool.Name},
-			},
-		},
-		"generationConfig": p.genConfig(thinking),
-	})
-	if err != nil {
-		return "", fmt.Errorf("gemini: marshal tool request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/models/%s:generateContent", p.baseURL, p.model)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// Key in a header (not the URL) so it can't leak via *url.Error in logs.
-	req.Header.Set("x-goog-api-key", p.apiKey)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer closeResponseBody(resp)
-
-	limitedBody := io.LimitReader(resp.Body, 1<<20)
-
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return "", &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrAuthFailure, resp.StatusCode)
-		case resp.StatusCode >= 500:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return "", fmt.Errorf("%w: gemini HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
-	}
-
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					FunctionCall struct {
+					Text         string `json:"text"`
+					Thought      string `json:"thought"`
+					FunctionCall *struct {
+						Name string         `json:"name"`
 						Args map[string]any `json:"args"`
 					} `json:"functionCall"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 	}
-	if err := json.NewDecoder(limitedBody).Decode(&result); err != nil {
-		return "", err
+	if err := json.NewDecoder(body).Decode(&raw); err != nil {
+		return nil, err
 	}
 
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 || result.Candidates[0].Content.Parts[0].FunctionCall.Args == nil {
-		return "", fmt.Errorf("gemini returned no function call args")
+	if len(raw.Candidates) == 0 || len(raw.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("gemini returned no content")
 	}
 
-	argsBytes, err := json.Marshal(result.Candidates[0].Content.Parts[0].FunctionCall.Args)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal gemini function args: %w", err)
+	id := raw.ID
+	if id == "" {
+		id = raw.InteractionID
 	}
 
-	return string(argsBytes), nil
+	result := &Response{ID: id}
+	for _, part := range raw.Candidates[0].Content.Parts {
+		if part.Thought != "" {
+			result.Output = append(result.Output, ReasoningItem{Text: part.Thought})
+		}
+		if part.Text != "" {
+			result.Output = append(result.Output, MessageItem{Role: jsonRoleAssistant, Text: part.Text})
+		}
+		if part.FunctionCall != nil && part.FunctionCall.Args != nil {
+			argsBytes, err := json.Marshal(part.FunctionCall.Args)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal gemini function args: %w", err)
+			}
+			result.Output = append(result.Output, FunctionCallItem{
+				CallID:    part.FunctionCall.Name,
+				Name:      part.FunctionCall.Name,
+				Arguments: string(argsBytes),
+			})
+		}
+	}
+
+	return result, nil
 }
 
 // DiscoverModels returns a short, curated list of production text models.
