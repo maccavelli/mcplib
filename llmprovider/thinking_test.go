@@ -86,55 +86,54 @@ func TestClaudeThinkingTool_AutoChoice(t *testing.T) {
 	}
 }
 
-// TestOpenAIThinking_RequestBody verifies the reasoning path swaps max_tokens for
-// max_completion_tokens and sets reasoning_effort.
+// TestOpenAIThinking_RequestBody verifies the reasoning path sets reasoning.effort
+// and max_output_tokens.
 func TestOpenAIThinking_RequestBody(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"choices":[{"message":{"content":"ok"}}]}`)
+	srv := captureServer(t, &body, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
 
 	p, _ := NewOpenAI("k", "o4", WithBaseURL(srv.URL), WithMaxTokens(5000), WithReasoningEffort("high"))
 	if _, err := p.GenerateThinking(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}
-	if _, present := body["max_tokens"]; present {
-		t.Errorf("reasoning request must not send max_tokens: %v", body)
+	if mt, ok := body["max_output_tokens"].(float64); !ok || int(mt) != 5000 {
+		t.Errorf("max_output_tokens = %v, want 5000", body["max_output_tokens"])
 	}
-	if mct, ok := body["max_completion_tokens"].(float64); !ok || int(mct) != 5000 {
-		t.Errorf("max_completion_tokens = %v, want 5000", body["max_completion_tokens"])
-	}
-	if body["reasoning_effort"] != "high" {
-		t.Errorf("reasoning_effort = %v, want high", body["reasoning_effort"])
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Errorf("reasoning.effort = %v, want high", body["reasoning"])
 	}
 }
 
 // TestOpenAIThinking_DefaultEffort verifies the default effort is applied when unset.
 func TestOpenAIThinking_DefaultEffort(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"choices":[{"message":{"content":"ok"}}]}`)
+	srv := captureServer(t, &body, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
 
 	p, _ := NewOpenAI("k", "o4", WithBaseURL(srv.URL))
 	if _, err := p.GenerateThinking(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}
-	if body["reasoning_effort"] != defaultOpenAIReasoningEffort {
-		t.Errorf("reasoning_effort = %v, want default %q", body["reasoning_effort"], defaultOpenAIReasoningEffort)
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != defaultOpenAIReasoningEffort {
+		t.Errorf("reasoning.effort = %v, want default %q", body["reasoning"], defaultOpenAIReasoningEffort)
 	}
 }
 
-// TestOpenAINonThinking_UsesMaxTokens verifies the default path still uses max_tokens.
+// TestOpenAINonThinking_UsesMaxTokens verifies the default path uses max_output_tokens and omits reasoning.
 func TestOpenAINonThinking_UsesMaxTokens(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"choices":[{"message":{"content":"ok"}}]}`)
+	srv := captureServer(t, &body, `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
 
 	p, _ := NewOpenAI("k", "gpt-x", WithBaseURL(srv.URL), WithMaxTokens(321))
 	if _, err := p.Generate(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}
-	if mt, ok := body["max_tokens"].(float64); !ok || int(mt) != 321 {
-		t.Errorf("max_tokens = %v, want 321", body["max_tokens"])
+	if mt, ok := body["max_output_tokens"].(float64); !ok || int(mt) != 321 {
+		t.Errorf("max_output_tokens = %v, want 321", body["max_output_tokens"])
 	}
-	if _, present := body["reasoning_effort"]; present {
-		t.Errorf("non-thinking request must not send reasoning_effort: %v", body)
+	if _, present := body["reasoning"]; present {
+		t.Errorf("non-thinking request must not send reasoning: %v", body)
 	}
 }
 
@@ -187,13 +186,99 @@ func TestGeminiThinking_DynamicBudgetDefault(t *testing.T) {
 	}
 }
 
-// TestProvidersImplementThinkingInterfaces is a compile-time guarantee that all three
+func TestOpenAIThinkingTool(t *testing.T) {
+	var body map[string]any
+	srv := captureServer(t, &body, `{"output":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{\"x\":1}"}]}`)
+
+	p, _ := NewOpenAI("k", "o4", WithBaseURL(srv.URL), WithReasoningEffort("high"))
+	tool := Tool{Name: "calc", Description: "calc", Schema: map[string]any{"type": "object"}}
+	args, err := p.GenerateWithToolThinking(context.Background(), "hi", tool)
+	if err != nil {
+		t.Fatalf("GenerateWithToolThinking error: %v", err)
+	}
+	if args != `{"x":1}` {
+		t.Errorf("expected arguments '{\"x\":1}', got %q", args)
+	}
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Errorf("expected reasoning effort high, got %v", body["reasoning"])
+	}
+}
+
+func TestGeminiThinkingTool(t *testing.T) {
+	var body map[string]any
+	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"test"}}}]}}]}`)
+
+	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL), WithThinkingBudget(1000))
+	tool := Tool{Name: "lookup", Description: "lookup", Schema: map[string]any{"type": "object"}}
+	args, err := p.GenerateWithToolThinking(context.Background(), "hi", tool)
+	if err != nil {
+		t.Fatalf("GenerateWithToolThinking error: %v", err)
+	}
+	if args != `{"q":"test"}` {
+		t.Errorf("expected '{\"q\":\"test\"}', got %q", args)
+	}
+	gc := body["generationConfig"].(map[string]any)
+	tc := gc["thinkingConfig"].(map[string]any)
+	if b := tc["thinkingBudget"].(float64); int(b) != 1000 {
+		t.Errorf("thinkingBudget = %v, want 1000", b)
+	}
+}
+
+func TestGrokThinkingTool(t *testing.T) {
+	var body map[string]any
+	srv := captureServer(t, &body, `{"output":[{"type":"function_call","call_id":"c1","name":"query","arguments":"{\"a\":2}"}]}`)
+
+	p, _ := NewGrok("k", "grok-4.5", WithBaseURL(srv.URL), WithReasoningEffort("high"))
+	tool := Tool{Name: "query", Description: "query", Schema: map[string]any{"type": "object"}}
+	args, err := p.GenerateWithToolThinking(context.Background(), "hi", tool)
+	if err != nil {
+		t.Fatalf("GenerateWithToolThinking error: %v", err)
+	}
+	if args != `{"a":2}` {
+		t.Errorf("expected '{\"a\":2}', got %q", args)
+	}
+}
+
+func TestProviderNamesAndConstructors(t *testing.T) {
+	cp, err := NewClaude("key", "claude-x")
+	if err != nil || cp.Name() != ProviderClaude {
+		t.Errorf("Claude name = %v, err = %v", cp.Name(), err)
+	}
+	if _, err := NewClaude("", "claude-x"); err == nil {
+		t.Error("expected error for empty Claude API key")
+	}
+
+	op, err := NewOpenAI("key", "gpt-x")
+	if err != nil || op.Name() != ProviderOpenAI {
+		t.Errorf("OpenAI name = %v, err = %v", op.Name(), err)
+	}
+
+	gp, err := NewGemini(context.Background(), "key", "gemini-x")
+	if err != nil || gp.Name() != ProviderGemini {
+		t.Errorf("Gemini name = %v, err = %v", gp.Name(), err)
+	}
+
+	xaiP, err := NewGrok("key", "grok-x")
+	if err != nil || xaiP.Name() != ProviderGrok {
+		t.Errorf("Grok name = %v, err = %v", xaiP.Name(), err)
+	}
+	if _, err := NewGrok("", "grok-x"); err == nil {
+		t.Error("expected error for empty Grok API key")
+	}
+}
+
+// TestProvidersImplementThinkingInterfaces is a compile-time guarantee that all
 // providers satisfy the optional thinking interfaces.
 func TestProvidersImplementThinkingInterfaces(t *testing.T) {
 	var _ ThinkingProvider = (*ClaudeProvider)(nil)
 	var _ ThinkingProvider = (*OpenAIProvider)(nil)
 	var _ ThinkingProvider = (*GeminiProvider)(nil)
+	var _ ThinkingProvider = (*GrokProvider)(nil)
 	var _ ThinkingToolProvider = (*ClaudeProvider)(nil)
 	var _ ThinkingToolProvider = (*OpenAIProvider)(nil)
 	var _ ThinkingToolProvider = (*GeminiProvider)(nil)
+	var _ ThinkingToolProvider = (*GrokProvider)(nil)
+	var _ ItemProvider = (*GrokProvider)(nil)
+	var _ Continuer = (*GrokProvider)(nil)
 }
