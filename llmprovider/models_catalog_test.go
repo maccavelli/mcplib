@@ -154,3 +154,130 @@ func TestRankGeminiModel_PrefersFlashLite(t *testing.T) {
 		t.Error("preview should rank far below stable flash")
 	}
 }
+
+func TestIsUsableGrokModel(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"grok-4", true},
+		{"grok-3-mini", true},
+		{"grok-3-mini-fast", true},
+		{"grok-4.5", true},
+		{"grok-4.6", true},
+		{"grok-4-fast-reasoning", true},
+		{"grok-vision-beta", false},
+		{"grok-image-gen", false},
+		{"", false},
+		{"llama-3", false},
+	}
+	for _, tc := range tests {
+		if got := isUsableGrokModel(tc.id); got != tc.want {
+			t.Errorf("isUsableGrokModel(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}
+
+func TestRankGrokModel(t *testing.T) {
+	if RankGrokModel("grok-3-mini-fast") <= RankGrokModel("grok-3-mini") {
+		t.Error("mini-fast should rank above mini")
+	}
+	if RankGrokModel("grok-3-mini") <= RankGrokModel("grok-4") {
+		t.Error("mini should rank above grok-4 for cost preference")
+	}
+}
+
+func TestStaticGrok_Count(t *testing.T) {
+	if len(StaticGrok) > MaxListedModels {
+		t.Errorf("StaticGrok has %d entries, max is %d", len(StaticGrok), MaxListedModels)
+	}
+}
+
+func TestStaticModels(t *testing.T) {
+	providers := []string{ProviderGemini, ProviderOpenAI, ProviderClaude, ProviderGrok}
+	for _, p := range providers {
+		models := StaticModels(p)
+		if len(models) == 0 {
+			t.Errorf("StaticModels(%q) returned empty slice", p)
+		}
+	}
+	if StaticModels("unknown") != nil {
+		t.Errorf("StaticModels('unknown') should return nil")
+	}
+}
+
+func TestIsUsableClaudeTextModel(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"claude-sonnet-5", true},
+		{"claude-haiku-4-5", true},
+		{"claude-opus-4-8", true},
+		{"claude-3-5-sonnet", true},
+		{"claude-computer-use-preview", false},
+		{"claude-3-bedrock", false},
+		{"claude-instant-1", false},
+		{"gpt-4", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isUsableClaudeTextModel(tc.id); got != tc.want {
+			t.Errorf("isUsableClaudeTextModel(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}
+
+func TestRankOpenAIModel(t *testing.T) {
+	if RankOpenAIModel("gpt-4.1-nano") <= RankOpenAIModel("gpt-4.1-mini") {
+		t.Error("nano should rank above mini for cost preference")
+	}
+	if RankOpenAIModel("gpt-4.1-mini") <= RankOpenAIModel("gpt-4.1") {
+		t.Error("mini should rank above standard 4.1")
+	}
+	if RankOpenAIModel("o4") <= RankOpenAIModel("o3") {
+		t.Error("o4 should rank above o3")
+	}
+	if RankOpenAIModel("gpt-4o-realtime") >= 0 {
+		t.Error("realtime models should be penalized")
+	}
+	if RankOpenAIModel("unknown-model") != 0 {
+		t.Error("unknown model should have score 0")
+	}
+}
+
+func TestRankClaudeModel(t *testing.T) {
+	if RankClaudeModel("claude-haiku-4-5") <= RankClaudeModel("claude-sonnet-5") {
+		t.Error("haiku should rank above sonnet for speed")
+	}
+	if RankClaudeModel("claude-sonnet-5") <= RankClaudeModel("claude-opus-4-8") {
+		t.Error("sonnet should rank above opus")
+	}
+	if RankClaudeModel("claude-fable-4") <= 0 {
+		t.Error("fable should have positive score")
+	}
+	if RankClaudeModel("unknown-model") != 0 {
+		t.Error("unknown model should have score 0")
+	}
+}
+
+func TestSortByRankDesc(t *testing.T) {
+	models := []string{"gemini-2.5-flash", "gemini-3.7-flash", "gemini-2.5-pro"}
+	sortByRankDesc(models, RankGeminiModel)
+	if models[0] != "gemini-3.7-flash" {
+		t.Errorf("expected highest rank first, got %v", models)
+	}
+}
+
+func TestCurateFromCatalog_Backfill(t *testing.T) {
+	// Catalog has only 1 matching model, available has more usable models
+	catalog := []string{"gpt-4.1-mini"}
+	available := []string{"gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-5"}
+	out := curateFromCatalog(catalog, available, isUsableOpenAIChatModel, RankOpenAIModel)
+	if len(out) != 4 {
+		t.Fatalf("expected 4 backfilled models, got %d (%v)", len(out), out)
+	}
+	if out[0] != "gpt-4.1-mini" {
+		t.Errorf("catalog hit should be first, got %s", out[0])
+	}
+}

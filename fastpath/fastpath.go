@@ -71,7 +71,13 @@ func isSafeArtifactPath(artifactPath string) bool {
 		homeDir = ""
 	}
 	tempDir := os.TempDir()
+	if resolved, err := filepath.EvalSymlinks(tempDir); err == nil {
+		tempDir = resolved
+	}
 	sessionDir := filepath.Join(homeDir, ".gemini", "antigravity", "brain")
+	if resolved, err := filepath.EvalSymlinks(sessionDir); err == nil {
+		sessionDir = resolved
+	}
 	return (homeDir != "" && contained(artifactPath, sessionDir)) || contained(artifactPath, tempDir)
 }
 

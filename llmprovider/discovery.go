@@ -28,6 +28,8 @@ func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts 
 		return listOpenAIModels(ctx, apiKey, cfg)
 	case ProviderClaude:
 		return listClaudeModels(ctx, apiKey, cfg)
+	case ProviderGrok:
+		return listGrokModels(ctx, apiKey, cfg)
 	case "ollama":
 		return listOllamaModels(ctx, cfg)
 	default:
@@ -246,4 +248,50 @@ func ValidateOllamaURL(ctx context.Context, baseURL string) error {
 		return fmt.Errorf("ollama returned HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// listGrokModels fetches xAI models and curates to usable Grok chat models.
+func listGrokModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+	baseURL := "https://api.x.ai/v1"
+	if cfg.BaseURL != "" {
+		baseURL = cfg.BaseURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	if err != nil {
+		return StaticModels(ProviderGrok), nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return StaticModels(ProviderGrok), nil
+	}
+	defer closeResponseBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return StaticModels(ProviderGrok), nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return StaticModels(ProviderGrok), nil
+	}
+
+	var available []string
+	for _, m := range result.Data {
+		if isUsableGrokModel(m.ID) {
+			available = append(available, m.ID)
+		}
+	}
+
+	curated := curateFromCatalog(StaticGrok, available, isUsableGrokModel, RankGrokModel)
+	if len(curated) == 0 {
+		return StaticModels(ProviderGrok), nil
+	}
+	return curated, nil
 }

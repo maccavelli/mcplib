@@ -53,6 +53,16 @@ var (
 		"claude-3-5-haiku-latest",
 		"claude-sonnet-4-20250514",
 	}
+
+	// StaticGrok: fast/flagship models first.
+	StaticGrok = []string{
+		"grok-3-mini-fast",
+		"grok-3-mini",
+		"grok-4",
+		"grok-4.5",
+		"grok-4.6",
+		"grok-4-fast-reasoning",
+	}
 )
 
 // geminiDenySubstrings reject non-text / non-production / specialized endpoints.
@@ -92,6 +102,8 @@ func StaticModels(provider string) []string {
 		return append([]string(nil), StaticOpenAI...)
 	case ProviderClaude:
 		return append([]string(nil), StaticClaude...)
+	case ProviderGrok:
+		return append([]string(nil), StaticGrok...)
 	default:
 		return nil
 	}
@@ -328,6 +340,47 @@ func RankClaudeModel(m string) int {
 	}
 	if strings.Contains(sm, "3-5") || strings.Contains(sm, "3.5") {
 		score += 10
+	}
+	return score
+}
+
+// isUsableGrokModel filters xAI model IDs for Responses API text use.
+func isUsableGrokModel(id string) bool {
+	sm := strings.ToLower(strings.TrimSpace(id))
+	if sm == "" || !strings.HasPrefix(sm, "grok") {
+		return false
+	}
+	// Skip non-text specialties if they appear.
+	for _, deny := range []string{"vision", "image", "embed"} {
+		if strings.Contains(sm, deny) {
+			return false
+		}
+	}
+	return true
+}
+
+// RankGrokModel prefers mini-fast for cost/speed, then by generation.
+func RankGrokModel(m string) int {
+	sm := strings.ToLower(m)
+	score := 0
+	switch {
+	case strings.Contains(sm, "mini-fast"):
+		score += 200
+	case strings.Contains(sm, "mini"):
+		score += 180
+	case strings.Contains(sm, "fast-reasoning"):
+		score += 100
+	}
+	// Generation weights.
+	switch {
+	case strings.Contains(sm, "4.6"):
+		score += 60
+	case strings.Contains(sm, "4.5"):
+		score += 50
+	case strings.HasPrefix(sm, "grok-4"):
+		score += 40
+	case strings.HasPrefix(sm, "grok-3"):
+		score += 30
 	}
 	return score
 }
