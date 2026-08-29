@@ -76,10 +76,17 @@ var (
 type RateLimitError struct {
 	RetryAfter time.Duration
 	Status     int
+	// Provider names the source of the limit, so a 429 is attributable when a
+	// caller holds several providers. Empty is valid and reproduces the
+	// original message verbatim.
+	Provider string
 }
 
 func (e *RateLimitError) Error() string {
-	return fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	if e.Provider == "" {
+		return fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	}
+	return fmt.Sprintf("%v: %s HTTP %d (retry-after %s)", ErrRateLimited, e.Provider, e.Status, e.RetryAfter)
 }
 
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }

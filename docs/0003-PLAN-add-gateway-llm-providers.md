@@ -2402,7 +2402,11 @@ go test -tags live_gateways ./llmprovider/ -run Live -v
     date; neither OpenCode list contains `qwen3.7-max` or `qwen3.7-plus`.
 17. `classifyHTTPStatus` maps **402 → `ErrInvalidRequest`**, asserted in both
     `TestClassifyHTTPStatus` and `TestKilo_ErrorClassification`.
-18. No existing provider file is modified: the `git diff --stat` in §8 is empty.
+18. ~~No existing provider file is modified: the `git diff --stat` in §8 is empty.~~
+    **Amended by deviation D4:** `openai.go`, `claude.go`, `gemini.go` and `grok.go` each
+    gain **exactly one line** — naming themselves in the `RateLimitError` they construct.
+    Their request building, decoding and classification switches are untouched;
+    `git diff --stat` against `main` must show `2 +-` for each and nothing more.
 19. Three **distinct** constants exist — `wireShapesProbedOnOpencode` (`"2026-08-28"`),
     `wireShapesProbedOnHuggingFace` and `wireShapesProbedOnKilo` (both `"2026-08-29"`) —
     distinct because all three files share `package llmprovider`. Each value matches the
@@ -2479,7 +2483,8 @@ Additional decisions this plan makes that the MADR left implicit:
 - **Refactoring `openai.go`, `claude.go`, `gemini.go`, `grok.go` onto `classifyHTTPStatus`.**
   The helper is introduced and used only by the new providers. Migrating the other four is a
   clean follow-up but would put four tested files in this change's blast radius for no
-  functional gain.
+  functional gain. *(Still out of scope after deviation D4, which changes one line in each
+  for provider attribution and leaves their classification switches intact.)*
 - Making auth headers injectable on the existing providers (MADR option 3, rejected).
 - An `ErrPaymentRequired` sentinel for Kilo's `402`.
 - HF: non-chat task APIs, `X-HF-Bill-To`, custom-provider-key config, `/v1/responses`.
@@ -2538,5 +2543,6 @@ through or annotated rather than rewritten.
 | Date | Phase/Step | Finding | Resolution | Files added to scope |
 |---|---|---|---|---|
 | 2026-08-29 | **D1** — Phase 1, Step 1.1 | `make lint` fails the Phase 1 gate: `unused` flags all 7 new JSON-key constants, because the plan's own code blocks first use them in Phases 2/3/6. Two — `jsonKeyToolCalls`, `jsonKeyReasoningContent` — are referenced **0 times in any phase**; `decodeChatCompletionsResponse` reads those fields via struct tags. Confirmed introduced, not pre-existing: `make lint` passes on the stashed tree. | Declare each constant in the phase that first uses it (still `constants.go`): `jsonRoleTool`+`jsonKeyMaxTokens`→Step 2.1, `jsonKeyReasoning`→Step 3.1, `jsonKeyToolChoice`+`jsonKeyReasoningEffort`→Step 6.1. **Drop** the two dead constants. Chosen over `//nolint:unused` so the linter keeps working and the dead constants are removed rather than suppressed. | none — Steps 1.1, 2.1, 3.1, 6.1 amended |
+| 2026-08-29 | **D4** — post-Phase 7, by explicit direction | `RateLimitError.Error()` carried no provider name, so a 429 from any of the eight providers read identically and was not attributable to a source. Found during Phase 2 and scoped out then, because the type is exported and shared by the four providers criterion 18 protects. | Added a `Provider` field, populated by `classifyHTTPStatus` and by each existing provider (one line each). `Error()` omits it when empty, reproducing the original message verbatim, so callers matching the old string are unaffected — asserted by `TestRateLimitError_ProviderAttribution`. Two tests that previously *exempted* 429 from the provider-name assertion were tightened into positive assertions. **Criterion 18 amended** from "not modified" to "exactly one line each". | `openai.go`, `claude.go`, `gemini.go`, `grok.go` (one line each) |
 | 2026-08-29 | **D3** — Phase 7, Step 7.1 | Step 7.1 asserted OpenCode's free models "ignore auth", so the live tests could pass a placeholder key. False: measured, OpenCode returns `200` with **no** `Authorization` header but `401 "Invalid API key."` with a bogus one. The original measurement used no header and was wrongly generalised. `NewOpencode` requires a non-empty key and always sends it, so all three OpenCode live tests failed `401`, including the route-enforcement assertion that protects the 63+26-row table. Kilo is unaffected — it genuinely ignores a bogus key (`200`). | The three OpenCode live tests skip unless `OPENCODE_API_KEY` is set, matching the Hugging Face row. Chosen over relaxing `NewOpencode`'s non-empty-key contract (a design change diverging from `NewClaude`/`NewGrok`) and over bypassing the provider with raw HTTP (which would test the gateway rather than the integration). Accepted cost: route enforcement is only verified by someone holding an OpenCode key. | none — Step 7.1 amended |
 | 2026-08-29 | **D2** — Phase 1, Step 1.0 | Step 1.0's stated fix for `unused` on `wireShapesProbedOn*` — "reference it from the `live_gateways` suite" — cannot work: `.golangci.yml` sets no `build-tags`, so `//go:build live_gateways` files are never analysed. Would have recurred in Phases 5 and 6. | Reference each constant from a new **untagged** `TestWireShapesProbedOn` (Step 1.4, test 8) that validates it parses as `YYYY-MM-DD` and is not in the future. Chosen over `//nolint` (leaves the date unverified), exporting (grows public API for 12 repos to satisfy a linter), and adding repo-wide `build-tags` (changes lint config as a side effect of this feature). | none — Steps 1.0, 1.4 amended |

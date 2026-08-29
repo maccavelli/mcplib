@@ -264,7 +264,9 @@ func TestOpencode_ErrorClassification(t *testing.T) {
 					// The gateway sends no Retry-After (measured 2026-08-28).
 					t.Errorf("RetryAfter = %v, want 0", rl.RetryAfter)
 				}
-			} else if !strings.Contains(err.Error(), "opencode-zen/messages") {
+			}
+			// Every classification names gateway/route, 429 included.
+			if !strings.Contains(err.Error(), "opencode-zen/messages") {
 				t.Errorf("error must name gateway/route for diagnosability: %v", err)
 			}
 		})

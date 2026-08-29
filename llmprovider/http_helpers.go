@@ -96,6 +96,7 @@ func classifyHTTPStatus(provider string, resp *http.Response) error {
 		return &RateLimitError{
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
 			Status:     resp.StatusCode,
+			Provider:   provider,
 		}
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return fmt.Errorf("%w: %s HTTP %d", ErrAuthFailure, provider, resp.StatusCode)

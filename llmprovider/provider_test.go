@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -187,5 +188,26 @@ func TestNewProvider_OpencodeRoutesResolved(t *testing.T) {
 	}
 	if op.Route() != OpencodeRouteMessages {
 		t.Errorf("Route() = %q, want %q", op.Route(), OpencodeRouteMessages)
+	}
+}
+
+// TestRateLimitError_ProviderAttribution covers the field added so a 429 is
+// attributable when a caller holds several providers. An empty Provider
+// reproduces the original message verbatim, so existing callers matching on it
+// are unaffected.
+func TestRateLimitError_ProviderAttribution(t *testing.T) {
+	withName := &RateLimitError{RetryAfter: 5 * time.Second, Status: 429, Provider: ProviderKilo}
+	if !strings.Contains(withName.Error(), ProviderKilo) {
+		t.Errorf("Error() must name the provider: %v", withName)
+	}
+	if !errors.Is(withName, ErrRateLimited) {
+		t.Error("must still unwrap to ErrRateLimited")
+	}
+
+	anonymous := &RateLimitError{RetryAfter: 5 * time.Second, Status: 429}
+	want := "llm: rate limited: HTTP 429 (retry-after 5s)"
+	if anonymous.Error() != want {
+		t.Errorf("empty Provider must reproduce the original message.\n got: %s\nwant: %s",
+			anonymous.Error(), want)
 	}
 }

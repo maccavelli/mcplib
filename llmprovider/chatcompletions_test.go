@@ -252,16 +252,11 @@ func TestClassifyHTTPStatus(t *testing.T) {
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want wrapping %v", err, tc.wantErr)
 			}
-			// The sentinel-wrapped branches name the provider/route so a
-			// misroute is diagnosable from the error alone. 429 is exempt: it
-			// returns the pre-existing *RateLimitError, whose Error() format
-			// (provider.go:81-83) is shared by all providers and carries no
-			// provider name. Changing that would alter an exported type used by
-			// the four existing providers, which this change leaves untouched.
-			if tc.status != http.StatusTooManyRequests {
-				if !strings.Contains(err.Error(), "gw/route") {
-					t.Errorf("error must name the provider/route: %v", err)
-				}
+			// Every branch names the provider/route so a failure is
+			// attributable from the error alone, including 429 since
+			// RateLimitError gained a Provider field.
+			if !strings.Contains(err.Error(), "gw/route") {
+				t.Errorf("error must name the provider/route: %v", err)
 			}
 			if tc.status == http.StatusTooManyRequests {
 				var rl *RateLimitError
