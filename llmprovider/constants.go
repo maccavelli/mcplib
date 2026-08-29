@@ -44,6 +44,14 @@ const (
 	jsonKeyMaxTokens       = "max_tokens"
 	jsonKeyToolChoice      = "tool_choice"
 	jsonKeyReasoningEffort = "reasoning_effort"
+	// jsonKeyReasoning is the Responses API reasoning block (OpenCode responses route).
+	jsonKeyReasoning = "reasoning"
+	// jsonKeyMaxOutputTokens and jsonKeyEffort are Responses API field names.
+	// They are named here so opencode.go does not push the existing literals in
+	// openai.go and grok.go over goconst's occurrence threshold; those files are
+	// deliberately not modified by this change.
+	jsonKeyMaxOutputTokens = "max_output_tokens"
+	jsonKeyEffort          = "effort"
 	jsonRoleTool           = "tool"
 )
 
