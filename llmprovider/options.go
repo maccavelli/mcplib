@@ -33,6 +33,11 @@ type ProviderConfig struct {
 	// ReasoningEffort selects OpenAI reasoning effort ("low"|"medium"|"high") for
 	// the GenerateThinking path. Empty leaves the per-provider default in effect.
 	ReasoningEffort string
+	// OpencodeRoute overrides the wire format the OpenCode gateway providers use
+	// for the configured model. Empty means "resolve from the built-in route
+	// table, then the per-gateway prefix heuristic". Set this when a model is
+	// newer than the table. Ignored by all other providers.
+	OpencodeRoute OpencodeRoute
 }
 
 // ProviderOption is a functional option for provider constructors.
@@ -73,6 +78,16 @@ func WithThinkingBudget(n int) ProviderOption {
 func WithReasoningEffort(s string) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.ReasoningEffort = s
+	}
+}
+
+// WithOpencodeRoute pins the wire format used by the OpenCode Zen/Go providers,
+// overriding the built-in route table. Use it when the gateway adds a model
+// before this package's table is updated; sending a model to the wrong route
+// fails with an opaque HTTP 500. Ignored by all other providers.
+func WithOpencodeRoute(route OpencodeRoute) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.OpencodeRoute = route
 	}
 }
 

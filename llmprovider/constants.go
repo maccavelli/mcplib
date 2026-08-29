@@ -6,6 +6,16 @@ const (
 	ProviderOpenAI = "openai"
 	ProviderClaude = "claude"
 	ProviderGrok   = "grok"
+	// ProviderOpencodeZen is the OpenCode Zen gateway (pay-as-you-go).
+	ProviderOpencodeZen = "opencode-zen"
+	// ProviderOpencodeGo is the OpenCode Go gateway (subscription).
+	ProviderOpencodeGo = "opencode-go"
+	// ProviderHuggingFace is the Hugging Face Inference Providers router.
+	ProviderHuggingFace = "huggingface"
+	// ProviderKilo is the Kilo Gateway (the API behind the Kilo Code agent).
+	// models.dev registers this gateway as "kilo"; this package follows that
+	// registry key. See docs/0003-MADR-add-gateway-llm-providers.md revision 4.
+	ProviderKilo = "kilo"
 )
 
 // Common LLM API JSON field names.
