@@ -13,6 +13,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ Provider = (*OpencodeProvider)(nil)
 	var _ Provider = (*HuggingFaceProvider)(nil)
 	var _ Provider = (*KiloProvider)(nil)
+	var _ Provider = (*OllamaProvider)(nil)
 
 	// ToolProvider interface (all 4 satisfy)
 	var _ ToolProvider = (*OpenAIProvider)(nil)
@@ -22,6 +23,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ToolProvider = (*OpencodeProvider)(nil)
 	var _ ToolProvider = (*HuggingFaceProvider)(nil)
 	var _ ToolProvider = (*KiloProvider)(nil)
+	var _ ToolProvider = (*OllamaProvider)(nil)
 
 	// ThinkingProvider interface (all 4 satisfy)
 	var _ ThinkingProvider = (*OpenAIProvider)(nil)
@@ -31,6 +33,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ThinkingProvider = (*OpencodeProvider)(nil)
 	var _ ThinkingProvider = (*HuggingFaceProvider)(nil)
 	var _ ThinkingProvider = (*KiloProvider)(nil)
+	var _ ThinkingProvider = (*OllamaProvider)(nil)
 
 	// ThinkingToolProvider interface (all 4 satisfy)
 	var _ ThinkingToolProvider = (*OpenAIProvider)(nil)
@@ -40,6 +43,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ThinkingToolProvider = (*OpencodeProvider)(nil)
 	var _ ThinkingToolProvider = (*HuggingFaceProvider)(nil)
 	var _ ThinkingToolProvider = (*KiloProvider)(nil)
+	var _ ThinkingToolProvider = (*OllamaProvider)(nil)
 
 	// ItemProvider interface (all 4 satisfy)
 	var _ ItemProvider = (*OpenAIProvider)(nil)
@@ -49,6 +53,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ItemProvider = (*OpencodeProvider)(nil)
 	var _ ItemProvider = (*HuggingFaceProvider)(nil)
 	var _ ItemProvider = (*KiloProvider)(nil)
+	var _ ItemProvider = (*OllamaProvider)(nil)
 
 	// ItemToolProvider interface (all 4 satisfy)
 	var _ ItemToolProvider = (*OpenAIProvider)(nil)
@@ -58,6 +63,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ItemToolProvider = (*OpencodeProvider)(nil)
 	var _ ItemToolProvider = (*HuggingFaceProvider)(nil)
 	var _ ItemToolProvider = (*KiloProvider)(nil)
+	var _ ItemToolProvider = (*OllamaProvider)(nil)
 
 	// ItemThinkingProvider interface (all 4 satisfy)
 	var _ ItemThinkingProvider = (*OpenAIProvider)(nil)
@@ -67,6 +73,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ItemThinkingProvider = (*OpencodeProvider)(nil)
 	var _ ItemThinkingProvider = (*HuggingFaceProvider)(nil)
 	var _ ItemThinkingProvider = (*KiloProvider)(nil)
+	var _ ItemThinkingProvider = (*OllamaProvider)(nil)
 
 	// ItemThinkingToolProvider interface (all 4 satisfy)
 	var _ ItemThinkingToolProvider = (*OpenAIProvider)(nil)
@@ -76,6 +83,7 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ItemThinkingToolProvider = (*OpencodeProvider)(nil)
 	var _ ItemThinkingToolProvider = (*HuggingFaceProvider)(nil)
 	var _ ItemThinkingToolProvider = (*KiloProvider)(nil)
+	var _ ItemThinkingToolProvider = (*OllamaProvider)(nil)
 
 	// Continuer optional interface (OpenAI, Gemini, Grok satisfy; Claude is
 	// stateless, and the OpenCode gateway rejects previous_response_id with
@@ -92,4 +100,5 @@ func TestProviderInterfaceSatisfaction(t *testing.T) {
 	var _ ModelDiscoverer = (*OpencodeProvider)(nil)
 	var _ ModelDiscoverer = (*HuggingFaceProvider)(nil)
 	var _ ModelDiscoverer = (*KiloProvider)(nil)
+	var _ ModelDiscoverer = (*OllamaProvider)(nil)
 }

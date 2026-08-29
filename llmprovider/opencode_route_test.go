@@ -179,6 +179,7 @@ func TestWireShapesProbedOn(t *testing.T) {
 		"opencode":    wireShapesProbedOnOpencode,
 		"huggingface": wireShapesProbedOnHuggingFace,
 		"kilo":        wireShapesProbedOnKilo,
+		"ollama":      wireShapesProbedOnOllama,
 	}
 	for name, pin := range pins {
 		t.Run(name, func(t *testing.T) {

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-29
 parent-madr: 0004-MADR-canonicalize-llm-provider-configuration.md
 decision-makers: mcplib maintainers
@@ -927,4 +927,4 @@ similar here, particularly around raw-mode terminal handling in Phase 4.
 
 | Date | Phase/Step | Finding | Resolution | Files added to scope |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| 2026-08-29 | **D1** — Phase 4, Step 4.2 | `TextPrompter.In` was typed `*os.File`. Phase 6 could not use it: `prepare-commit-msg` threads an `io.Reader` through `RunSetupWithOptions` so its tests can inject scripted input, and its existing code already handles the "not an `*os.File`" case. The signature was wrong for its own consumers. | `In` is now `io.Reader`. Raw-mode masking is used only when the input is genuinely a terminal (`inTTY`), degrading to a plain read otherwise — the behaviour non-TTY callers already received. All Phase 4 tests pass unchanged. | none |

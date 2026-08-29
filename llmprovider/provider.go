@@ -239,6 +239,8 @@ func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, 
 		return NewHuggingFace(apiKey, model, opts...)
 	case ProviderKilo:
 		return NewKilo(apiKey, model, opts...)
+	case ProviderOllama:
+		return NewOllama(apiKey, model, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}

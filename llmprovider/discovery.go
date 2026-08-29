@@ -39,7 +39,7 @@ func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts 
 		return listHuggingFaceModels(ctx, apiKey, cfg)
 	case ProviderKilo:
 		return listKiloModels(ctx, apiKey, cfg)
-	case "ollama":
+	case ProviderOllama:
 		return listOllamaModels(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("unsupported provider for model listing: %s", providerName)
