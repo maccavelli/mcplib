@@ -766,7 +766,14 @@ a thin filter: take `Descriptors()`, keep those whose `ProviderSpec` supports th
 them to `ConfigureLLM` via `Options.Providers`. `promptOllamaURL` disappears because
 `ConfigureLLM` handles `SupportsBaseURL` and `IsLocal` generically.
 
-`ConfigureLLM` is called **once per tier**; `mcplib` never learns what a tier is.
+~~`ConfigureLLM` is called **once per tier**~~; `mcplib` never learns what a tier is.
+
+> **Amended 2026-08-29 (deviation D7).** `ConfigureLLM` drives the **fast and thinking**
+> tiers only. The MADR's scope boundaries place embedding-model selection outside
+> `llmprovider`, which has no embedding abstraction, and the embedding flow's
+> dimension-annotated catalog and `Dimensions` lookup have no equivalent in `Result`. That
+> tier keeps its own model flow; only its credential and endpoint prompts move onto the
+> `Prompter`, which is enough for every acceptance grep in Step 8.4.
 
 ### Step 8.4 — Tests and verification
 
@@ -924,7 +931,7 @@ Additional decisions this plan makes:
 | `mcp-server-magicdev/cmd/.../pterm_prompter.go` | 7 | `Prompter` over pterm |
 | `mcp-server-magictools/cmd/.../pterm_prompter.go` | 8 | `Prompter` over pterm |
 
-### Modified files (19)
+### Modified files (20)
 
 | File | Phase | Change |
 |---|---|---|
@@ -947,6 +954,7 @@ Additional decisions this plan makes:
 | `mcp-server-magictools/internal/config/config.go` | 8 | +`ThinkingAPIURL` (D6) |
 | `mcp-server-magictools/internal/config/patch_yaml.go` | 8 | +`thinking_api_url` patching (D6) |
 | `mcp-server-magictools/internal/llm/pool.go` | 8 | +`WithBaseURL` on both tiers (D6) |
+| `mcp-server-magictools/internal/provider/catalog_test.go` | 8 | tier counts and Ollama assertion follow the new catalog (D7) |
 
 Plus three consumer `go.mod` files gaining a `replace` directive (Phases 6–8).
 
@@ -970,3 +978,4 @@ similar here, particularly around raw-mode terminal handling in Phase 4.
 | 2026-08-29 | **D4** — Phase 8, Step 8.3 | Step 8.3 lists `maskKey` (`config.go:576`) for deletion but does not account for its callers or its test. Its three live call sites are in the **configuration summary display** (`:525`, `:537`, `:548`), not the wizard, and `config_extra_test.go:13-18` pins its exact output — a file absent from the plan's file list. The formats differ substantively, not cosmetically: `maskKey("short")` returns `"****hort"`, revealing four of five characters, where `logging.MaskSecret("short")` returns `"••••••••"` and reveals none. | Delete `maskKey`, repoint the three display sites at `logging.MaskSecret`, and rewrite the two `TestConfigHelpers` assertions to the new format. One masking implementation per binary, and short values stop leaking most of themselves. | `mcp-server-magictools/cmd/.../config_extra_test.go` |
 | 2026-08-29 | **D5** — Phase 7, Step 7.2 | Phase 7 migrates the wizard but not the runtime that consumes its output. `internal/integration/llm_client.go:47-56` switches on the configured id and returns `unsupported llm provider: %s` for anything outside `gemini|openai|claude`, so six of the nine providers the migrated wizard offers would write a configuration the server rejects at start. There is also no `llm.base_url` key in `internal/config/registry.go`, so the `Result.BaseURL` that `ConfigureLLM` collects for Ollama and all four gateways has nowhere to be stored. Confirmed pre-existing: both files were unmodified when this was found. | Delete the switch. `llmprovider.NewProvider` is already the authority on valid ids, and `DescriptorFor` gives a clear up-front error, so a tenth provider added to `mcplib` works here with no edit — the drift this MADR exists to remove. Add `llm.base_url` to the registry and thread it through `llmprovider.WithBaseURL`. | `mcp-server-magicdev/internal/integration/llm_client.go`, `internal/config/registry.go`, `internal/handler/tools.go` |
 | 2026-08-29 | **D6** — Phase 8, Step 8.3 | `internal/llm/pool.go:105` and `:113` construct both tiers with `WithHTTPClient` alone and never pass `WithBaseURL`. `Intelligence.APIURL` is written by the wizard (`config.go:141-143`) and persisted (`config.go:744`) but never read — a dead write that is currently harmless only because Ollama's spec sets `Fast: false`, making the fast-tier `promptOllamaURL` branch unreachable. Step 8.1 makes it reachable. `IntelligenceEngine` also has no `ThinkingAPIURL` field at all, so the thinking tier cannot store an endpoint. Confirmed pre-existing: `pool.go` and `config.go` were unmodified when this was found. | Add `ThinkingAPIURL` with its YAML and patch plumbing, and pass `llmprovider.WithBaseURL` for both tiers when set. This repairs the dead `APIURL` write rather than leaving it dormant behind a newly-reachable path. | `mcp-server-magictools/internal/config/config.go`, `internal/config/patch_yaml.go`, the tier patch structs, `internal/llm/pool.go` |
+| 2026-08-29 | **D7** — Phase 8, Steps 8.1 and 8.3 | Step 8.3 states "`ConfigureLLM` is called **once per tier**", but the MADR's scope boundaries put embedding-model selection outside `mcplib`: "Embedding providers (`voyage`) and embedding-model selection. `llmprovider` has no embedding abstraction; adding one is its own MADR." The embedding flow selects dimension-annotated models (`"text-embedding-3-large (1024 dims)"`) and maps them through `Dimensions` to `EmbeddingDimensionality`, none of which `ConfigureLLM` models, and Voyage has no descriptor to offer. Separately, `internal/provider/catalog_test.go:7-24` pins `fast == 3`, `thinking == 3` and asserts Ollama is absent from both — which the MADR's "every wizard offers all providers in `Descriptors()`" and mcplib v1.2.0's promotion of Ollama to a real generative provider both contradict. | The MADR wins. `ConfigureLLM` drives the fast and thinking tiers; the embedding tier keeps its own model and dimensionality flow, with only its credential and endpoint prompts moved onto the `Prompter`. Every Step 8.4 acceptance grep still passes. `catalog_test.go` is updated to the new contract — the same call already made for `contract_test.go` when Ollama was promoted. | `mcp-server-magictools/internal/provider/catalog_test.go` |
