@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-29
 parent-madr: 0004-MADR-canonicalize-llm-provider-configuration.md
 decision-makers: mcplib maintainers

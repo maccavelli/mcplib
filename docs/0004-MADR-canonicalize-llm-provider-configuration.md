@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-29
 decision-makers: mcplib maintainers
 consulted: mcp-server-magictools, mcp-server-magicdev, prepare-commit-msg
