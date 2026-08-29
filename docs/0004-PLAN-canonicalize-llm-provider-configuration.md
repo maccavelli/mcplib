@@ -689,11 +689,18 @@ cannot reveal a tail. A compile-time `var _ wizard.Prompter = (*ptermPrompter)(n
 
 ### Step 7.2 — `configure.go`
 
-Delete `providerEnvVars` (`:27`), `maskKey` (`:107`), `readHiddenSecret` (`:182`), and the
+Delete `providerEnvVars` (`:27`), `maskKey` (`:107`), ~~`readHiddenSecret` (`:182`)~~, and the
 prompting body of `resolveAPIKey` (`:118`). Call `wizard.ConfigureLLM` with the pterm
 prompter. Stored-key display becomes `logging.MaskSecret`.
 
 Non-LLM steps — IDE setup, tokens, Jira — are untouched.
+
+> **Amended 2026-08-29 (deviation D3).** `readHiddenSecret` is **not** deleted: five non-LLM
+> callers depend on it (`setupJira:228`, `setupConfluence:283`, `setupGitlab:321`,
+> `setupGithub:339`, `token.go:104`), so removing the symbol contradicts the "non-LLM steps
+> are untouched" sentence in this same step. Its **body** is deleted instead — it becomes a
+> thin delegate to `wizard.NewTextPrompter().Secret`. The duplicated raw-terminal handling
+> is gone, no non-LLM caller changes, and those five prompts gain masked paste feedback.
 
 ### Step 7.3 — Tests and verification
 
@@ -738,7 +745,14 @@ them would mean `mcplib` importing `pterm`, which is the thing this MADR exists 
 ### Step 8.3 — `config.go`
 
 Delete `readHiddenSecret` (`:565`), `maskKey` (`:576`), `resolveAPIKey` (`:621`),
-`promptOllamaURL` (`:676`), `selectModel` (`:696`). `selectProviderForTier` (`:601`) becomes
+`promptOllamaURL` (`:676`), `selectModel` (`:696`), and `providerEnvVars` (`:31`), which
+`resolveAPIKey` was its only reader of.
+
+> **Amended 2026-08-29 (deviation D4).** `maskKey`'s three live callers are in the
+> configuration **summary display** (`:525`, `:537`, `:548`), not the wizard; they are
+> repointed at `logging.MaskSecret`. `config_extra_test.go:13-18` pins `maskKey`'s output
+> and is added to this phase's scope: `maskKey("short")` revealed four of five characters,
+> `logging.MaskSecret("short")` reveals none, so the assertions change with the behaviour. `selectProviderForTier` (`:601`) becomes
 a thin filter: take `Descriptors()`, keep those whose `ProviderSpec` supports the tier, hand
 them to `ConfigureLLM` via `Options.Providers`. `promptOllamaURL` disappears because
 `ConfigureLLM` handles `SupportsBaseURL` and `IsLocal` generically.
@@ -894,7 +908,7 @@ Additional decisions this plan makes:
 | `mcp-server-magicdev/cmd/.../pterm_prompter.go` | 7 | `Prompter` over pterm |
 | `mcp-server-magictools/cmd/.../pterm_prompter.go` | 8 | `Prompter` over pterm |
 
-### Modified files (12)
+### Modified files (13)
 
 | File | Phase | Change |
 |---|---|---|
@@ -907,9 +921,10 @@ Additional decisions this plan makes:
 | `mcplib/llmprovider/provider_test.go` | 3 | +`ProviderOllama` in the provider slice |
 | `mcplib/go.mod` | 4 | +`golang.org/x/term` (third direct dependency) |
 | `prepare-commit-msg/internal/ui/setup.go` | 6 | −5 functions, −17-entry catalog, +`ConfigureLLM` |
-| `mcp-server-magicdev/cmd/.../configure.go` | 7 | −`maskKey`, −`providerEnvVars`, −`readHiddenSecret` |
+| `mcp-server-magicdev/cmd/.../configure.go` | 7 | −`maskKey`, −`providerEnvVars`; `readHiddenSecret` delegates to `wizard` (D3) |
 | `mcp-server-magictools/cmd/.../config.go` | 8 | −5 functions, `selectProviderForTier` becomes a filter |
 | `mcp-server-magictools/internal/provider/catalog.go` | 8 | `ProviderSpec` wraps descriptors; tier/embedding data kept |
+| `mcp-server-magictools/cmd/.../config_extra_test.go` | 8 | `maskKey` assertions become `logging.MaskSecret` (D4) |
 
 Plus three consumer `go.mod` files gaining a `replace` directive (Phases 6–8).
 
@@ -928,3 +943,6 @@ similar here, particularly around raw-mode terminal handling in Phase 4.
 | Date | Phase/Step | Finding | Resolution | Files added to scope |
 |---|---|---|---|---|
 | 2026-08-29 | **D1** — Phase 4, Step 4.2 | `TextPrompter.In` was typed `*os.File`. Phase 6 could not use it: `prepare-commit-msg` threads an `io.Reader` through `RunSetupWithOptions` so its tests can inject scripted input, and its existing code already handles the "not an `*os.File`" case. The signature was wrong for its own consumers. | `In` is now `io.Reader`. Raw-mode masking is used only when the input is genuinely a terminal (`inTTY`), degrading to a plain read otherwise — the behaviour non-TTY callers already received. All Phase 4 tests pass unchanged. | none |
+| 2026-08-29 | **D2** — Phase 5, Step 5.2 | `ConfigureLLM` had two capability gaps against the wizard it was replacing, both caught by `prepare-commit-msg`'s existing tests during Phase 6. Its model menu had no manual-entry escape hatch, though the `promptModel` it replaced offered one; and its environment reader was hard-wired to `os.Getenv`, so a consumer that indirects `os.Getenv` for its own tests — as `prepare-commit-msg` does via `osGetenv` — could not drive the env-key branch. | The model menu gained a trailing `"Other (enter a model id)"` option, and `Options.LookupEnv` makes the environment reader injectable. Executed in `5510341`; this row backfills the record, which that commit references but never wrote. | none |
+| 2026-08-29 | **D3** — Phase 7, Step 7.2 | Step 7.2 is self-contradictory as written: it orders the deletion of `readHiddenSecret` (`configure.go:182`) while also stating that the non-LLM steps are untouched. `readHiddenSecret` has five non-LLM callers — `setupJira:228`, `setupConfluence:283`, `setupGitlab:321`, `setupGithub:339` and `token.go:104` — so deleting the symbol breaks the build. Confirmed pre-existing: `configure.go` was unmodified in the working tree when this was found. | **Delete the implementation, keep the symbol.** `readHiddenSecret` becomes a thin delegate to `wizard.NewTextPrompter().Secret`. The duplicated raw-terminal handling this MADR exists to remove is gone, the five non-LLM callers compile unchanged, and those five credential prompts gain the masked-tail paste feedback. | none |
+| 2026-08-29 | **D4** — Phase 8, Step 8.3 | Step 8.3 lists `maskKey` (`config.go:576`) for deletion but does not account for its callers or its test. Its three live call sites are in the **configuration summary display** (`:525`, `:537`, `:548`), not the wizard, and `config_extra_test.go:13-18` pins its exact output — a file absent from the plan's file list. The formats differ substantively, not cosmetically: `maskKey("short")` returns `"****hort"`, revealing four of five characters, where `logging.MaskSecret("short")` returns `"••••••••"` and reveals none. | Delete `maskKey`, repoint the three display sites at `logging.MaskSecret`, and rewrite the two `TestConfigHelpers` assertions to the new format. One masking implementation per binary, and short values stop leaking most of themselves. | `mcp-server-magictools/cmd/.../config_extra_test.go` |
