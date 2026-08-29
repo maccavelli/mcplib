@@ -689,11 +689,18 @@ cannot reveal a tail. A compile-time `var _ wizard.Prompter = (*ptermPrompter)(n
 
 ### Step 7.2 — `configure.go`
 
-Delete `providerEnvVars` (`:27`), `maskKey` (`:107`), `readHiddenSecret` (`:182`), and the
+Delete `providerEnvVars` (`:27`), `maskKey` (`:107`), ~~`readHiddenSecret` (`:182`)~~, and the
 prompting body of `resolveAPIKey` (`:118`). Call `wizard.ConfigureLLM` with the pterm
 prompter. Stored-key display becomes `logging.MaskSecret`.
 
 Non-LLM steps — IDE setup, tokens, Jira — are untouched.
+
+> **Amended 2026-08-29 (deviation D3).** `readHiddenSecret` is **not** deleted: five non-LLM
+> callers depend on it (`setupJira:228`, `setupConfluence:283`, `setupGitlab:321`,
+> `setupGithub:339`, `token.go:104`), so removing the symbol contradicts the "non-LLM steps
+> are untouched" sentence in this same step. Its **body** is deleted instead — it becomes a
+> thin delegate to `wizard.NewTextPrompter().Secret`. The duplicated raw-terminal handling
+> is gone, no non-LLM caller changes, and those five prompts gain masked paste feedback.
 
 ### Step 7.3 — Tests and verification
 
@@ -704,7 +711,16 @@ cd mcp-server-magicdev && gofmt -l . && go vet ./... && go test ./...
 grep -rn 'func maskKey\|providerEnvVars' . ; echo "^ must be empty"
 ```
 
-**Acceptance:** `maskKey` and the local env-var map are gone. **Commit in `magicdev`.**
+> **Amended 2026-08-29 (deviation D5).** The phase also unblocks the runtime, which
+> otherwise rejects six of the nine providers the migrated wizard offers.
+> `internal/integration/llm_client.go` loses its three-provider switch in favour of
+> `llmprovider.DescriptorFor` validation, and gains `llm.base_url` — added to
+> `internal/config/registry.go` and to the valid-keys list in `internal/handler/tools.go` —
+> threaded through `llmprovider.WithBaseURL`. Without this the wizard writes configurations
+> the server cannot start on.
+
+**Acceptance:** `maskKey` and the local env-var map are gone; `NewLLMClient` constructs
+every descriptor id. **Commit in `magicdev`.**
 
 ---
 
@@ -738,12 +754,26 @@ them would mean `mcplib` importing `pterm`, which is the thing this MADR exists 
 ### Step 8.3 — `config.go`
 
 Delete `readHiddenSecret` (`:565`), `maskKey` (`:576`), `resolveAPIKey` (`:621`),
-`promptOllamaURL` (`:676`), `selectModel` (`:696`). `selectProviderForTier` (`:601`) becomes
+`promptOllamaURL` (`:676`), `selectModel` (`:696`), and `providerEnvVars` (`:31`), which
+`resolveAPIKey` was its only reader of.
+
+> **Amended 2026-08-29 (deviation D4).** `maskKey`'s three live callers are in the
+> configuration **summary display** (`:525`, `:537`, `:548`), not the wizard; they are
+> repointed at `logging.MaskSecret`. `config_extra_test.go:13-18` pins `maskKey`'s output
+> and is added to this phase's scope: `maskKey("short")` revealed four of five characters,
+> `logging.MaskSecret("short")` reveals none, so the assertions change with the behaviour. `selectProviderForTier` (`:601`) becomes
 a thin filter: take `Descriptors()`, keep those whose `ProviderSpec` supports the tier, hand
 them to `ConfigureLLM` via `Options.Providers`. `promptOllamaURL` disappears because
 `ConfigureLLM` handles `SupportsBaseURL` and `IsLocal` generically.
 
-`ConfigureLLM` is called **once per tier**; `mcplib` never learns what a tier is.
+~~`ConfigureLLM` is called **once per tier**~~; `mcplib` never learns what a tier is.
+
+> **Amended 2026-08-29 (deviation D7).** `ConfigureLLM` drives the **fast and thinking**
+> tiers only. The MADR's scope boundaries place embedding-model selection outside
+> `llmprovider`, which has no embedding abstraction, and the embedding flow's
+> dimension-annotated catalog and `Dimensions` lookup have no equivalent in `Result`. That
+> tier keeps its own model flow; only its credential and endpoint prompts move onto the
+> `Prompter`, which is enough for every acceptance grep in Step 8.4.
 
 ### Step 8.4 — Tests and verification
 
@@ -758,7 +788,14 @@ cd mcp-server-magictools && gofmt -l . && go vet ./... && go test ./...
 grep -rn 'func maskKey\|func promptOllamaURL\|gemini-2.0-flash' . ; echo "^ must be empty"
 ```
 
-**Acceptance:** all three greps empty. **Commit in `magictools`.**
+> **Amended 2026-08-29 (deviation D6).** The phase also threads base URLs to the runtime.
+> `IntelligenceEngine` gains `ThinkingAPIURL` (with YAML and patch plumbing), and
+> `internal/llm/pool.go` passes `llmprovider.WithBaseURL` for both tiers when set. `APIURL`
+> was previously written and never read; Step 8.1 makes that path reachable, so it is
+> repaired here rather than left dormant.
+
+**Acceptance:** all three greps empty; both tiers honour a configured endpoint.
+**Commit in `magictools`.**
 
 ---
 
@@ -894,7 +931,7 @@ Additional decisions this plan makes:
 | `mcp-server-magicdev/cmd/.../pterm_prompter.go` | 7 | `Prompter` over pterm |
 | `mcp-server-magictools/cmd/.../pterm_prompter.go` | 8 | `Prompter` over pterm |
 
-### Modified files (12)
+### Modified files (20)
 
 | File | Phase | Change |
 |---|---|---|
@@ -907,9 +944,17 @@ Additional decisions this plan makes:
 | `mcplib/llmprovider/provider_test.go` | 3 | +`ProviderOllama` in the provider slice |
 | `mcplib/go.mod` | 4 | +`golang.org/x/term` (third direct dependency) |
 | `prepare-commit-msg/internal/ui/setup.go` | 6 | −5 functions, −17-entry catalog, +`ConfigureLLM` |
-| `mcp-server-magicdev/cmd/.../configure.go` | 7 | −`maskKey`, −`providerEnvVars`, −`readHiddenSecret` |
+| `mcp-server-magicdev/cmd/.../configure.go` | 7 | −`maskKey`, −`providerEnvVars`; `readHiddenSecret` delegates to `wizard` (D3) |
 | `mcp-server-magictools/cmd/.../config.go` | 8 | −5 functions, `selectProviderForTier` becomes a filter |
 | `mcp-server-magictools/internal/provider/catalog.go` | 8 | `ProviderSpec` wraps descriptors; tier/embedding data kept |
+| `mcp-server-magictools/cmd/.../config_extra_test.go` | 8 | `maskKey` assertions become `logging.MaskSecret` (D4) |
+| `mcp-server-magicdev/internal/integration/llm_client.go` | 7 | −three-provider switch; +`WithBaseURL` (D5) |
+| `mcp-server-magicdev/internal/config/registry.go` | 7 | +`llm.base_url` (D5) |
+| `mcp-server-magicdev/internal/handler/tools.go` | 7 | +`llm.base_url` in the valid-keys list (D5) |
+| `mcp-server-magictools/internal/config/config.go` | 8 | +`ThinkingAPIURL` (D6) |
+| `mcp-server-magictools/internal/config/patch_yaml.go` | 8 | +`thinking_api_url` patching (D6) |
+| `mcp-server-magictools/internal/llm/pool.go` | 8 | +`WithBaseURL` on both tiers (D6) |
+| `mcp-server-magictools/internal/provider/catalog_test.go` | 8 | tier counts and Ollama assertion follow the new catalog (D7) |
 
 Plus three consumer `go.mod` files gaining a `replace` directive (Phases 6–8).
 
@@ -928,3 +973,9 @@ similar here, particularly around raw-mode terminal handling in Phase 4.
 | Date | Phase/Step | Finding | Resolution | Files added to scope |
 |---|---|---|---|---|
 | 2026-08-29 | **D1** — Phase 4, Step 4.2 | `TextPrompter.In` was typed `*os.File`. Phase 6 could not use it: `prepare-commit-msg` threads an `io.Reader` through `RunSetupWithOptions` so its tests can inject scripted input, and its existing code already handles the "not an `*os.File`" case. The signature was wrong for its own consumers. | `In` is now `io.Reader`. Raw-mode masking is used only when the input is genuinely a terminal (`inTTY`), degrading to a plain read otherwise — the behaviour non-TTY callers already received. All Phase 4 tests pass unchanged. | none |
+| 2026-08-29 | **D2** — Phase 5, Step 5.2 | `ConfigureLLM` had two capability gaps against the wizard it was replacing, both caught by `prepare-commit-msg`'s existing tests during Phase 6. Its model menu had no manual-entry escape hatch, though the `promptModel` it replaced offered one; and its environment reader was hard-wired to `os.Getenv`, so a consumer that indirects `os.Getenv` for its own tests — as `prepare-commit-msg` does via `osGetenv` — could not drive the env-key branch. | The model menu gained a trailing `"Other (enter a model id)"` option, and `Options.LookupEnv` makes the environment reader injectable. Executed in `5510341`; this row backfills the record, which that commit references but never wrote. | none |
+| 2026-08-29 | **D3** — Phase 7, Step 7.2 | Step 7.2 is self-contradictory as written: it orders the deletion of `readHiddenSecret` (`configure.go:182`) while also stating that the non-LLM steps are untouched. `readHiddenSecret` has five non-LLM callers — `setupJira:228`, `setupConfluence:283`, `setupGitlab:321`, `setupGithub:339` and `token.go:104` — so deleting the symbol breaks the build. Confirmed pre-existing: `configure.go` was unmodified in the working tree when this was found. | **Delete the implementation, keep the symbol.** `readHiddenSecret` becomes a thin delegate to `wizard.NewTextPrompter().Secret`. The duplicated raw-terminal handling this MADR exists to remove is gone, the five non-LLM callers compile unchanged, and those five credential prompts gain the masked-tail paste feedback. | none |
+| 2026-08-29 | **D4** — Phase 8, Step 8.3 | Step 8.3 lists `maskKey` (`config.go:576`) for deletion but does not account for its callers or its test. Its three live call sites are in the **configuration summary display** (`:525`, `:537`, `:548`), not the wizard, and `config_extra_test.go:13-18` pins its exact output — a file absent from the plan's file list. The formats differ substantively, not cosmetically: `maskKey("short")` returns `"****hort"`, revealing four of five characters, where `logging.MaskSecret("short")` returns `"••••••••"` and reveals none. | Delete `maskKey`, repoint the three display sites at `logging.MaskSecret`, and rewrite the two `TestConfigHelpers` assertions to the new format. One masking implementation per binary, and short values stop leaking most of themselves. | `mcp-server-magictools/cmd/.../config_extra_test.go` |
+| 2026-08-29 | **D5** — Phase 7, Step 7.2 | Phase 7 migrates the wizard but not the runtime that consumes its output. `internal/integration/llm_client.go:47-56` switches on the configured id and returns `unsupported llm provider: %s` for anything outside `gemini|openai|claude`, so six of the nine providers the migrated wizard offers would write a configuration the server rejects at start. There is also no `llm.base_url` key in `internal/config/registry.go`, so the `Result.BaseURL` that `ConfigureLLM` collects for Ollama and all four gateways has nowhere to be stored. Confirmed pre-existing: both files were unmodified when this was found. | Delete the switch. `llmprovider.NewProvider` is already the authority on valid ids, and `DescriptorFor` gives a clear up-front error, so a tenth provider added to `mcplib` works here with no edit — the drift this MADR exists to remove. Add `llm.base_url` to the registry and thread it through `llmprovider.WithBaseURL`. | `mcp-server-magicdev/internal/integration/llm_client.go`, `internal/config/registry.go`, `internal/handler/tools.go` |
+| 2026-08-29 | **D6** — Phase 8, Step 8.3 | `internal/llm/pool.go:105` and `:113` construct both tiers with `WithHTTPClient` alone and never pass `WithBaseURL`. `Intelligence.APIURL` is written by the wizard (`config.go:141-143`) and persisted (`config.go:744`) but never read — a dead write that is currently harmless only because Ollama's spec sets `Fast: false`, making the fast-tier `promptOllamaURL` branch unreachable. Step 8.1 makes it reachable. `IntelligenceEngine` also has no `ThinkingAPIURL` field at all, so the thinking tier cannot store an endpoint. Confirmed pre-existing: `pool.go` and `config.go` were unmodified when this was found. | Add `ThinkingAPIURL` with its YAML and patch plumbing, and pass `llmprovider.WithBaseURL` for both tiers when set. This repairs the dead `APIURL` write rather than leaving it dormant behind a newly-reachable path. | `mcp-server-magictools/internal/config/config.go`, `internal/config/patch_yaml.go`, the tier patch structs, `internal/llm/pool.go` |
+| 2026-08-29 | **D7** — Phase 8, Steps 8.1 and 8.3 | Step 8.3 states "`ConfigureLLM` is called **once per tier**", but the MADR's scope boundaries put embedding-model selection outside `mcplib`: "Embedding providers (`voyage`) and embedding-model selection. `llmprovider` has no embedding abstraction; adding one is its own MADR." The embedding flow selects dimension-annotated models (`"text-embedding-3-large (1024 dims)"`) and maps them through `Dimensions` to `EmbeddingDimensionality`, none of which `ConfigureLLM` models, and Voyage has no descriptor to offer. Separately, `internal/provider/catalog_test.go:7-24` pins `fast == 3`, `thinking == 3` and asserts Ollama is absent from both — which the MADR's "every wizard offers all providers in `Descriptors()`" and mcplib v1.2.0's promotion of Ollama to a real generative provider both contradict. | The MADR wins. `ConfigureLLM` drives the fast and thinking tiers; the embedding tier keeps its own model and dimensionality flow, with only its credential and endpoint prompts moved onto the `Prompter`. Every Step 8.4 acceptance grep still passes. `catalog_test.go` is updated to the new contract — the same call already made for `contract_test.go` when Ollama was promoted. | `mcp-server-magictools/internal/provider/catalog_test.go` |
