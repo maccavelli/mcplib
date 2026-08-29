@@ -460,9 +460,8 @@ const (
 >
 > | Constant | Declared in | First use |
 > |---|---|---|
-> | `jsonRoleTool`, `jsonKeyMaxTokens` | **Step 2.1** | `chatcompletions.go` |
+> | `jsonRoleTool`, `jsonKeyMaxTokens`, `jsonKeyToolChoice`, `jsonKeyReasoningEffort` | **Step 2.1** | `chatcompletions.go` — `itemsToChatMessages` and `chatCompletionsBody` |
 > | `jsonKeyReasoning` | **Step 3.1** | `opencode.go` `responsesBody` |
-> | `jsonKeyToolChoice`, `jsonKeyReasoningEffort` | **Step 6.1** | `kilo.go` `supports()` gating |
 > | ~~`jsonKeyToolCalls`~~, ~~`jsonKeyReasoningContent`~~ | **dropped** | never — `decodeChatCompletionsResponse` reads those fields via struct tags, not constants |
 >
 > Existing entries `jsonKeyModel`, `jsonKeyMessages`, `jsonKeyContent`, `jsonKeyRole`,
@@ -681,9 +680,17 @@ consumers.
 `chatcompletions.go` uses, to the field-name block:
 
 ```go
-	jsonKeyMaxTokens = "max_tokens"
-	jsonRoleTool     = "tool"
+	jsonKeyMaxTokens       = "max_tokens"
+	jsonKeyToolChoice      = "tool_choice"
+	jsonKeyReasoningEffort = "reasoning_effort"
+	jsonRoleTool           = "tool"
 ```
+
+> **Corrected 2026-08-29.** The D1 entry first assigned `jsonKeyToolChoice` and
+> `jsonKeyReasoningEffort` to Step 6.1. That was wrong: `chatCompletionsBody` in this phase
+> uses both, so they must be declared here or Phase 2 does not compile. Phase 6 reuses them
+> as capability keys in `supports()` but is not their first use. The resolution principle
+> — declare at first use — is unchanged.
 
 Then `http_helpers.go`: add `"fmt"` to the import block (`http_helpers.go:3-9`, which currently lacks it), then
 append:
@@ -1815,13 +1822,8 @@ make lint && make test
 
 ### Step 6.1 — `llmprovider/kilo.go` (new file)
 
-**First, `constants.go` (deviation D1).** Add the two constants this phase's `supports()`
-gating uses as capability keys:
-
-```go
-	jsonKeyToolChoice      = "tool_choice"
-	jsonKeyReasoningEffort = "reasoning_effort"
-```
+**No new constants.** This phase's `supports()` gating reuses `jsonKeyToolChoice` and
+`jsonKeyReasoningEffort` as capability keys; both are declared in Step 2.1, their first use.
 
 ```go
 const kiloBaseURL = "https://api.kilo.ai/api/gateway"

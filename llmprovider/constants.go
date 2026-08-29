@@ -38,6 +38,13 @@ const (
 	jsonKeyOutput      = "output"
 	jsonKeyCallID      = "call_id"
 	jsonKeyArguments   = "arguments"
+
+	// Chat Completions field names, shared by every gateway provider that
+	// speaks that format (OpenCode's chat route, Hugging Face, Kilo).
+	jsonKeyMaxTokens       = "max_tokens"
+	jsonKeyToolChoice      = "tool_choice"
+	jsonKeyReasoningEffort = "reasoning_effort"
+	jsonRoleTool           = "tool"
 )
 
 // Reasoning effort level values shared across providers.
