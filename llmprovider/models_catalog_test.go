@@ -194,7 +194,10 @@ func TestStaticGrok_Count(t *testing.T) {
 }
 
 func TestStaticModels(t *testing.T) {
-	providers := []string{ProviderGemini, ProviderOpenAI, ProviderClaude, ProviderGrok}
+	providers := []string{
+		ProviderGemini, ProviderOpenAI, ProviderClaude, ProviderGrok,
+		ProviderOpencodeZen, ProviderOpencodeGo, ProviderHuggingFace, ProviderKilo,
+	}
 	for _, p := range providers {
 		models := StaticModels(p)
 		if len(models) == 0 {
@@ -279,5 +282,64 @@ func TestCurateFromCatalog_Backfill(t *testing.T) {
 	}
 	if out[0] != "gpt-4.1-mini" {
 		t.Errorf("catalog hit should be first, got %s", out[0])
+	}
+}
+
+func TestIsUsableOpencodeModel(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"gpt-5.4-nano", true},
+		{"claude-haiku-4-5", true},
+		{"kimi-k2.6", true},
+		{"hy3-free", true},
+		{"deepseek-v4-flash-vision-exp", false},
+		{"mimo-v2-omni", false},
+		{"hy3-preview", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isUsableOpencodeModel(tc.id); got != tc.want {
+			t.Errorf("isUsableOpencodeModel(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}
+
+func TestRankOpencodeModel(t *testing.T) {
+	if RankOpencodeModel("gpt-5.4-nano") <= RankOpencodeModel("gpt-5.4-mini") {
+		t.Error("nano should rank above mini for hook latency")
+	}
+	if RankOpencodeModel("gemini-3.5-flash-lite") <= RankOpencodeModel("gemini-3.7-flash") {
+		t.Error("lite should rank above flash")
+	}
+	if RankOpencodeModel("claude-haiku-4-5") <= RankOpencodeModel("claude-sonnet-5") {
+		t.Error("haiku should rank above sonnet")
+	}
+	if RankOpencodeModel("qwen3.8-flash") <= RankOpencodeModel("qwen3.8-max") {
+		t.Error("flash should rank above max")
+	}
+	if RankOpencodeModel("hy3-free") >= RankOpencodeModel("hy3") {
+		t.Error("free tier is rate-limited and must rank below its paid sibling")
+	}
+}
+
+func TestStaticOpencode_Count(t *testing.T) {
+	for name, cat := range map[string][]string{
+		"StaticOpencodeZen": StaticOpencodeZen,
+		"StaticOpencodeGo":  StaticOpencodeGo,
+	} {
+		if len(cat) == 0 || len(cat) > MaxListedModels {
+			t.Errorf("%s has %d entries, want 1..%d", name, len(cat), MaxListedModels)
+		}
+		for _, m := range cat {
+			// The docs endpoint table lists these but the live listing does not.
+			if m == "qwen3.7-max" || m == "qwen3.7-plus" {
+				t.Errorf("%s must not include %q: absent from the live listing", name, m)
+			}
+			if !isUsableOpencodeModel(m) {
+				t.Errorf("%s entry %q fails its own usability filter", name, m)
+			}
+		}
 	}
 }

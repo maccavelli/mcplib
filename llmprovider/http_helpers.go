@@ -2,6 +2,7 @@ package llmprovider
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -73,4 +74,35 @@ func decodeResponsesAPIOutput(body io.Reader) (*Response, error) {
 	}
 
 	return result, nil
+}
+
+// classifyHTTPStatus maps a non-200 response to the package's typed sentinels.
+// It is the shared form of the switch duplicated in openai.go, claude.go,
+// gemini.go and grok.go; those remain untouched, and adopting this helper there
+// is deliberately out of scope. Returns nil for 200 OK.
+//
+// provider names the caller for the error string — for a multi-route gateway,
+// pass "gateway/route" so a misroute is diagnosable from the error alone.
+//
+// Note: Kilo documents HTTP 402 "insufficient balance". It falls to
+// ErrInvalidRequest, which is the correct retry behaviour (retrying will not add
+// balance) even though the message reads as a client error. See MADR revision 4.
+func classifyHTTPStatus(provider string, resp *http.Response) error {
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return &RateLimitError{
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			Status:     resp.StatusCode,
+			Provider:   provider,
+		}
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return fmt.Errorf("%w: %s HTTP %d", ErrAuthFailure, provider, resp.StatusCode)
+	case resp.StatusCode >= 500:
+		return fmt.Errorf("%w: %s HTTP %d", ErrProviderUnavailable, provider, resp.StatusCode)
+	default:
+		return fmt.Errorf("%w: %s HTTP %d", ErrInvalidRequest, provider, resp.StatusCode)
+	}
 }

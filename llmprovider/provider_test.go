@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,7 +93,10 @@ func TestGenerateItemsWithRetry_NonRetryable(t *testing.T) {
 }
 
 func TestNewProvider(t *testing.T) {
-	providers := []string{ProviderGemini, ProviderClaude, ProviderOpenAI, ProviderGrok}
+	providers := []string{
+		ProviderGemini, ProviderClaude, ProviderOpenAI, ProviderGrok,
+		ProviderOpencodeZen, ProviderOpencodeGo, ProviderHuggingFace, ProviderKilo,
+	}
 	for _, p := range providers {
 		prov, err := NewProvider(p, "test-key", "model-x")
 		if err != nil {
@@ -152,5 +156,58 @@ func TestGenerateItemsWithRetry_ContextCancelled(t *testing.T) {
 	_, err := GenerateItemsWithRetry(ctx, f, []Item{MessageItem{Role: "user", Text: "hi"}}, 3, 50*time.Millisecond)
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestProviderEnvVars_Opencode pins the single evidenced credential name: both
+// gateways share OPENCODE_API_KEY (models.dev declares it for each; neither
+// docs page names any other variable).
+func TestProviderEnvVars_Opencode(t *testing.T) {
+	for _, gw := range []string{ProviderOpencodeZen, ProviderOpencodeGo} {
+		got, ok := ProviderEnvVars[gw]
+		if !ok {
+			t.Errorf("ProviderEnvVars missing %q", gw)
+			continue
+		}
+		if got != "OPENCODE_API_KEY" {
+			t.Errorf("ProviderEnvVars[%q] = %q, want OPENCODE_API_KEY", gw, got)
+		}
+	}
+}
+
+// TestNewProvider_OpencodeRoutesResolved verifies NewProvider resolves the wire
+// format at construction, so a misroute is visible before any request is made.
+func TestNewProvider_OpencodeRoutesResolved(t *testing.T) {
+	prov, err := NewProvider(ProviderOpencodeZen, "k", "claude-sonnet-5")
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	op, ok := prov.(*OpencodeProvider)
+	if !ok {
+		t.Fatalf("NewProvider returned %T, want *OpencodeProvider", prov)
+	}
+	if op.Route() != OpencodeRouteMessages {
+		t.Errorf("Route() = %q, want %q", op.Route(), OpencodeRouteMessages)
+	}
+}
+
+// TestRateLimitError_ProviderAttribution covers the field added so a 429 is
+// attributable when a caller holds several providers. An empty Provider
+// reproduces the original message verbatim, so existing callers matching on it
+// are unaffected.
+func TestRateLimitError_ProviderAttribution(t *testing.T) {
+	withName := &RateLimitError{RetryAfter: 5 * time.Second, Status: 429, Provider: ProviderKilo}
+	if !strings.Contains(withName.Error(), ProviderKilo) {
+		t.Errorf("Error() must name the provider: %v", withName)
+	}
+	if !errors.Is(withName, ErrRateLimited) {
+		t.Error("must still unwrap to ErrRateLimited")
+	}
+
+	anonymous := &RateLimitError{RetryAfter: 5 * time.Second, Status: 429}
+	want := "llm: rate limited: HTTP 429 (retry-after 5s)"
+	if anonymous.Error() != want {
+		t.Errorf("empty Provider must reproduce the original message.\n got: %s\nwant: %s",
+			anonymous.Error(), want)
 	}
 }

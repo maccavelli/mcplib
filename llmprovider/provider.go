@@ -76,10 +76,17 @@ var (
 type RateLimitError struct {
 	RetryAfter time.Duration
 	Status     int
+	// Provider names the source of the limit, so a 429 is attributable when a
+	// caller holds several providers. Empty is valid and reproduces the
+	// original message verbatim.
+	Provider string
 }
 
 func (e *RateLimitError) Error() string {
-	return fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	if e.Provider == "" {
+		return fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	}
+	return fmt.Sprintf("%v: %s HTTP %d (retry-after %s)", ErrRateLimited, e.Provider, e.Status, e.RetryAfter)
 }
 
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
@@ -108,6 +115,12 @@ var ProviderEnvVars = map[string]string{
 	ProviderClaude: "CLAUDE_API_KEY",
 	ProviderOpenAI: "OPENAI_API_KEY",
 	ProviderGrok:   "XAI_API_KEY",
+	// One credential serves both OpenCode gateways; models.dev declares
+	// OPENCODE_API_KEY for each, and neither docs page names any other variable.
+	ProviderOpencodeZen: "OPENCODE_API_KEY",
+	ProviderOpencodeGo:  "OPENCODE_API_KEY",
+	ProviderHuggingFace: "HF_TOKEN",
+	ProviderKilo:        "KILO_API_KEY",
 }
 
 // GenerateWithRetry executes a Generate call with the specified number of retries
@@ -220,6 +233,12 @@ func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, 
 		return NewOpenAI(apiKey, model, opts...)
 	case ProviderGrok:
 		return NewGrok(apiKey, model, opts...)
+	case ProviderOpencodeZen, ProviderOpencodeGo:
+		return NewOpencode(name, apiKey, model, opts...)
+	case ProviderHuggingFace:
+		return NewHuggingFace(apiKey, model, opts...)
+	case ProviderKilo:
+		return NewKilo(apiKey, model, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}
