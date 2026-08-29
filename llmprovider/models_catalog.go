@@ -54,6 +54,30 @@ var (
 		"claude-sonnet-4-20250514",
 	}
 
+	// StaticOpencodeZen: fast/cheap first across all four gateway routes.
+	// Verified present in GET https://opencode.ai/zen/v1/models on 2026-08-28.
+	// Deliberately excludes qwen3.7-max/qwen3.7-plus: they appear in the docs
+	// endpoint table but NOT in the live listing.
+	StaticOpencodeZen = []string{
+		"gpt-5.4-nano",          // responses
+		"gemini-3.5-flash-lite", // google
+		"gpt-5.4-mini",          // responses
+		"claude-haiku-4-5",      // messages
+		"gemini-3.7-flash",      // google
+		"kimi-k2.6",             // chat_completions
+	}
+
+	// StaticOpencodeGo: Go carries no Claude or Gemini models.
+	// Verified present in GET https://opencode.ai/zen/go/v1/models on 2026-08-28.
+	StaticOpencodeGo = []string{
+		"glm-5.3-flash",     // chat_completions
+		"qwen3.8-flash",     // messages
+		"deepseek-v4-flash", // chat_completions
+		"kimi-k2.6",         // chat_completions
+		"gpt-5.6-luna",      // responses
+		"grok-4.6",          // responses
+	}
+
 	// StaticGrok: fast/flagship models first.
 	StaticGrok = []string{
 		"grok-3-mini-fast",
@@ -68,6 +92,18 @@ var (
 // geminiDenySubstrings reject non-text / non-production / specialized endpoints.
 // Matched as lowercase substrings of the model id (after models/ prefix strip).
 const denyComputerUse = "computer-use"
+
+// Deny substrings shared across provider filters. They are named rather than
+// repeated as literals so that adding a new provider's deny list does not push
+// the existing occurrences over goconst's threshold, which would report files
+// this change deliberately leaves untouched.
+const (
+	denyEmbed   = "embed"
+	denyVision  = "vision"
+	denyImage   = "image"
+	denyAudio   = "audio"
+	denyPreview = "preview"
+)
 
 var geminiDenySubstrings = []string{
 	"image", "vision", "embed", "tts", "audio", "live", "preview",
@@ -104,9 +140,78 @@ func StaticModels(provider string) []string {
 		return append([]string(nil), StaticClaude...)
 	case ProviderGrok:
 		return append([]string(nil), StaticGrok...)
+	case ProviderOpencodeZen:
+		return append([]string(nil), StaticOpencodeZen...)
+	case ProviderOpencodeGo:
+		return append([]string(nil), StaticOpencodeGo...)
 	default:
 		return nil
 	}
+}
+
+// staticOpencodeCatalog returns the curation seed for a gateway (no copy;
+// callers must not mutate).
+func staticOpencodeCatalog(gateway string) []string {
+	if gateway == ProviderOpencodeGo {
+		return StaticOpencodeGo
+	}
+	return StaticOpencodeZen
+}
+
+// opencodeDenySubstrings reject non-text / non-production entries that appear in
+// the gateway catalogs (e.g. deepseek-v4-flash-vision-exp, mimo-v2-omni,
+// hy3-preview on OpenCode Go).
+var opencodeDenySubstrings = []string{
+	denyVision, denyImage, denyEmbed, "tts", denyAudio, "omni", denyPreview, "-exp",
+}
+
+// isUsableOpencodeModel filters gateway model IDs to production text models.
+// Unlike the vendor filters it enforces no family prefix: the gateways
+// deliberately aggregate many vendors under bare IDs.
+func isUsableOpencodeModel(id string) bool {
+	sm := strings.ToLower(strings.TrimSpace(id))
+	if sm == "" {
+		return false
+	}
+	for _, deny := range opencodeDenySubstrings {
+		if strings.Contains(sm, deny) {
+			return false
+		}
+	}
+	return true
+}
+
+// RankOpencodeModel scores a gateway model for menu ordering. Higher is better.
+// Prefers low-latency tiers for fast Git hook execution, penalizes heavy
+// reasoning tiers, and demotes free models because the gateway rate-limits them
+// aggressively (HTTP 429 FreeUsageLimitError).
+func RankOpencodeModel(m string) int {
+	sm := strings.ToLower(m)
+	score := 0
+	switch {
+	case strings.Contains(sm, "nano"):
+		score += 200
+	case strings.Contains(sm, "lite"):
+		score += 190
+	case strings.Contains(sm, "flash"):
+		score += 180
+	case strings.Contains(sm, "mini"):
+		score += 170
+	case strings.Contains(sm, "haiku"):
+		score += 160
+	case strings.Contains(sm, "sonnet"):
+		score += 90
+	case strings.Contains(sm, "opus"), strings.Contains(sm, "-pro"),
+		strings.Contains(sm, "-max"):
+		score -= 300
+	}
+	if strings.HasSuffix(sm, "-free") {
+		score -= 50 // free tier is rate-limited; usable but not a default
+	}
+	if strings.Contains(sm, "codex") {
+		score -= 100 // code-completion specialisations, not general chat
+	}
+	return score
 }
 
 // isUsableGeminiTextModel reports whether id is a production text generateContent model.

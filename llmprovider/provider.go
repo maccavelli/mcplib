@@ -108,6 +108,10 @@ var ProviderEnvVars = map[string]string{
 	ProviderClaude: "CLAUDE_API_KEY",
 	ProviderOpenAI: "OPENAI_API_KEY",
 	ProviderGrok:   "XAI_API_KEY",
+	// One credential serves both OpenCode gateways; models.dev declares
+	// OPENCODE_API_KEY for each, and neither docs page names any other variable.
+	ProviderOpencodeZen: "OPENCODE_API_KEY",
+	ProviderOpencodeGo:  "OPENCODE_API_KEY",
 }
 
 // GenerateWithRetry executes a Generate call with the specified number of retries
@@ -220,6 +224,8 @@ func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, 
 		return NewOpenAI(apiKey, model, opts...)
 	case ProviderGrok:
 		return NewGrok(apiKey, model, opts...)
+	case ProviderOpencodeZen, ProviderOpencodeGo:
+		return NewOpencode(name, apiKey, model, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}

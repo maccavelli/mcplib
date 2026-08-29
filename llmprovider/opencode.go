@@ -299,3 +299,32 @@ func firstFunctionCallArgs(resp *Response, provider string) (string, error) {
 	}
 	return "", fmt.Errorf("%s: no function call in response", provider)
 }
+
+// DiscoverModels returns curated gateway models, with a short health probe.
+// Falls back to the static catalog.
+//
+// Each probe reconstructs the provider so the per-model route is resolved
+// correctly. Cloning p would send every candidate down the first model's wire
+// format and 500 on most of them.
+func (p *OpencodeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
+	listed, err := listOpencodeModels(ctx, p.gateway, p.apiKey, ProviderConfig{
+		HTTPClient: p.client,
+		BaseURL:    p.baseURL,
+	})
+	if err != nil || len(listed) == 0 {
+		listed = StaticModels(p.gateway)
+	}
+
+	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
+		tp, err := NewOpencode(p.gateway, p.apiKey, modelID,
+			WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		if err != nil {
+			return "", err
+		}
+		return tp.Generate(tCtx, "Respond with ONLY the word Hello")
+	})
+	if len(healthy) > 0 {
+		return healthy, nil
+	}
+	return listed, nil
+}

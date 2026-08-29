@@ -230,3 +230,86 @@ func TestValidateOllamaURL(t *testing.T) {
 		t.Error("expected error for non-200 status")
 	}
 }
+
+// opencodeListingFixture is the real GET /models shape: an OpenAI list whose
+// entries carry no routing or capability metadata at all.
+const opencodeListingFixture = `{"object":"list","data":[
+	{"id":"gpt-5.4-nano","object":"model","created":1787968159,"owned_by":"opencode"},
+	{"id":"claude-haiku-4-5","object":"model","created":1787968159,"owned_by":"opencode"},
+	{"id":"gemini-3.7-flash","object":"model","created":1787968159,"owned_by":"opencode"},
+	{"id":"kimi-k2.6","object":"model","created":1787968159,"owned_by":"opencode"},
+	{"id":"deepseek-v4-flash-vision-exp","object":"model","created":1787968159,"owned_by":"opencode"}]}`
+
+func TestListAvailableModels_OpencodeZen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(opencodeListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderOpencodeZen, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("ListAvailableModels: %v", err)
+	}
+	if len(models) == 0 || len(models) > MaxListedModels {
+		t.Fatalf("got %d models, want 1..%d", len(models), MaxListedModels)
+	}
+	for _, m := range models {
+		if m == "deepseek-v4-flash-vision-exp" {
+			t.Errorf("denied model returned: %s", m)
+		}
+	}
+}
+
+func TestListAvailableModels_OpencodeGo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"glm-5.3-flash","object":"model","owned_by":"opencode"},
+			{"id":"grok-4.6","object":"model","owned_by":"opencode"}]}`))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderOpencodeGo, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("ListAvailableModels: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected non-empty model list")
+	}
+}
+
+// TestListOpencodeModels_NoAPIKey pins the measured fact that the gateway's
+// /models endpoint is public: the handler FAILS the test if a credential is
+// sent, and the call must still succeed with an empty key.
+func TestListOpencodeModels_NoAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization must not be sent when no key is configured: %q",
+				r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(opencodeListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderOpencodeZen, "", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("listing with no API key must succeed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected non-empty model list with no credential")
+	}
+}
+
+func TestListAvailableModels_OpencodeFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderOpencodeZen, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("fallback must not error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected static catalog fallback")
+	}
+}

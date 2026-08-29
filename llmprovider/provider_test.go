@@ -92,7 +92,10 @@ func TestGenerateItemsWithRetry_NonRetryable(t *testing.T) {
 }
 
 func TestNewProvider(t *testing.T) {
-	providers := []string{ProviderGemini, ProviderClaude, ProviderOpenAI, ProviderGrok}
+	providers := []string{
+		ProviderGemini, ProviderClaude, ProviderOpenAI, ProviderGrok,
+		ProviderOpencodeZen, ProviderOpencodeGo,
+	}
 	for _, p := range providers {
 		prov, err := NewProvider(p, "test-key", "model-x")
 		if err != nil {
@@ -152,5 +155,37 @@ func TestGenerateItemsWithRetry_ContextCancelled(t *testing.T) {
 	_, err := GenerateItemsWithRetry(ctx, f, []Item{MessageItem{Role: "user", Text: "hi"}}, 3, 50*time.Millisecond)
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestProviderEnvVars_Opencode pins the single evidenced credential name: both
+// gateways share OPENCODE_API_KEY (models.dev declares it for each; neither
+// docs page names any other variable).
+func TestProviderEnvVars_Opencode(t *testing.T) {
+	for _, gw := range []string{ProviderOpencodeZen, ProviderOpencodeGo} {
+		got, ok := ProviderEnvVars[gw]
+		if !ok {
+			t.Errorf("ProviderEnvVars missing %q", gw)
+			continue
+		}
+		if got != "OPENCODE_API_KEY" {
+			t.Errorf("ProviderEnvVars[%q] = %q, want OPENCODE_API_KEY", gw, got)
+		}
+	}
+}
+
+// TestNewProvider_OpencodeRoutesResolved verifies NewProvider resolves the wire
+// format at construction, so a misroute is visible before any request is made.
+func TestNewProvider_OpencodeRoutesResolved(t *testing.T) {
+	prov, err := NewProvider(ProviderOpencodeZen, "k", "claude-sonnet-5")
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	op, ok := prov.(*OpencodeProvider)
+	if !ok {
+		t.Fatalf("NewProvider returned %T, want *OpencodeProvider", prov)
+	}
+	if op.Route() != OpencodeRouteMessages {
+		t.Errorf("Route() = %q, want %q", op.Route(), OpencodeRouteMessages)
 	}
 }

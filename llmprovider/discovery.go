@@ -30,6 +30,8 @@ func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts 
 		return listClaudeModels(ctx, apiKey, cfg)
 	case ProviderGrok:
 		return listGrokModels(ctx, apiKey, cfg)
+	case ProviderOpencodeZen, ProviderOpencodeGo:
+		return listOpencodeModels(ctx, strings.ToLower(providerName), apiKey, cfg)
 	case "ollama":
 		return listOllamaModels(ctx, cfg)
 	default:
@@ -292,6 +294,65 @@ func listGrokModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]s
 	curated := curateFromCatalog(StaticGrok, available, isUsableGrokModel, RankGrokModel)
 	if len(curated) == 0 {
 		return StaticModels(ProviderGrok), nil
+	}
+	return curated, nil
+}
+
+// listOpencodeModels fetches the gateway catalog and curates it. The OpenCode
+// /models endpoint is PUBLIC — it answers 200 with no credentials (verified
+// 2026-08-28) — so the Authorization header is sent only when a key is
+// available, and an empty key is not an error.
+//
+// The listing carries no routing or capability metadata (every entry reports
+// owned_by "opencode"), so route selection cannot be derived from it; see
+// opencode_route.go.
+func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) ([]string, error) {
+	baseURL, err := opencodeBaseURL(gateway)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.BaseURL != "" {
+		baseURL = strings.TrimRight(cfg.BaseURL, "/")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	if err != nil {
+		return StaticModels(gateway), nil
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return StaticModels(gateway), nil
+	}
+	defer closeResponseBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return StaticModels(gateway), nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return StaticModels(gateway), nil
+	}
+
+	var available []string
+	for _, m := range result.Data {
+		if isUsableOpencodeModel(m.ID) {
+			available = append(available, m.ID)
+		}
+	}
+
+	curated := curateFromCatalog(staticOpencodeCatalog(gateway), available,
+		isUsableOpencodeModel, RankOpencodeModel)
+	if len(curated) == 0 {
+		return StaticModels(gateway), nil
 	}
 	return curated, nil
 }
