@@ -196,7 +196,7 @@ func TestStaticGrok_Count(t *testing.T) {
 func TestStaticModels(t *testing.T) {
 	providers := []string{
 		ProviderGemini, ProviderOpenAI, ProviderClaude, ProviderGrok,
-		ProviderOpencodeZen, ProviderOpencodeGo, ProviderHuggingFace,
+		ProviderOpencodeZen, ProviderOpencodeGo, ProviderHuggingFace, ProviderKilo,
 	}
 	for _, p := range providers {
 		models := StaticModels(p)

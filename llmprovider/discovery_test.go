@@ -2,6 +2,7 @@ package llmprovider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -394,5 +395,119 @@ func TestListAvailableModels_HuggingFaceFallback(t *testing.T) {
 	}
 	if len(models) == 0 {
 		t.Fatal("expected static catalog fallback")
+	}
+}
+
+// kiloListingFixture mirrors the real Kilo catalog: OpenRouter shape plus Kilo's
+// extensions. It contains a vision model, a training-on-prompts model, a
+// non-tool model, and three priced text models including the "-1" variable price.
+const kiloListingFixture = `{"data":[
+ {"id":"org/vlm","architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.000001"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false},
+ {"id":"org/trains","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.0000001"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":true},
+ {"id":"org/no-tools","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.0000001"},"supported_parameters":["max_tokens"],"mayTrainOnYourPrompts":false},
+ {"id":"org/dear","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.000002"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false},
+ {"id":"org/cheap","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.0000005"},"supported_parameters":["tools","tool_choice"],"mayTrainOnYourPrompts":false},
+ {"id":"kilo-auto/variable","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "pricing":{"completion":"-1"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false}]}`
+
+// TestListKiloModels_MetadataCuration asserts both documented traps and the
+// policy exclusion: vision, training-on-prompts and non-tool models are dropped,
+// survivors are cheapest-first, and "-1" variable pricing sorts LAST.
+func TestListKiloModels_MetadataCuration(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(kiloListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderKilo, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("ListAvailableModels: %v", err)
+	}
+	for _, m := range models {
+		switch m {
+		case "org/vlm":
+			t.Error("vision-language model must be dropped")
+		case "org/trains":
+			t.Error("mayTrainOnYourPrompts model must be dropped (policy)")
+		case "org/no-tools":
+			t.Error("model without tools in supported_parameters must be dropped")
+		}
+	}
+	want := []string{"org/cheap", "org/dear", "kilo-auto/variable"}
+	if len(models) != len(want) {
+		t.Fatalf("got %v, want %v", models, want)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Fatalf("order = %v, want %v (cheapest first, \"-1\" last)", models, want)
+		}
+	}
+}
+
+// TestListKiloModels_NoAPIKey pins that Kilo's /models endpoint is public.
+func TestListKiloModels_NoAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization must not be sent with an empty key: %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(kiloListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderKilo, "", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("listing with no API key must succeed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected non-empty list with no credential")
+	}
+}
+
+// TestIsUsableKiloModel_TrainingPolicy documents and pins the one judgement this
+// package makes on the user's behalf: mayTrainOnYourPrompts models are excluded
+// by the lister, not by the id-only filter.
+func TestIsUsableKiloModel_TrainingPolicy(t *testing.T) {
+	// The id-only filter knows nothing about the flag and must accept the id.
+	if !isUsableKiloModel("org/trains") {
+		t.Error("isUsableKiloModel is id-only; the training flag lives in the listing")
+	}
+	// The lister applies the policy. Asserted end-to-end above; this guards the
+	// division of responsibility so the check is not silently moved or dropped.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(kiloListingFixture))
+	}))
+	defer srv.Close()
+	models, _ := ListAvailableModels(context.Background(), ProviderKilo, "", WithBaseURL(srv.URL))
+	for _, m := range models {
+		if m == "org/trains" {
+			t.Error("listKiloModels must exclude mayTrainOnYourPrompts models")
+		}
+	}
+}
+
+func TestKiloModelCapabilities(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization must not be sent with an empty key: %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(kiloListingFixture))
+	}))
+	defer srv.Close()
+
+	caps, err := KiloModelCapabilities(context.Background(), "", "org/cheap", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("KiloModelCapabilities: %v", err)
+	}
+	if len(caps) != 2 || caps[0] != jsonKeyTools || caps[1] != jsonKeyToolChoice {
+		t.Errorf("caps = %v, want [tools tool_choice]", caps)
+	}
+
+	if _, err := KiloModelCapabilities(context.Background(), "", "org/absent", WithBaseURL(srv.URL)); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("absent model err = %v, want wrapping ErrInvalidRequest", err)
 	}
 }

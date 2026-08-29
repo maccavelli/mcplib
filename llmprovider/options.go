@@ -38,6 +38,10 @@ type ProviderConfig struct {
 	// table, then the per-gateway prefix heuristic". Set this when a model is
 	// newer than the table. Ignored by all other providers.
 	OpencodeRoute OpencodeRoute
+	// KiloCapabilities lists the request parameters the configured Kilo model
+	// accepts (its supported_parameters). Empty means "unknown — send
+	// everything". Ignored by all other providers.
+	KiloCapabilities []string
 }
 
 // ProviderOption is a functional option for provider constructors.
@@ -88,6 +92,20 @@ func WithReasoningEffort(s string) ProviderOption {
 func WithOpencodeRoute(route OpencodeRoute) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.OpencodeRoute = route
+	}
+}
+
+// WithKiloCapabilities declares the request parameters the configured Kilo model
+// accepts, as published in that model's supported_parameters (GET {base}/models).
+// It gates optional fields the model may reject: "tool_choice" for forced tool
+// calls and "reasoning_effort" for the thinking path.
+//
+// Omit it and every parameter is sent — the gateway is the authority, and
+// withholding a parameter we merely cannot confirm would silently degrade
+// requests. Ignored by all other providers.
+func WithKiloCapabilities(params ...string) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.KiloCapabilities = params
 	}
 }
 

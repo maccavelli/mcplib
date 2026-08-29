@@ -91,6 +91,20 @@ var (
 		"zai-org/GLM-5.2",                    // 8 providers
 	}
 
+	// StaticKilo: fallback only — discovery is metadata-driven. Every ID
+	// confirmed present in GET https://api.kilo.ai/api/gateway/models on
+	// 2026-08-29, all tool-capable. Five are kilo-auto/* managed tiers, chosen
+	// because Kilo maintains what they point at — the strongest churn resistance
+	// available in a 366-model open catalog.
+	StaticKilo = []string{
+		"kilo-auto/free",                     // free; also the live-test target
+		"kilo-auto/small",                    // cheapest managed tier
+		"kilo-auto/efficient",                // cost-optimised
+		"kilo-auto/balanced",                 // default quality tier
+		"meta-llama/llama-3.1-8b-instruct",   // cheapest concrete model, $0.04/M out
+		"nvidia/nemotron-3.5-lightning:free", // free fallback, supports reasoning_effort
+	}
+
 	// StaticGrok: fast/flagship models first.
 	StaticGrok = []string{
 		"grok-3-mini-fast",
@@ -161,6 +175,8 @@ func StaticModels(provider string) []string {
 		return append([]string(nil), StaticOpencodeGo...)
 	case ProviderHuggingFace:
 		return append([]string(nil), StaticHuggingFace...)
+	case ProviderKilo:
+		return append([]string(nil), StaticKilo...)
 	default:
 		return nil
 	}
@@ -555,6 +571,49 @@ func RankHuggingFaceModel(m string) int {
 	}
 	if strings.Contains(sm, "thinking") || strings.Contains(sm, "-r1") {
 		score -= 100 // reasoning-heavy; slow for hook latency
+	}
+	return score
+}
+
+// isUsableKiloModel filters Kilo model IDs to production text models.
+//
+// POLICY, not capability: models flagged mayTrainOnYourPrompts are excluded by
+// listKiloModels (25 of 366 on 2026-08-29). A shared library used by commit
+// hooks should not route a private diff to a model that trains on it without
+// the caller asking. This is the only judgement this package makes on the
+// user's behalf; TestIsUsableKiloModel_TrainingPolicy pins it so it stays
+// visible and reversible. The flag lives in the listing, so the check is in
+// listKiloModels; this function handles the id-only static path.
+func isUsableKiloModel(id string) bool {
+	sm := strings.ToLower(strings.TrimSpace(id))
+	// NOTE: no colon-splitting — ":free" is part of the id, not a policy suffix.
+	if sm == "" || !strings.Contains(sm, "/") {
+		return false
+	}
+	for _, deny := range []string{denyVision, "-vl", denyEmbed, denyTTS, "whisper", denyOmni, denyImage} {
+		if strings.Contains(sm, deny) {
+			return false
+		}
+	}
+	return true
+}
+
+// RankKiloModel is a weak, name-based fallback used only when the live listing
+// is unavailable. The primary ranking path uses published pricing; see
+// listKiloModels.
+func RankKiloModel(m string) int {
+	sm := strings.ToLower(m)
+	score := 0
+	if strings.HasPrefix(sm, "kilo-auto/") {
+		score += 200 // managed tiers: stable ids, gateway-selected models
+	}
+	switch {
+	case strings.Contains(sm, "flash"), strings.Contains(sm, "lightning"),
+		strings.Contains(sm, "small"), strings.Contains(sm, "mini"):
+		score += 100
+	case strings.Contains(sm, "-pro"), strings.Contains(sm, "-max"),
+		strings.Contains(sm, "frontier"):
+		score -= 200
 	}
 	return score
 }
