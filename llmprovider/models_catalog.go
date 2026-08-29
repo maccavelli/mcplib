@@ -617,3 +617,63 @@ func RankKiloModel(m string) int {
 	}
 	return score
 }
+
+// modelLabels maps a curated model id to a human-readable menu label. It lives
+// beside the static catalogs it annotates so a catalog edit and its label edit
+// are the same diff — the arrangement that let prepare-commit-msg's private
+// 17-entry copy drift out of step with this package.
+//
+// Labels are advisory. ModelLabel falls back to the bare id, so a live listing
+// that outruns this table degrades to raw ids rather than hiding models.
+//
+//nolint:goconst // model ids are intentionally repeated across catalog and labels
+var modelLabels = map[string]string{
+	// Gemini
+	"gemini-3.7-flash":      "Gemini 3.7 Flash       [★ Recommended: frontier coding intelligence]",
+	"gemini-3.6-flash":      "Gemini 3.6 Flash       [high efficiency, reduced token overhead]",
+	"gemini-3.5-flash":      "Gemini 3.5 Flash       [high-speed production workhorse]",
+	"gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite  [ultra-low latency]",
+	"gemini-2.5-flash":      "Gemini 2.5 Flash       [proven balanced baseline]",
+	"gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite  [lightweight baseline]",
+
+	// OpenAI
+	"gpt-4.1-mini": "GPT-4.1 Mini           [★ Recommended: fast & cost-effective]",
+	"gpt-4.1-nano": "GPT-4.1 Nano           [ultra-low latency]",
+	"gpt-4o-mini":  "GPT-4o Mini            [stable fast chat model]",
+	"gpt-4.1":      "GPT-4.1                [high-capability fast tier]",
+	"gpt-4o":       "GPT-4o                 [flagship multimodal]",
+	"o4-mini":      "o4-mini                [fast reasoning]",
+
+	// Claude
+	"claude-haiku-4-5":        "Claude Haiku 4.5       [★ Recommended: high speed, low latency]",
+	"claude-sonnet-5":         "Claude Sonnet 5        [balanced speed & precision]",
+	"claude-sonnet-4-6":       "Claude Sonnet 4.6      [stable high precision]",
+	"claude-opus-4-8":         "Claude Opus 4.8        [maximum capability]",
+	"claude-3-5-haiku-latest": "Claude 3.5 Haiku       [fast lightweight]",
+
+	// Grok
+	"grok-3-mini-fast":      "Grok 3 Mini Fast       [★ Recommended: fastest tier]",
+	"grok-3-mini":           "Grok 3 Mini            [low latency]",
+	"grok-4":                "Grok 4                 [flagship]",
+	"grok-4.6":              "Grok 4.6               [current flagship]",
+	"grok-4-fast-reasoning": "Grok 4 Fast Reasoning  [fast reasoning tier]",
+
+	// Gateway managed tiers
+	"kilo-auto/free":      "Kilo Auto Free         [★ Recommended: no cost, gateway-selected]",
+	"kilo-auto/small":     "Kilo Auto Small        [cheapest managed tier]",
+	"kilo-auto/efficient": "Kilo Auto Efficient    [cost-optimised]",
+	"kilo-auto/balanced":  "Kilo Auto Balanced     [default quality tier]",
+	"openai/gpt-oss-20b":  "GPT-OSS 20B            [★ Recommended: fast, widely served]",
+	"openai/gpt-oss-120b": "GPT-OSS 120B           [highest throughput]",
+}
+
+// ModelLabel returns a human-readable menu label for a model, or the bare model
+// id when none is known. The provider argument is accepted for future
+// per-provider disambiguation; ids are currently unique across providers.
+func ModelLabel(provider, model string) string {
+	_ = provider
+	if label, ok := modelLabels[model]; ok {
+		return label
+	}
+	return model
+}
