@@ -45,10 +45,22 @@ type Options struct {
 	DiscoverLimit time.Duration
 	// NeedFallbacks collects additional models after the primary.
 	NeedFallbacks bool
+	// LookupEnv reads an environment variable. Nil uses os.Getenv. Consumers
+	// inject this to drive the flow deterministically in their own tests.
+	LookupEnv func(string) string
 }
 
-// getenv is indirected for tests.
+// getenv is indirected for this package's own tests.
 var getenv = os.Getenv
+
+// lookupEnv resolves the environment reader for a run: the caller's when
+// supplied, this package's otherwise.
+func (o Options) lookupEnv() func(string) string {
+	if o.LookupEnv != nil {
+		return o.LookupEnv
+	}
+	return getenv
+}
 
 // ConfigureLLM runs the canonical provider configuration flow: choose a
 // provider, resolve a base URL, resolve a credential, choose a model, and
@@ -183,7 +195,7 @@ func resolveAPIKey(p Prompter, d llmprovider.ProviderDescriptor, o Options) (str
 	}
 
 	if o.AllowEnv && d.EnvVar != "" {
-		if envVal := getenv(d.EnvVar); envVal != "" {
+		if envVal := o.lookupEnv()(d.EnvVar); envVal != "" {
 			use, err := p.Confirm(
 				fmt.Sprintf("Use %s from the environment (%s)?", d.EnvVar, logging.MaskSecret(envVal)), true)
 			if err != nil {
@@ -253,6 +265,11 @@ func modelChoices(provider string, models []string) []Choice {
 	return out
 }
 
+// otherModelLabel is the trailing escape hatch on the model menu. A live
+// listing can lag a newly released model, and the catalog is curated rather
+// than exhaustive, so the user must always be able to name a model directly.
+const otherModelLabel = "Other (enter a model id)"
+
 func selectModel(p Prompter, d llmprovider.ProviderDescriptor, models []string, o Options) (string, error) {
 	defaultIdx := 0
 	for i, m := range models {
@@ -260,9 +277,20 @@ func selectModel(p Prompter, d llmprovider.ProviderDescriptor, models []string, 
 			defaultIdx = i
 		}
 	}
-	idx, err := p.Select(fmt.Sprintf("Choose a %s model:", d.Label), modelChoices(d.ID, models), defaultIdx)
+	choices := append(modelChoices(d.ID, models), Choice{Label: otherModelLabel})
+	idx, err := p.Select(fmt.Sprintf("Choose a %s model:", d.Label), choices, defaultIdx)
 	if err != nil {
 		return "", fmt.Errorf("select model: %w", err)
+	}
+	if idx == len(models) {
+		manual, inputErr := p.Input("Model id", o.Existing.Model)
+		if inputErr != nil {
+			return "", fmt.Errorf("enter model: %w", inputErr)
+		}
+		if manual == "" {
+			return "", fmt.Errorf("wizard: no model entered")
+		}
+		return manual, nil
 	}
 	return models[idx], nil
 }

@@ -248,3 +248,50 @@ func TestConfigureLLM_ProviderFilter(t *testing.T) {
 		t.Error("expected an error when no requested provider exists")
 	}
 }
+
+// TestConfigureLLM_OtherModelEscapeHatch: a curated catalog and a live listing
+// can both lag a newly released model, so the menu always ends with a manual
+// entry. prepare-commit-msg's wizard had this before the migration.
+func TestConfigureLLM_OtherModelEscapeHatch(t *testing.T) {
+	withEnv(t, nil)
+	static := llmprovider.StaticModels(llmprovider.ProviderClaude)
+	f := &fakePrompter{
+		t: t,
+		// provider, then the trailing "Other" entry
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude), len(static)},
+		secrets: []string{testKey},
+		inputs:  []string{"my-custom-model"},
+	}
+	res, err := ConfigureLLM(context.Background(), f, Options{})
+	if err != nil {
+		t.Fatalf("ConfigureLLM: %v", err)
+	}
+	if res.Model != "my-custom-model" {
+		t.Errorf("Model = %q, want the manually entered id", res.Model)
+	}
+	last := f.seenSelectItems[1][len(f.seenSelectItems[1])-1].Label
+	if last != otherModelLabel {
+		t.Errorf("model menu must end with %q, got %q", otherModelLabel, last)
+	}
+}
+
+// TestConfigureLLM_InjectedLookupEnv: consumers drive the env-key branch
+// deterministically in their own tests without touching the real environment.
+func TestConfigureLLM_InjectedLookupEnv(t *testing.T) {
+	withEnv(t, nil) // the package-level reader returns nothing
+	f := &fakePrompter{
+		t:        t,
+		selects:  []int{providerIdx(t, llmprovider.ProviderGemini), 0},
+		confirms: []bool{true},
+	}
+	res, err := ConfigureLLM(context.Background(), f, Options{
+		AllowEnv:  true,
+		LookupEnv: func(k string) string { return map[string]string{"GEMINI_API_KEY": testKey}[k] },
+	})
+	if err != nil {
+		t.Fatalf("ConfigureLLM: %v", err)
+	}
+	if res.APIKey != testKey {
+		t.Errorf("APIKey = %q, want the injected env value", res.APIKey)
+	}
+}
