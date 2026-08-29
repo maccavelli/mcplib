@@ -27,7 +27,11 @@ const maskGlyphs = 8
 // which every mcplib consumer with a wizard already depends on. Consumers with
 // a UI toolkit implement Prompter over it instead.
 type TextPrompter struct {
-	In  *os.File
+	// In is the input source. When it is an *os.File attached to a terminal,
+	// Secret uses raw mode for live masking; otherwise it degrades to a plain
+	// read. Accepting io.Reader rather than *os.File lets consumers inject a
+	// scripted reader in their own tests.
+	In  io.Reader
 	Out io.Writer
 
 	// reader is retained across prompts. A fresh bufio.Reader per call would
@@ -72,11 +76,21 @@ func (p *TextPrompter) flushErr() error {
 	return err
 }
 
-func (p *TextPrompter) in() *os.File {
+func (p *TextPrompter) in() io.Reader {
 	if p.In == nil {
 		return os.Stdin
 	}
 	return p.In
+}
+
+// inTTY returns the input as a terminal file descriptor, if it is one. Raw-mode
+// masking is only possible when it is.
+func (p *TextPrompter) inTTY() (*os.File, bool) {
+	f, ok := p.in().(*os.File)
+	if !ok {
+		return nil, false
+	}
+	return f, term.IsTerminal(int(f.Fd()))
 }
 
 // readLine reads one line. It returns io.EOF alongside any final partial line
@@ -275,13 +289,14 @@ func (p *TextPrompter) Secret(prompt string) (string, error) {
 }
 
 func (p *TextPrompter) secretOnce(prompt string) (string, error) {
-	fd := int(p.in().Fd())
-	if !term.IsTerminal(fd) {
-		// Not a TTY (piped input, CI, a test): read plainly. Nothing is
-		// echoed by us, so there is no masking to do.
+	f, isTTY := p.inTTY()
+	if !isTTY {
+		// Not a terminal (piped input, CI, an injected reader): read plainly.
+		// Nothing is echoed by us, so there is no masking to do.
 		p.printf("%s: ", prompt)
 		return p.readLine()
 	}
+	fd := int(f.Fd())
 
 	state, err := term.MakeRaw(fd)
 	if err != nil {
@@ -303,7 +318,7 @@ func (p *TextPrompter) secretOnce(prompt string) (string, error) {
 	var entered []rune
 	buf := make([]byte, 1)
 	for {
-		n, readErr := p.in().Read(buf)
+		n, readErr := f.Read(buf)
 		if readErr != nil || n == 0 {
 			p.printf("\n")
 			return string(entered), readErr
