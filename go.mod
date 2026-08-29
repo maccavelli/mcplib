@@ -5,6 +5,7 @@ go 1.26.5
 require (
 	github.com/invopop/jsonschema v0.14.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	golang.org/x/term v0.43.0
 )
 
 require (
