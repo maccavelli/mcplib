@@ -65,6 +65,12 @@ var descriptorSpecs = []struct {
 		defaultBaseURL: kiloBaseURL, supportsBaseURL: true, requiresAPIKey: true,
 		notes: "free models available",
 	},
+	{
+		id: ProviderOllama, label: "Ollama (local)",
+		defaultBaseURL: ollamaBaseURL, supportsBaseURL: true, isLocal: true,
+		requiresAPIKey: false,
+		notes:          "runs on your machine; no API key",
+	},
 }
 
 // Descriptors returns every provider a configuration UI may offer, in menu

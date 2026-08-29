@@ -177,6 +177,11 @@ func StaticModels(provider string) []string {
 		return append([]string(nil), StaticHuggingFace...)
 	case ProviderKilo:
 		return append([]string(nil), StaticKilo...)
+	case ProviderOllama:
+		// Installed models are machine-specific, so there is no meaningful
+		// static catalog. listOllamaModels is the only sensible source, and
+		// ConfigureLLM tolerates an empty catalog for exactly this case.
+		return nil
 	default:
 		return nil
 	}
