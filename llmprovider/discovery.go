@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,6 +34,8 @@ func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts 
 		return listGrokModels(ctx, apiKey, cfg)
 	case ProviderOpencodeZen, ProviderOpencodeGo:
 		return listOpencodeModels(ctx, strings.ToLower(providerName), apiKey, cfg)
+	case ProviderHuggingFace:
+		return listHuggingFaceModels(ctx, apiKey, cfg)
 	case "ollama":
 		return listOllamaModels(ctx, cfg)
 	default:
@@ -353,6 +357,118 @@ func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg Provide
 		isUsableOpencodeModel, RankOpencodeModel)
 	if len(curated) == 0 {
 		return StaticModels(gateway), nil
+	}
+	return curated, nil
+}
+
+// onlyText reports whether a modality list is exactly ["text"].
+func onlyText(mods []string) bool { return len(mods) == 1 && mods[0] == jsonKeyText }
+
+// listHuggingFaceModels fetches the router catalog and curates it using the
+// metadata Hugging Face publishes. The endpoint is PUBLIC (200 with no
+// credential, verified 2026-08-29), so the Authorization header is optional.
+//
+// Unlike every other provider in this package, ranking here uses measured
+// figures rather than name heuristics: the listing reports throughput
+// (tokens/sec) and first_token_latency_ms per provider offering. The sorted
+// order is handed to curateFromCatalog with a nil rankFn, which preserves it.
+func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+	baseURL := huggingFaceBaseURL
+	if cfg.BaseURL != "" {
+		baseURL = strings.TrimRight(cfg.BaseURL, "/")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	if err != nil {
+		return StaticModels(ProviderHuggingFace), nil
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := cfg.HTTPClient.Do(req)
+	if err != nil {
+		return StaticModels(ProviderHuggingFace), nil
+	}
+	defer closeResponseBody(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return StaticModels(ProviderHuggingFace), nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID           string `json:"id"`
+			Architecture struct {
+				InputModalities  []string `json:"input_modalities"`
+				OutputModalities []string `json:"output_modalities"`
+			} `json:"architecture"`
+			Providers []struct {
+				Status              string  `json:"status"`
+				SupportsTools       bool    `json:"supports_tools"`
+				Throughput          float64 `json:"throughput"`
+				FirstTokenLatencyMs float64 `json:"first_token_latency_ms"`
+			} `json:"providers"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return StaticModels(ProviderHuggingFace), nil
+	}
+
+	type scored struct {
+		id   string
+		tps  float64
+		ttft float64
+	}
+	var ranked []scored
+	for _, m := range result.Data {
+		if !onlyText(m.Architecture.InputModalities) || !onlyText(m.Architecture.OutputModalities) {
+			continue
+		}
+		if !isUsableHuggingFaceModel(m.ID) {
+			continue
+		}
+		best := scored{id: m.ID, ttft: math.MaxFloat64}
+		live := false
+		for _, pr := range m.Providers {
+			if pr.Status != "live" {
+				continue
+			}
+			live = true
+			if pr.Throughput > best.tps {
+				best.tps = pr.Throughput
+			}
+			if pr.FirstTokenLatencyMs > 0 && pr.FirstTokenLatencyMs < best.ttft {
+				best.ttft = pr.FirstTokenLatencyMs
+			}
+		}
+		if live {
+			ranked = append(ranked, best)
+		}
+	}
+	// Fastest first; ties broken by lowest time-to-first-token.
+	slices.SortStableFunc(ranked, func(a, b scored) int {
+		switch {
+		case a.tps > b.tps:
+			return -1
+		case a.tps < b.tps:
+			return 1
+		case a.ttft < b.ttft:
+			return -1
+		case a.ttft > b.ttft:
+			return 1
+		}
+		return 0
+	})
+	available := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		available = append(available, r.id)
+	}
+
+	// nil rankFn preserves the metadata-derived order above.
+	curated := curateFromCatalog(StaticHuggingFace, available, isUsableHuggingFaceModel, nil)
+	if len(curated) == 0 {
+		return StaticModels(ProviderHuggingFace), nil
 	}
 	return curated, nil
 }

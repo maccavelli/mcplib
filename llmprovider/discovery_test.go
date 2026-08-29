@@ -313,3 +313,86 @@ func TestListAvailableModels_OpencodeFallback(t *testing.T) {
 		t.Fatal("expected static catalog fallback")
 	}
 }
+
+// hfListingFixture mirrors the real /v1/models shape. It deliberately contains
+// a vision-language model, a model whose only provider is not live, and three
+// text models with differing throughput so ordering can be asserted.
+const hfListingFixture = `{"object":"list","data":[
+ {"id":"org/vlm","architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":999,"first_token_latency_ms":10}]},
+ {"id":"org/not-live","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"queued","supports_tools":true,"throughput":888,"first_token_latency_ms":10}]},
+ {"id":"org/slow","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":50,"first_token_latency_ms":900}]},
+ {"id":"org/fast","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":300,"first_token_latency_ms":100}]},
+ {"id":"org/mid","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":150,"first_token_latency_ms":400}]}]}`
+
+// TestListHuggingFaceModels_MetadataCuration proves the curation is driven by
+// published metadata rather than name heuristics: vision-language and non-live
+// models are dropped, and survivors come back fastest-first. The ordering
+// assertion also proves the nil rankFn preserves the caller's order.
+func TestListHuggingFaceModels_MetadataCuration(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(hfListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderHuggingFace, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("ListAvailableModels: %v", err)
+	}
+	for _, m := range models {
+		if m == "org/vlm" {
+			t.Error("vision-language model must be dropped via architecture.input_modalities")
+		}
+		if m == "org/not-live" {
+			t.Error("model with no live provider must be dropped")
+		}
+	}
+	want := []string{"org/fast", "org/mid", "org/slow"}
+	if len(models) != len(want) {
+		t.Fatalf("got %v, want %v", models, want)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Fatalf("order = %v, want %v (descending throughput; nil rankFn must preserve it)", models, want)
+		}
+	}
+}
+
+// TestListHuggingFaceModels_NoToken pins that the router's /v1/models endpoint
+// is public: the handler fails the test if a credential is sent.
+func TestListHuggingFaceModels_NoToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("Authorization must not be sent with an empty token: %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(hfListingFixture))
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderHuggingFace, "", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("listing with no token must succeed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected non-empty list with no credential")
+	}
+}
+
+func TestListAvailableModels_HuggingFaceFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	models, err := ListAvailableModels(context.Background(), ProviderHuggingFace, "k", WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("fallback must not error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected static catalog fallback")
+	}
+}

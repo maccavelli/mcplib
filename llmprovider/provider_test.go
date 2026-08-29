@@ -94,7 +94,7 @@ func TestGenerateItemsWithRetry_NonRetryable(t *testing.T) {
 func TestNewProvider(t *testing.T) {
 	providers := []string{
 		ProviderGemini, ProviderClaude, ProviderOpenAI, ProviderGrok,
-		ProviderOpencodeZen, ProviderOpencodeGo,
+		ProviderOpencodeZen, ProviderOpencodeGo, ProviderHuggingFace,
 	}
 	for _, p := range providers {
 		prov, err := NewProvider(p, "test-key", "model-x")

@@ -176,7 +176,8 @@ func TestProviderConstants_Distinct(t *testing.T) {
 // D2. Phases 5 and 6 add their constants to this table.
 func TestWireShapesProbedOn(t *testing.T) {
 	pins := map[string]string{
-		"opencode": wireShapesProbedOnOpencode,
+		"opencode":    wireShapesProbedOnOpencode,
+		"huggingface": wireShapesProbedOnHuggingFace,
 	}
 	for name, pin := range pins {
 		t.Run(name, func(t *testing.T) {

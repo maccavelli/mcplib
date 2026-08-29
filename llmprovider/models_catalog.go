@@ -78,6 +78,19 @@ var (
 		"grok-4.6",          // responses
 	}
 
+	// StaticHuggingFace: fallback only — discovery is metadata-driven. Every ID
+	// confirmed present in GET https://router.huggingface.co/v1/models on
+	// 2026-08-29, text->text, tool-capable, and served by >= 4 partner providers
+	// (redundancy is the best available proxy for durability in an open catalog).
+	StaticHuggingFace = []string{
+		"openai/gpt-oss-20b",                 // 7 providers, 763 tok/s, $0.50/M out
+		"openai/gpt-oss-120b",                // 11 providers, 1106 tok/s, $0.75/M out
+		"meta-llama/Llama-3.1-8B-Instruct",   // 4 providers, cheapest at $0.06/M out
+		"zai-org/GLM-5.3-Flash",              // 5 providers, 144 tok/s
+		"deepseek-ai/DeepSeek-V4-Flash-0731", // 5 providers, all tool-capable
+		"zai-org/GLM-5.2",                    // 8 providers
+	}
+
 	// StaticGrok: fast/flagship models first.
 	StaticGrok = []string{
 		"grok-3-mini-fast",
@@ -103,6 +116,8 @@ const (
 	denyImage   = "image"
 	denyAudio   = "audio"
 	denyPreview = "preview"
+	denyTTS     = "tts"
+	denyOmni    = "omni"
 )
 
 var geminiDenySubstrings = []string{
@@ -144,6 +159,8 @@ func StaticModels(provider string) []string {
 		return append([]string(nil), StaticOpencodeZen...)
 	case ProviderOpencodeGo:
 		return append([]string(nil), StaticOpencodeGo...)
+	case ProviderHuggingFace:
+		return append([]string(nil), StaticHuggingFace...)
 	default:
 		return nil
 	}
@@ -162,7 +179,7 @@ func staticOpencodeCatalog(gateway string) []string {
 // the gateway catalogs (e.g. deepseek-v4-flash-vision-exp, mimo-v2-omni,
 // hy3-preview on OpenCode Go).
 var opencodeDenySubstrings = []string{
-	denyVision, denyImage, denyEmbed, "tts", denyAudio, "omni", denyPreview, "-exp",
+	denyVision, denyImage, denyEmbed, denyTTS, denyAudio, denyOmni, denyPreview, "-exp",
 }
 
 // isUsableOpencodeModel filters gateway model IDs to production text models.
@@ -486,6 +503,58 @@ func RankGrokModel(m string) int {
 		score += 40
 	case strings.HasPrefix(sm, "grok-3"):
 		score += 30
+	}
+	return score
+}
+
+// splitHuggingFaceModelPolicy splits a router model id into its bare
+// "<org>/<name>" and an optional provider-selection policy suffix
+// (":fastest", ":cheapest", ":preferred", or a partner name like ":groq").
+// The split is at the LAST colon, and only when the suffix contains no "/",
+// because org and model names may not contain colons but the policy always
+// follows one.
+//
+// NOTE: this is Hugging Face-specific. Kilo model ids may legitimately END in
+// ":free" (tencent/hy3:free), so Kilo must NOT use this helper.
+func splitHuggingFaceModelPolicy(id string) (base, policy string) {
+	i := strings.LastIndex(id, ":")
+	if i < 0 || strings.Contains(id[i+1:], "/") {
+		return id, ""
+	}
+	return id[:i], id[i+1:]
+}
+
+// isUsableHuggingFaceModel filters router model IDs to production text models.
+// Modality filtering happens in listHuggingFaceModels from published metadata;
+// this catches the static-catalog path where no metadata is available.
+func isUsableHuggingFaceModel(id string) bool {
+	base, _ := splitHuggingFaceModelPolicy(strings.TrimSpace(id))
+	sm := strings.ToLower(base)
+	if sm == "" || !strings.Contains(sm, "/") {
+		return false
+	}
+	for _, deny := range []string{denyVision, "-vl-", denyEmbed, denyTTS, "whisper", "flux", "stable-diffusion"} {
+		if strings.Contains(sm, deny) {
+			return false
+		}
+	}
+	return true
+}
+
+// RankHuggingFaceModel is a weak, name-based fallback used only when the live
+// listing is unavailable and the static catalog is in play. The primary ranking
+// path uses published throughput and latency; see listHuggingFaceModels.
+func RankHuggingFaceModel(m string) int {
+	sm := strings.ToLower(m)
+	score := 0
+	switch {
+	case strings.Contains(sm, "-20b"), strings.Contains(sm, "8b"), strings.Contains(sm, "flash"):
+		score += 150
+	case strings.Contains(sm, "-120b"), strings.Contains(sm, "70b"):
+		score += 80
+	}
+	if strings.Contains(sm, "thinking") || strings.Contains(sm, "-r1") {
+		score -= 100 // reasoning-heavy; slow for hook latency
 	}
 	return score
 }
