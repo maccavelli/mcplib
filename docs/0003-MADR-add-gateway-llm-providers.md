@@ -1346,6 +1346,19 @@ conflation this section exists to prevent.
 
 ## Open Questions
 
+> **Status after implementation (2026-08-29).** The `live_gateways` suite runs green
+> against all four gateways, which closes the shape questions it covers. Q9 is closed. Q1,
+> Q2, Q3 and Q10 could **not** be closed: credentialed probing from the implementation
+> environment did not carry the key to `curl` (the Go live tests do get it), so answering
+> them would have meant guessing. They remain open and are recorded as such rather than
+> assumed. No code depends on an unanswered one — each has a documented default.
+>
+> Confirmed live on 2026-08-29 by the suite: OpenCode routes are still **not**
+> interchangeable (the measurement the 63+26-row table rests on); Kilo still emits
+> `message.reasoning`; Kilo still publishes `supported_parameters` with `tools`; Hugging
+> Face still publishes all four curation fields; and all four `/models` endpoints still
+> answer `200` with no credential.
+
 These could not be resolved without a funded API key and must be closed during
 implementation, before the corresponding tests are claimed as passing.
 
@@ -1388,8 +1401,11 @@ $0.10 monthly credit, so these are cheaper to close than the OpenCode set):
 key, against `kilo-auto/free`, and should be closed during implementation rather than
 deferred):
 
-9. Does Kilo send `Retry-After` with `429`? Reachable free-of-charge by driving
-   `kilo-auto/free` until the free tier limits. Determines only what the test fixture
+9. **CLOSED 2026-08-29: no.** Kilo's `429` carries no `Retry-After`, matching OpenCode.
+   `RateLimitError.RetryAfter` is therefore `0` and `GenerateWithRetry` uses its
+   exponential-with-jitter path — the behaviour already implemented, no code change.
+   ~~Does Kilo send `Retry-After` with `429`? Reachable free-of-charge by driving
+   `kilo-auto/free` until the free tier limits.~~ Determines only what the test fixture
    asserts, not the code path.
 10. Does a paid model return the documented `402 Insufficient balance` with an exhausted
     balance, or the `401 PAID_MODEL_AUTH_REQUIRED` envelope seen with no credential at all?

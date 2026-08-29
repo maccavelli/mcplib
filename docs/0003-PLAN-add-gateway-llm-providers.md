@@ -2250,21 +2250,36 @@ rather than failing.
 
 | Test | Target | Credential | Asserts |
 |---|---|---|---|
-| `TestLive_OpencodeChatCompletions` | `hy3-free` on Zen | none | non-empty `OutputText()` |
-| `TestLive_OpencodeResponses` | `muse-spark-1.2-contributor-free` | none | `MessageItem` present; `Route()` is `OpencodeRouteResponses` |
+| `TestLive_OpencodeChatCompletions` | `hy3-free` on Zen | `OPENCODE_API_KEY` or skip (D3) | non-empty `OutputText()` |
+| `TestLive_OpencodeResponses` | `muse-spark-1.2-contributor-free` | `OPENCODE_API_KEY` or skip (D3) | `MessageItem` present; `Route()` is `OpencodeRouteResponses` |
 | `TestLive_KiloChatCompletions` | `kilo-auto/free` | none | non-empty `OutputText()` |
 | `TestLive_KiloToolCall` | `kilo-auto/free` | none | **a `FunctionCallItem` with parseable JSON arguments** |
 | `TestLive_HuggingFaceChatCompletions` | `openai/gpt-oss-20b` | `HF_TOKEN` or skip | non-empty `OutputText()` |
-| **`TestLive_OpencodeRouteStillEnforced`** | `muse-spark-1.2-contributor-free` | none | `/responses` still `200` **and** `/chat/completions` still fails — the measurement the entire 63+26-row route table rests on |
+| **`TestLive_OpencodeRouteStillEnforced`** | `muse-spark-1.2-contributor-free` | `OPENCODE_API_KEY` or skip (D3) | `/responses` still `200` **and** `/chat/completions` still fails — the measurement the entire 63+26-row route table rests on |
 | **`TestLive_KiloReasoningSpelling`** | `kilo-auto/free` | none | `choices[0].message.reasoning` is still the emitted spelling (not `reasoning_content`), pinning the dual-name decoder |
 | **`TestLive_KiloSupportedParameters`** | `GET /models` | none | entries still publish `supported_parameters`, containing `tools` for the gated models |
 | **`TestLive_HuggingFaceMetadataFields`** | `GET /v1/models` | none | the four curation fields are still **present in the schema**: `architecture.output_modalities` on every model, and `throughput` / `first_token_latency_ms` / `supports_tools` on **at least one live offering of at least one model**. Deliberately not universal — re-probed 2026-08-29, only **253 of 317** offerings carry all four, so asserting every offering would be flaky by construction |
 | **`TestLive_ListingsNeedNoCredential`** | all four `GET …/models` | none | each still answers `200` with **no** `Authorization` header |
 
 `TestLive_KiloToolCall` is the **only** end-to-end tool-calling coverage in this change —
-OpenCode's free models refuse tool requests and Hugging Face has no free tier. Because
-`NewOpencode` and `NewKilo` require a non-empty key, the credential-free tests pass a
-placeholder string; free models ignore auth (measured).
+OpenCode's free models refuse tool requests and Hugging Face has no free tier.
+
+~~Because `NewOpencode` and `NewKilo` require a non-empty key, the credential-free tests
+pass a placeholder string; free models ignore auth (measured).~~
+
+> **Amended 2026-08-29 — deviation D3.** That is true of **Kilo only**. Measured:
+>
+> | Request | Result |
+> |---|---|
+> | OpenCode free model, **no** `Authorization` header | `200` |
+> | OpenCode free model, **bogus** Bearer | `401 "Invalid API key."` |
+> | Kilo free model, **bogus** Bearer | `200` |
+>
+> The original measurement of OpenCode's free models used **no header**; generalising it to
+> "ignores auth" was wrong. A bogus key is strictly worse there than none, and
+> `NewOpencode` requires a non-empty key and always sends it. The three OpenCode live tests
+> therefore **skip unless `OPENCODE_API_KEY` is set**, matching the Hugging Face row.
+> Kilo's four tests remain credential-free.
 
 > **Known caveat, stated rather than worked around:** these depend on third-party services
 > being up and on free-tier capacity. That is exactly why they are build-tagged and
@@ -2523,4 +2538,5 @@ through or annotated rather than rewritten.
 | Date | Phase/Step | Finding | Resolution | Files added to scope |
 |---|---|---|---|---|
 | 2026-08-29 | **D1** — Phase 1, Step 1.1 | `make lint` fails the Phase 1 gate: `unused` flags all 7 new JSON-key constants, because the plan's own code blocks first use them in Phases 2/3/6. Two — `jsonKeyToolCalls`, `jsonKeyReasoningContent` — are referenced **0 times in any phase**; `decodeChatCompletionsResponse` reads those fields via struct tags. Confirmed introduced, not pre-existing: `make lint` passes on the stashed tree. | Declare each constant in the phase that first uses it (still `constants.go`): `jsonRoleTool`+`jsonKeyMaxTokens`→Step 2.1, `jsonKeyReasoning`→Step 3.1, `jsonKeyToolChoice`+`jsonKeyReasoningEffort`→Step 6.1. **Drop** the two dead constants. Chosen over `//nolint:unused` so the linter keeps working and the dead constants are removed rather than suppressed. | none — Steps 1.1, 2.1, 3.1, 6.1 amended |
+| 2026-08-29 | **D3** — Phase 7, Step 7.1 | Step 7.1 asserted OpenCode's free models "ignore auth", so the live tests could pass a placeholder key. False: measured, OpenCode returns `200` with **no** `Authorization` header but `401 "Invalid API key."` with a bogus one. The original measurement used no header and was wrongly generalised. `NewOpencode` requires a non-empty key and always sends it, so all three OpenCode live tests failed `401`, including the route-enforcement assertion that protects the 63+26-row table. Kilo is unaffected — it genuinely ignores a bogus key (`200`). | The three OpenCode live tests skip unless `OPENCODE_API_KEY` is set, matching the Hugging Face row. Chosen over relaxing `NewOpencode`'s non-empty-key contract (a design change diverging from `NewClaude`/`NewGrok`) and over bypassing the provider with raw HTTP (which would test the gateway rather than the integration). Accepted cost: route enforcement is only verified by someone holding an OpenCode key. | none — Step 7.1 amended |
 | 2026-08-29 | **D2** — Phase 1, Step 1.0 | Step 1.0's stated fix for `unused` on `wireShapesProbedOn*` — "reference it from the `live_gateways` suite" — cannot work: `.golangci.yml` sets no `build-tags`, so `//go:build live_gateways` files are never analysed. Would have recurred in Phases 5 and 6. | Reference each constant from a new **untagged** `TestWireShapesProbedOn` (Step 1.4, test 8) that validates it parses as `YYYY-MM-DD` and is not in the future. Chosen over `//nolint` (leaves the date unverified), exporting (grows public API for 12 repos to satisfy a linter), and adding repo-wide `build-tags` (changes lint config as a side effect of this feature). | none — Steps 1.0, 1.4 amended |
