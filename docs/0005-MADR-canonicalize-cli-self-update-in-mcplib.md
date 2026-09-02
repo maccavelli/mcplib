@@ -10,6 +10,10 @@ informed: all mcplib consumers
 
 <!-- markdownlint-disable MD013 MD024 -->
 
+> Paired with [0005-PLAN-canonicalize-cli-self-update-in-mcplib.md](0005-PLAN-canonicalize-cli-self-update-in-mcplib.md),
+> which is the authoritative record of the frozen API, phases, gates, and
+> execution evidence.
+
 ## Context and Problem Statement
 
 The four assessed repositories need one dependable CLI update capability, but they currently
@@ -836,6 +840,32 @@ running-image backup returns `ERROR_ACCESS_DENIED` rather than only
 is classified as `PendingBackup` with a cleanup receipt. Directory
 `ERROR_ACCESS_DENIED` on `File.Sync` remains an unsupported-sync no-op,
 not a failed install. The chosen option is unchanged.
+
+On 2026-09-02 the decision began shipping. `mcplib` v1.3.0 published the
+`selfupdate` package at commit `3e64e3078c875a3dc3ffe235952be9f76c1ac787`
+(Gate G1), and `prepare-commit-msg` became the first migrated consumer,
+deleting its `internal/selfupdate` package (Phase 6). The associated plan is
+consequently `in-progress`, not proposed; the 2026-09-01 and earlier 2026-09-02
+addenda above describe it as proposed because that was its state on their
+dates, and they are left as written.
+
+Two points of this record are superseded in detail, not in substance, by that
+implementation:
+
+* Plan Section 4 is the authoritative frozen API. The `Updater` sketch under
+  [Package Boundary](#package-boundary) above composes its collaborators as
+  public struct fields; the shipped API takes them through a `Config` value
+  passed to `New`, which that section's "exact identifiers may be refined in the
+  implementation plan" allowance permits. Ownership, seams, and the absence of a
+  convenience constructor that could hide security-relevant defaults are
+  unchanged.
+* The [Core State Machine](#core-state-machine) and
+  [Download and Verification Rules](#download-and-verification-rules) above
+  remain the rationale for the ordering; plan Sections 4.2 and 4.6 are the
+  implemented specification and are the text to change first if the order ever
+  needs to move.
+
+The chosen option is unchanged.
 
 ### Primary Research Sources
 

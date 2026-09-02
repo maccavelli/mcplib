@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: in-progress
 date: 2026-09-02
 associated-madr: 0005-MADR-canonicalize-cli-self-update-in-mcplib.md
 decision-makers: mcplib maintainers
@@ -174,6 +174,12 @@ The implementation shall follow these primary sources:
 Version selection for the new module dependencies is fixed as of 2026-09-02:
 golang.org/x/mod v0.40.0 and golang.org/x/sys v0.47.0. Both declare Go 1.25
 and therefore remain compatible with the Go 1.26.5 floor.
+
+The package also imports golang.org/x/term v0.43.0 in its terminal confirmer.
+That module was already a direct mcplib requirement at the Section 1.1 baseline
+`fc2c94db7817`, added by `wizard`, so no new module enters the graph. Section 22's
+go.sum rule is read as the pinned mcplib, x/mod, x/sys, and pre-existing x/term
+graph.
 
 ## 2. Goal, Scope, and Non-goals
 
@@ -964,6 +970,15 @@ Commit after all commands pass. Do not push.
 No unbounded remote body read exists, and an authorization header can reach
 only the configured API origin.
 
+### Deviation 2026-09-02 — file list narrower than planned
+
+**Found.** Commit `7652cbf` added every planned file but modified only
+`selfupdate/types.go`. `selfupdate/errors.go` needed no change because Phase 1
+already declared every sentinel this phase returns.
+
+**Decision.** Record the narrower list. No sentinel was added, renamed, or
+removed, so the Section 4.1 frozen error set is unaffected.
+
 ## 8. Phase 3 — Add Target Policy, Locking, Replacement, and Installers
 
 ### Files
@@ -1103,6 +1118,19 @@ Every apply failure has one tested rollback path; Windows comments describe
 native guarantees without calling the two-step operation atomic. A successful
 Windows update can retain only the reported, receipted running-image backup,
 and the next Begin proves deterministic cleanup.
+
+### Deviation 2026-09-02 — unlisted internal helper file
+
+**Found.** Commit `7e3d803` added `selfupdate/close.go`, which no phase file
+list names. It holds three unexported helpers shared by the session, cleanup,
+and replacement code: `joinClose`, `joinRemove`, and `openAbsFile`. The same
+commit also modified `selfupdate/assets.go` and `go.mod` — the x/sys v0.47.0
+requirement anticipated by Section 1.4 step 1 — while `selfupdate/errors.go`
+was again unchanged.
+
+**Decision.** Keep the file and record it here. Every symbol is unexported, so
+the Section 4 frozen public API is unaffected and no reviewed-plan change is
+required. Treat `selfupdate/close.go` as part of this phase's Files list.
 
 ## 9. Phase 4 — Add Coordinator, Text UX, and Public Examples
 
@@ -1451,6 +1479,17 @@ exact staged snapshot, and commit only if it passes. Do not push.
 
 The canary has one thin binding, no local release client/parser/downloader/
 replacer, and all prior update features now obey the canonical contract.
+
+### Deviation 2026-09-02 — modified test file name
+
+**Found.** Commit `9f887d3b7b47` modified `main_extra2_test.go`, not the
+`main_test.go` named in this phase's Modified list. The repository keeps its
+main-package coverage in numbered extra test files; `main_test.go` needed no
+change once the flag binding moved to `update.go`.
+
+**Decision.** Record the actual file. The phase's CLI matrix is covered by the
+new `update_test.go` (409 lines) plus the amended `main_extra2_test.go`; no
+matrix case was dropped.
 
 ## 13. Phase 7 — Migrate Magic Remote and Create the Bridge
 
@@ -2189,16 +2228,21 @@ these commits.
 
 Populate during approved implementation.
 
+Rows 0 through 6 were backfilled on 2026-09-02, after the fact. They were left
+at `pending` while the work landed, which breached Execution Contract rule 8;
+the correction and its limits are described in the retrospective note below the
+table. Rows from Phase 7 onward are populated as each phase executes.
+
 | Phase or gate | Status | Commit/release | Verification evidence | Deviation |
 |---|---|---|---|---|
-| 0 Decision artifacts | in progress | | PLAN status set to accepted; MADR remains accepted; filenames mirror; HEAD recorded as fc2c94db7817 | planning snapshot HEAD dc1221873b17 superseded by docs-only fc2c94d; no source anchors moved |
-| 1 Core policy | pending | | | |
-| 2 GitHub/download | pending | | | |
-| 3 Installers/native | pending | | | |
-| 4 Coordinator/UX | pending | | | |
-| 5 Shared release workflow | pending | | | |
+| 0 Decision artifacts | complete | f5b7771, dc12218, fc2c94d, 5afe26c | PLAN status set to accepted at 5afe26c; MADR accepted; filenames mirror; baseline HEAD recorded as fc2c94db7817 | planning snapshot HEAD dc1221873b17 superseded by docs-only fc2c94d; no source anchors moved |
+| 1 Core policy | complete | e21b997 | Added files match Section 6 exactly: 9 selfupdate files plus go.mod and go.sum; x/mod v0.40.0 added as a direct requirement | none |
+| 2 GitHub/download | complete | 7652cbf | Added files match Section 7 exactly, including both SHA256SUMS fixtures; only types.go was modified | Deviation 2026-09-02 in Section 7 — errors.go needed no change |
+| 3 Installers/native | complete | 7e3d803 | Added files match Section 8 plus the unlisted selfupdate/close.go; ci.yml moves validate to the ubuntu-24.04/macos-15/windows-2025 matrix and pins its actions to full SHAs; go.mod adds x/sys v0.47.0 | Deviation 2026-09-02 in Section 8 — unlisted internal helper file; assets.go and go.mod also modified |
+| 4 Coordinator/UX | complete | 1fbf36a | Added and modified files match Section 9 exactly, including example_test.go and the README entry | none |
+| 5 Shared release workflow | complete | 9c076e2 | Added files match Section 10 exactly: publish-selfupdate-release.yml, verify-selfupdate-release.sh, and its test harness; ci.yml, doc.go, and README modified | none |
 | G1 mcplib v1.3.0 | complete | tag v1.3.0 at 3e64e3078c875a3dc3ffe235952be9f76c1ac787; https://github.com/maccavelli/mcplib/releases/tag/v1.3.0 | main CI 33629927085 green (ubuntu-24.04, macos-15, windows-2025); tag CI 33630084419 green; `GOPROXY=https://proxy.golang.org go list -m github.com/maccavelli/mcplib@v1.3.0` resolved. Reusable workflow SHA is 3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`). | 2026-09-02: first push 9c076e2 failed (33628586778); wizard Ollama Confirm (pre-existing 33268493827); Windows dir sync ACCESS_DENIED, helper.exe, replacePath seam, backup-delete ACCESS_DENIED as PendingBackup. Fixes in 758209c and 3e64e30. |
-| 6 Prepare canary | pending | | | |
+| 6 Prepare canary | complete | prepare-commit-msg 9f887d3b7b47, authored 2026-09-02 07:48:42 -0500 | internal/selfupdate deleted (9 files, 1,363 lines); update.go and update_test.go added; go.mod pins github.com/maccavelli/mcplib v1.3.0 with no replace directive; ci.yml calls maccavelli/mcplib/.github/workflows/publish-selfupdate-release.yml@3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`), the exact G1 workflow SHA. `GOTOOLCHAIN=auto go test ./...` green on 2026-09-02 across 5 packages, with internal/selfupdate absent from the package list | Deviation 2026-09-02 in Section 12 — main_extra2_test.go modified instead of main_test.go |
 | 7 Magic bridge | pending | | | |
 | 8 Recall | pending | | | |
 | 9 MagicTools | pending | | | |
@@ -2206,6 +2250,37 @@ Populate during approved implementation.
 | 11 DuckDuckGo | pending | | | |
 | G2 product releases | pending authorization | | | |
 | 12 Deduplication/completion audit | pending | | | |
+
+### Retrospective note on rows 0 through 6
+
+Execution Contract rule 8 requires command output, commit IDs, and deviations to
+be recorded in this section *during* execution. That did not happen for Phases 0
+through 6: the rows stayed at `pending` while every one of those phases was
+committed, mcplib v1.3.0 was tagged, and prepare-commit-msg was migrated. The
+table above and the two Section 7/8 and one Section 12 deviation entries are a
+2026-09-02 reconstruction from the repositories themselves.
+
+What that reconstruction can and cannot establish:
+
+* It establishes the commits, their exact file lists, the published tag and its
+  SHA, the consumer's pinned module version and reusable-workflow SHA, and the
+  three file-list variances now recorded as deviations.
+* It does **not** recover the per-phase `go test`, `go vet`, `make lint`, or
+  `git diff --check` output those phases were required to capture, nor
+  prepare-commit-msg's `make verify`, `make verify-release`, and `rg` audit
+  output. That evidence was never written down and cannot be reconstructed after
+  the fact.
+* What replaces it is weaker but real: the G1 CI runs 33629927085 and
+  33630084419 exercised the cumulative Phase 1-5 tree green on ubuntu-24.04,
+  macos-15, and windows-2025, and a 2026-09-02 retrospective run of
+  `go build ./...`, `go vet ./selfupdate`, and `go test ./selfupdate` at
+  a9e8ad4 passed (`ok github.com/maccavelli/mcplib/selfupdate 1.556s`), as did
+  prepare-commit-msg's full suite at 9f887d3b7b47.
+
+Section 20 criterion 17 is therefore satisfied for the *commit* requirement but
+only partially for the *evidence* requirement on Phases 0 through 6. The Phase
+12 audit must state that limitation rather than claim per-phase evidence exists.
+Phases 7 onward record evidence as they run.
 
 Deferred Magic bridge cleanup is intentionally not an execution-record row; it
 requires the separately approved follow-up plan described in Section 19.
