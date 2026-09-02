@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-02
 associated-madr: 0007-MADR-restore-repository-context-in-the-reusable-release-workflow.md
 decision-makers: mcplib maintainers
@@ -152,6 +152,6 @@ Populate during execution.
 | Negative test of the guard | complete | (this commit) | The same test file was run against a scratchpad reconstruction of the pre-fix two-outcome guard. The two undiagnosed-failure cases **fail** there (it proceeds where it must refuse) and pass against the fix — including the exact CI string `failed to run git: fatal: not a git repository`. The tree was never modified | none |
 | Static workflow check | complete | (this commit) | `scripts/check-workflow-gh-repo.sh` asserts every repository-scoped `gh` step sets `GH_REPO`. Proven both ways: passes the real workflow, exits 1 on a fixture with **one** setting removed. Wired into mcplib CI beside the existing fixture test | the first version false-positived on the step *name* "Check **gh release** capabilities", which matched the command pattern; fixed by skipping `- name:` and comment lines |
 | Verification suite | complete | (this commit) | actionlint on both workflows; guard tests; static check; the untouched release-validator tests; shellcheck on all three new scripts; `go build`/`go vet`/`go test ./...`; `make lint`; `git diff --check` — all pass | none |
-| Gate: mcplib v1.4.1 | pending authorization | | | |
-| Repin six consumers | pending | | | |
-| Consumer release proves the path | pending | | | |
+| Gate: mcplib v1.4.1 | complete | tag v1.4.1 at 8d4d89ff34ff79c1ed65f223cc3d83b3ec0550aa | main CI green on ubuntu-24.04/macos-15/windows-2025; remote main verified equal to local HEAD before tagging; `go list -m github.com/maccavelli/mcplib@v1.4.1` resolves | none |
+| Repin six consumers | complete | prepare 8952222; magic-cli-remote ba19b2c; recall 6dab173; magictools a3358a5; socratic 4466310; duckduckgo f67d999 | All six now pin workflow `8d4d89f` (`# mcplib v1.4.1`); prepare-commit-msg moved from the older `3e64e30`, the other five from `3389f79`. Each verified `go build`/`go vet` clean; magic-cli-remote's actionlint output confirmed byte-identical to HEAD (two pre-existing shellcheck infos) | the **module** pin was also moved v1.4.0 -> v1.4.1 in all six. v1.4.0..v1.4.1 changes no Go code, but MADR 0005:421 requires the workflow commit and the module tag to be the same commit, so both move together |
+| Consumer release proves the path | complete | prepare-commit-msg v1.2.0; mcp-server-socratic-thinker v1.1.1 | **Both publish jobs succeeded.** prepare-commit-msg v1.2.0: immutable=true, draft=false, 6 exact binaries + SHA256SUMS, `sha256sum -c` all OK. socratic-thinker v1.1.1: immutable=true, 3 exact binaries + SHA256SUMS + both installers, `sha256sum -c` all OK, and its native smoke jobs passed. This is the first end-to-end proof of the canonical publication path | **the two earlier tags could not simply be re-run: a tag run resolves `uses:` from the tag's OWN tree, and `v1.1.4`/`v1.1.0` still pin the broken workflow (`3e64e30`/`3389f79`). Fresh tags were required.** They were left in place, not deleted, and produced no release. prepare-commit-msg was cut as **v1.2.0** per PLAN 0005 section 18 rather than reusing the patch-shaped v1.1.4; socratic-thinker took the next free patch, v1.1.1 |
