@@ -64,6 +64,10 @@ The plan was written against the following read-only snapshot:
 | mcp-server-socratic-thinker | ci/harden-release-pipeline | f62221a76ece | 1.26.5 | v1.2.0 | clean; two committed CI-hardening changes not on main |
 | mcp-server-duckduckgo | main | 9a312807504f | 1.26.5 | v1.2.0 | clean |
 
+The Go-directive column records each repository's floor as of the planning
+snapshot. Superseded 2026-09-02 by MADR/PLAN 0006, which raises every module to
+`go 1.26.6`; the snapshot values are left as written.
+
 The local toolchain was go1.26.5 darwin/arm64 except that prepare-commit-msg
 selected go1.26.6 from its module directive. The targeted tests in Section 1.2
 were rerun on 2026-09-02 and passed at these heads; Recall completed in 51.916s.
@@ -2126,7 +2130,8 @@ Do not delete old immutable release assets or tags.
 
 The plan is complete only when all statements are true:
 
-1. mcplib/selfupdate builds and tests with Go 1.26.5.
+1. ~~mcplib/selfupdate builds and tests with Go 1.26.5.~~ Superseded
+   2026-09-02 by MADR/PLAN 0006: builds and tests with Go 1.26.6.
 2. Every migrated executable exposes:
 
        update [--check] [--force] [--version vX.Y.Z] [--yes|-y]
@@ -2281,6 +2286,33 @@ Section 20 criterion 17 is therefore satisfied for the *commit* requirement but
 only partially for the *evidence* requirement on Phases 0 through 6. The Phase
 12 audit must state that limitation rather than claim per-phase evidence exists.
 Phases 7 onward record evidence as they run.
+
+### Deviation 2026-09-02 — Go floor raised to 1.26.6 and consumers repin v1.4.0
+
+**Found.** After Phase 6, `govulncheck` reported four reachable Go 1.26.5
+standard-library advisories in mcplib itself, all fixed in go1.26.6 and all in
+packages `selfupdate` depends on (`net/url`, `crypto/tls`, `encoding/asn1`,
+`net/http`). The condition is pre-existing and fleet-wide: `make vuln` failed on
+mcplib's unmodified tree, and fourteen of the workspace's fifteen modules
+declared `go 1.26.5`.
+
+**Decision.** Raise the floor rather than filter the check. Recorded as
+[MADR 0006](0006-MADR-raise-go-toolchain-floor-to-1-26-6.md) and
+[PLAN 0006](0006-PLAN-raise-go-toolchain-floor-to-1-26-6.md).
+
+**Effect on this plan.**
+
+* Global Acceptance criterion 1 becomes Go 1.26.6, struck through above.
+* Section 1.1's Go-directive column is a superseded snapshot, annotated above.
+* Remaining consumer phases 7-11 pin **mcplib v1.4.0**, not v1.3.0. Every
+  occurrence of "Pin mcplib v1.3.0" in Sections 13 through 17 is read as
+  v1.4.0; the no-replace-directive rule and the reusable-workflow SHA pin are
+  unchanged, and the workflow SHA remains the v1.3.0 commit
+  `3e64e3078c875a3dc3ffe235952be9f76c1ac787` unless PLAN 0006's Gate G1 moves
+  it.
+* Phase 6's prepare-commit-msg pin of v1.3.0 is bumped to v1.4.0 by PLAN 0006
+  Phase 6, not by re-opening this plan's Phase 6.
+* mcplib v1.3.0 is not rebuilt or replaced; it stays published and immutable.
 
 Deferred Magic bridge cleanup is intentionally not an execution-record row; it
 requires the separately approved follow-up plan described in Section 19.

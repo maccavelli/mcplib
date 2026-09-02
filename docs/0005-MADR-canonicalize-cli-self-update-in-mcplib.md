@@ -867,6 +867,19 @@ implementation:
 
 The chosen option is unchanged.
 
+On 2026-09-02 this record's compatibility floor was superseded. `govulncheck`
+reported four *reachable* Go 1.26.5 standard-library advisories in this very
+package — GO-2026-6218 (`net/url`), GO-2026-6090 (`crypto/tls`), GO-2026-5972
+(`encoding/asn1`), and GO-2026-5026 (`net/http`) — all fixed in go1.26.6, and
+all in packages the `selfupdate` client depends on directly. The sentence
+"The requested compatibility floor is Go 1.26.5" in Context and Problem
+Statement above records what was requested at the time and is left as written;
+the floor is now Go 1.26.6 by
+[MADR 0006](0006-MADR-raise-go-toolchain-floor-to-1-26-6.md). `mcplib` v1.3.0
+remains published, immutable, and built on 1.26.5; v1.4.0 carries the new floor
+and supersedes it. The self-update decision itself — canonical behavior behind
+policy and lifecycle seams — is unchanged.
+
 ### Primary Research Sources
 
 * [Go 1.26 release notes](https://go.dev/doc/go1.26)

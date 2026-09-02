@@ -289,9 +289,9 @@ Populate **during** execution.
 
 | Phase or gate | Status | Commit/release | Verification evidence | Deviation |
 |---|---|---|---|---|
-| 0 Decision artifacts | complete | (this commit) | both statuses set to accepted; filenames mirror; MADR links PLAN and PLAN links MADR; counts cross-checked against the workspace: 15 modules, 14 at go 1.26.5, 12 importing mcplib, 11 MOD_VERSION at 1.26.5 | none |
-| 1 Developer toolchain | pending | | | |
-| 2 mcplib floor + 0005 amendments | pending | | | |
+| 0 Decision artifacts | complete | bbdc65e | both statuses set to accepted; filenames mirror; MADR links PLAN and PLAN links MADR; counts cross-checked against the workspace: 15 modules, 14 at go 1.26.5, 12 importing mcplib, 11 MOD_VERSION at 1.26.5 | none |
+| 1 Developer toolchain | complete | no commit (environment) | go1.26.6 SDK installed to `~/.local/go1.26.6` by copying the GOSUMDB-verified module-cache toolchain `golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64`, avoiding a fresh download; `~/.local/bin/go` and `~/.local/bin/gofmt` repointed. `go version` = go1.26.6 darwin/arm64; `go env GOVERSION GOTOOLCHAIN GOROOT` = go1.26.6 / local / ~/.local/go1.26.6; `~/.local/go1.26.5` retained | plan named one symlink; two existed (`go` and `gofmt`), both repointed |
+| 2 mcplib floor + 0005 amendments | complete | (this commit) | `go.mod` 1.26.5 -> 1.26.6; `go mod tidy` left `go.sum` byte-identical (diff empty); `go build ./... && go vet ./... && go test ./...` green across all 8 packages; `make vuln` -> `No vulnerabilities found.` where the same tree reported Error 3 with 4 reachable advisories at 1.26.5 | mcplib has no Makefile `MOD_VERSION`, as recorded in Section 5 |
 | G1 mcplib v1.4.0 | pending authorization | | | |
 | 3 magic-cli-remote | pending | | | |
 | 4 PLAN 0005 MCP servers | pending | | | |
