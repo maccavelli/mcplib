@@ -2197,7 +2197,7 @@ Populate during approved implementation.
 | 3 Installers/native | pending | | | |
 | 4 Coordinator/UX | pending | | | |
 | 5 Shared release workflow | pending | | | |
-| G1 mcplib v1.3.0 | in progress | 9c076e2 pushed; tag blocked | CI 33628586778 failed: wizard Ollama Confirm (pre-existing on 33268493827) and Windows dir sync ACCESS_DENIED plus helper.exe | 2026-09-02: fix wizard tests, Windows unsupported dir sync, native helper .exe; then re-push and tag |
+| G1 mcplib v1.3.0 | complete | tag v1.3.0 at 3e64e3078c875a3dc3ffe235952be9f76c1ac787; https://github.com/maccavelli/mcplib/releases/tag/v1.3.0 | main CI 33629927085 green (ubuntu-24.04, macos-15, windows-2025); tag CI 33630084419 green; `GOPROXY=https://proxy.golang.org go list -m github.com/maccavelli/mcplib@v1.3.0` resolved. Reusable workflow SHA is 3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`). | 2026-09-02: first push 9c076e2 failed (33628586778); wizard Ollama Confirm (pre-existing 33268493827); Windows dir sync ACCESS_DENIED, helper.exe, replacePath seam, backup-delete ACCESS_DENIED as PendingBackup. Fixes in 758209c and 3e64e30. |
 | 6 Prepare canary | pending | | | |
 | 7 Magic bridge | pending | | | |
 | 8 Recall | pending | | | |
