@@ -2,7 +2,10 @@ package selfupdate
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -140,6 +143,25 @@ type Repository struct {
 	Owner string
 	// Name is the repository name.
 	Name string
+}
+
+// GitHubOptions construct a GitHubSource. There is no convenience constructor
+// that fills a client, token, or limits.
+type GitHubOptions struct {
+	// Repository is the GitHub owner/name pair.
+	Repository Repository
+	// Client is required. NewGitHubSource clones it and never mutates the
+	// caller's value.
+	Client *http.Client
+	// APIBaseURL is the GitHub API origin. Nil means https://api.github.com.
+	APIBaseURL *url.URL
+	// UserAgent is the required product/version User-Agent.
+	UserAgent string
+	// Token is an explicit GitHub token. Empty falls back to GH_TOKEN then
+	// GITHUB_TOKEN.
+	Token string
+	// Limits bound JSON, error, manifest, and executable bodies.
+	Limits Limits
 }
 
 // Release is one GitHub release after JSON decoding and field validation.
@@ -470,6 +492,13 @@ func DefaultLimits() Limits {
 		Manifest:    1 << 20,
 		Executable:  512 << 20,
 	}
+}
+
+func (l Limits) valid() error {
+	if l.ReleaseJSON <= 0 || l.ErrorBody <= 0 || l.Manifest <= 0 || l.Executable <= 0 {
+		return fmt.Errorf("selfupdate: limits must be positive")
+	}
+	return nil
 }
 
 // Config is the explicit Updater composition. There is no convenience
