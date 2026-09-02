@@ -253,6 +253,48 @@ Requires Gate G1.
 **Acceptance for Phases 3-6.** Every repository builds and tests green on
 go1.26.6; every `govulncheck` run recorded; no workflow file modified.
 
+### Deviation 2026-09-02 — reachable dependency advisories in two repositories
+
+**Found.** Phase 4 and Phase 5 require running `govulncheck` by hand in the
+repositories that have no gate. That surfaced reachable advisories in
+dependencies — not the standard library — in two of them:
+
+| Repository | Reachable | Dependency | Fixed in |
+|---|---|---|---|
+| mcp-server-duckduckgo | 7 | `x/net@v0.54.0` (6), `x/text@v0.37.0` (1) | v0.55.0 / v0.39.0 |
+| mcp-server-magicdev | 6 | `x/net@v0.54.0` (5), `x/text@v0.37.0` (1) | v0.55.0 / v0.39.0 |
+
+The `x/net` advisories are all in `x/net/html`: GO-2026-5030 (XSS via duplicate
+attributes), GO-2026-5028 (denial of service parsing arbitrary HTML), and
+GO-2026-5025/5027/5029 (parser correctness). duckduckgo parses untrusted HTML
+from the open web, so these are inside its threat model.
+
+**Pre-existing.** Confirmed, not caused by this plan: `git diff` on both
+`go.mod` files showed only the `go` directive line changed, `x/net v0.54.0` and
+`x/text v0.37.0` are present at each `HEAD` untouched, and `go mod tidy` left
+both `go.sum` files byte-identical. The advisories are in modules, so the
+toolchain raise neither introduced them nor could fix them. They were invisible
+because neither repository has a vulnerability gate. mcp-server-recall,
+mcp-server-magictools, and mcp-server-socratic-thinker require the same
+versions but do not reach the vulnerable code, and `govulncheck` cleared them.
+
+**Decision.** Fix now, chosen by the owner over deferring to a later plan.
+Upgrade both repositories to the versions magic-cli-remote already runs, in a
+commit **separate** from the floor raise so Execution Contract rule 7 remains
+intact and each concern stays independently revertible.
+
+**Files added to Phase 4 and Phase 5 scope.** `mcp-server-duckduckgo/go.mod`,
+`mcp-server-duckduckgo/go.sum`, `mcp-server-magicdev/go.mod`,
+`mcp-server-magicdev/go.sum`. A `go.sum` change in these two commits is expected
+and is explained by the dependency upgrade; rule 7 continues to apply everywhere
+else.
+
+**Not done, and why.** Neither repository gains a `govulncheck` gate. Adding
+vulnerability gates to repositories that lack them is explicitly out of this
+plan's scope, so nothing will catch a future regression in either repository
+until a separate plan adds one. That gap is recorded here rather than closed
+silently.
+
 ## 8. Phase 7 — Fleet Audit and Bump Procedure
 
 **Audit.** From the common parent directory:
@@ -293,9 +335,9 @@ Populate **during** execution.
 | 1 Developer toolchain | complete | no commit (environment) | go1.26.6 SDK installed to `~/.local/go1.26.6` by copying the GOSUMDB-verified module-cache toolchain `golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64`, avoiding a fresh download; `~/.local/bin/go` and `~/.local/bin/gofmt` repointed. `go version` = go1.26.6 darwin/arm64; `go env GOVERSION GOTOOLCHAIN GOROOT` = go1.26.6 / local / ~/.local/go1.26.6; `~/.local/go1.26.5` retained | plan named one symlink; two existed (`go` and `gofmt`), both repointed |
 | 2 mcplib floor + 0005 amendments | complete | (this commit) | `go.mod` 1.26.5 -> 1.26.6; `go mod tidy` left `go.sum` byte-identical (diff empty); `go build ./... && go vet ./... && go test ./...` green across all 8 packages; `make vuln` -> `No vulnerabilities found.` where the same tree reported Error 3 with 4 reachable advisories at 1.26.5 | mcplib has no Makefile `MOD_VERSION`, as recorded in Section 5 |
 | G1 mcplib v1.4.0 | pending authorization | | | |
-| 3 magic-cli-remote | pending | | | |
-| 4 PLAN 0005 MCP servers | pending | | | |
-| 5 Sibling modules | pending | | | |
+| 3 magic-cli-remote | complete | 3958bad | `go.mod` -> 1.26.6 and `scripts/test-linux-arm64.sh` -> `golang:1.26.6`; no `MOD_VERSION` in this repo; `go mod tidy` left `go.sum` byte-identical; `make pre-add-check FILES="go.mod scripts/test-linux-arm64.sh"` clean; `make vulncheck` -> 0 reachable; `make race` green across all packages; committed with `git commit --no-edit` per repository rule | plan named the target `make vuln`; it is `make vulncheck` in this repository |
+| 4 PLAN 0005 MCP servers | complete | recall fef172c; socratic-thinker 3e4499b; magictools e8b5dd7; duckduckgo (floor + dependency commits) | each: `go.mod` + `Makefile` -> 1.26.6, `go.sum` byte-identical, build/vet/test green. `govulncheck` clean for recall, magictools, socratic-thinker | magictools committed by pathspec to preserve the owner's staged `docs/0002-PLAN` file, which remains staged and untouched; duckduckgo carried the dependency deviation below; socratic-thinker edited on `ci/harden-release-pipeline` at f62221a per PLAN 0005 Section 16 |
+| 5 Sibling modules | complete | buntdb bd41487; brainstorm ff07ad5; evolve-plan 9d76d24; filesystem 20f8f46; go-modernizer dab536a; magicskills b025e1c; sequential-thinking ef5ba25; magicdev (floor + dependency commits) | all eight: build/vet/test green, `go.sum` byte-identical. `govulncheck` clean for seven | mcp-buntdb has no `Makefile` `MOD_VERSION`; magicdev carried the dependency deviation below |
 | 6 prepare-commit-msg repin | pending | | | |
 | 7 Audit and bump procedure | pending | | | |
 
