@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: complete
 date: 2026-09-02
 associated-madr: 0006-MADR-raise-go-toolchain-floor-to-1-26-6.md
 decision-makers: mcplib maintainers
@@ -333,13 +333,38 @@ Populate **during** execution.
 |---|---|---|---|---|
 | 0 Decision artifacts | complete | bbdc65e | both statuses set to accepted; filenames mirror; MADR links PLAN and PLAN links MADR; counts cross-checked against the workspace: 15 modules, 14 at go 1.26.5, 12 importing mcplib, 11 MOD_VERSION at 1.26.5 | none |
 | 1 Developer toolchain | complete | no commit (environment) | go1.26.6 SDK installed to `~/.local/go1.26.6` by copying the GOSUMDB-verified module-cache toolchain `golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64`, avoiding a fresh download; `~/.local/bin/go` and `~/.local/bin/gofmt` repointed. `go version` = go1.26.6 darwin/arm64; `go env GOVERSION GOTOOLCHAIN GOROOT` = go1.26.6 / local / ~/.local/go1.26.6; `~/.local/go1.26.5` retained | plan named one symlink; two existed (`go` and `gofmt`), both repointed |
-| 2 mcplib floor + 0005 amendments | complete | (this commit) | `go.mod` 1.26.5 -> 1.26.6; `go mod tidy` left `go.sum` byte-identical (diff empty); `go build ./... && go vet ./... && go test ./...` green across all 8 packages; `make vuln` -> `No vulnerabilities found.` where the same tree reported Error 3 with 4 reachable advisories at 1.26.5 | mcplib has no Makefile `MOD_VERSION`, as recorded in Section 5 |
-| G1 mcplib v1.4.0 | pending authorization | | | |
+| 2 mcplib floor + 0005 amendments | complete | 4098bc2 | `go.mod` 1.26.5 -> 1.26.6; `go mod tidy` left `go.sum` byte-identical (diff empty); `go build ./... && go vet ./... && go test ./...` green across all 8 packages; `make vuln` -> `No vulnerabilities found.` where the same tree reported Error 3 with 4 reachable advisories at 1.26.5 | mcplib has no Makefile `MOD_VERSION`, as recorded in Section 5 |
+| G1 mcplib v1.4.0 | complete | tag v1.4.0 at 3389f793e8fd6e697a3699fa8cb47dd50c2f951c | main pushed a9e8ad4..3389f79; CI run 33664733238 green on ubuntu-24.04, macos-15, windows-2025 for that exact commit; remote main verified equal to local HEAD before tagging; tag CI run 33665003808 green on all three runners; `GOPROXY=https://proxy.golang.org go list -m github.com/maccavelli/mcplib@v1.4.0` resolved | none; v1.3.0 left published and immutable |
 | 3 magic-cli-remote | complete | 3958bad | `go.mod` -> 1.26.6 and `scripts/test-linux-arm64.sh` -> `golang:1.26.6`; no `MOD_VERSION` in this repo; `go mod tidy` left `go.sum` byte-identical; `make pre-add-check FILES="go.mod scripts/test-linux-arm64.sh"` clean; `make vulncheck` -> 0 reachable; `make race` green across all packages; committed with `git commit --no-edit` per repository rule | plan named the target `make vuln`; it is `make vulncheck` in this repository |
 | 4 PLAN 0005 MCP servers | complete | recall fef172c; socratic-thinker 3e4499b; magictools e8b5dd7; duckduckgo (floor + dependency commits) | each: `go.mod` + `Makefile` -> 1.26.6, `go.sum` byte-identical, build/vet/test green. `govulncheck` clean for recall, magictools, socratic-thinker | magictools committed by pathspec to preserve the owner's staged `docs/0002-PLAN` file, which remains staged and untouched; duckduckgo carried the dependency deviation below; socratic-thinker edited on `ci/harden-release-pipeline` at f62221a per PLAN 0005 Section 16 |
 | 5 Sibling modules | complete | buntdb bd41487; brainstorm ff07ad5; evolve-plan 9d76d24; filesystem 20f8f46; go-modernizer dab536a; magicskills b025e1c; sequential-thinking ef5ba25; magicdev (floor + dependency commits) | all eight: build/vet/test green, `go.sum` byte-identical. `govulncheck` clean for seven | mcp-buntdb has no `Makefile` `MOD_VERSION`; magicdev carried the dependency deviation below |
-| 6 prepare-commit-msg repin | pending | | | |
-| 7 Audit and bump procedure | pending | | | |
+| 6 prepare-commit-msg repin | complete | ec255d7 | `go get github.com/maccavelli/mcplib@v1.4.0`; floor already 1.26.6 so no floor change; `make verify` green: coverage 83.7% against an 80.0% minimum, govulncheck `No vulnerabilities found.`, all six release binaries built | none |
+| 7 Audit and bump procedure | complete | (this commit) | All 15 modules declare `go 1.26.6`; `grep -rn 1.26.5` across every Makefile, script and workflow returns nothing; `docs/` and `scripts/` confirmed as the only non-module directories. Negative test: a scratch copy of `bootstrap-tools.sh` with `GO_VERSION="go1.26.99"` exited 1 with `expected go1.26.99, got go1.26.6`, and the real gate passes — the tree was never dirtied. Criterion 5 verified by inspecting all 21 commits: none touched a `.github/workflows/` file | none |
+
+### Verification of the Global Acceptance Criteria
+
+All nine criteria in Section 10 were confirmed on 2026-09-02:
+
+1. All 15 `go.mod` files declare `go 1.26.6`.
+2. `go version` reports go1.26.6 darwin/arm64; `go env GOTOOLCHAIN` reports `local`.
+3. `govulncheck` clean in mcplib (`make vuln`), magic-cli-remote (`make vulncheck`,
+   0 reachable), and prepare-commit-msg (inside `make verify`). Manual runs
+   recorded for all eight ungated modules; two required the dependency fix below
+   and are now clean.
+4. `make verify` is green in prepare-commit-msg, the only repository defining it.
+5. None of the 21 commits touched a `.github/workflows/` file, verified per commit.
+6. mcplib v1.4.0 resolves through the proxy and declares `go 1.26.6`.
+7. MADR 0005's floor assertion and PLAN 0005's criterion 1, baseline snapshot,
+   and v1.4.0 repin are recorded with the original text retained.
+8. No published release was rebuilt, replaced, or re-uploaded. mcplib v1.3.0 and
+   prepare-commit-msg v1.1.1-v1.1.3 remain exactly as published.
+9. Every mutating phase has one commit per touched repository and every phase's
+   evidence was recorded during execution, not backfilled.
+
+One item is deliberately **not** done and is not covered by any criterion:
+mcp-server-duckduckgo and mcp-server-magicdev still have no `govulncheck` gate,
+so nothing will catch a future dependency regression in either. Adding gates is
+out of this plan's scope; closing that gap needs a separate plan.
 
 ## 10. Global Acceptance Criteria
 
