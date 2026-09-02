@@ -1798,7 +1798,15 @@ recreate that work. At execution time, do exactly one of the following:
    every file below before editing.
 
 If neither condition is true, stop this phase and record the branch divergence
-in Section 23. The canonical immutable-release decision supersedes only local
+in Section 23.
+
+**Resolved 2026-09-02.** Condition 2 now applies. `ci/harden-release-pipeline`
+was merged to `origin/main` as a fast-forward at `3e4499b`, so this phase begins
+from a clean `main` that already contains the hardened workflow, the
+binary-only installers, MADR/PLAN 0001, and `go 1.26.6`. The repository has a
+second remote (`gitlab`) on a divergent lineage using the internal mcplib; the
+owner confirmed **GitHub is canonical**, so this phase targets `origin` only and
+must not reintroduce the GitLab module path. The canonical immutable-release decision supersedes only local
 MADR 0001's version-suffixed, dual-manifest, and `--clobber` publication
 details; its native testing, installer, cgo, timeout, and action-pinning work is
 retained.

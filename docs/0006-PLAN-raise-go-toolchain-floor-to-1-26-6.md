@@ -345,7 +345,9 @@ Populate **during** execution.
 
 All nine criteria in Section 10 were confirmed on 2026-09-02:
 
-1. All 15 `go.mod` files declare `go 1.26.6`.
+1. All 15 `go.mod` files declare `go 1.26.6`, on each repository's **canonical
+   published branch**, not merely in a local working tree. See the 2026-09-02
+   socratic-thinker deviation below.
 2. `go version` reports go1.26.6 darwin/arm64; `go env GOTOOLCHAIN` reports `local`.
 3. `govulncheck` clean in mcplib (`make vuln`), magic-cli-remote (`make vulncheck`,
    0 reachable), and prepare-commit-msg (inside `make verify`). Manual runs
@@ -381,6 +383,41 @@ out of this plan's scope; closing that gap needs a separate plan.
 8. No published release was rebuilt, replaced, or re-uploaded.
 9. Every mutating phase has one green commit per touched repository, and every
    phase's evidence was recorded during execution.
+
+### Deviation 2026-09-02 — socratic-thinker's floor was raised on a branch, not its mainline
+
+**Found.** Phase 4 raised mcp-server-socratic-thinker on
+`ci/harden-release-pipeline`, per PLAN 0005 Section 16's branch precondition.
+The Phase 7 audit then read the checked-out branch and reported the module at
+`go 1.26.6`, but `origin/main` was still `go 1.26.5`. The floor was committed
+where nothing published from, so acceptance criterion 1 was **not** met for this
+repository at the time it was reported met.
+
+**Why the audit missed it.** `grep -E '^go ' */go.mod` reads the working tree,
+which is whatever branch happens to be checked out. It cannot distinguish a
+value that has landed on the mainline from one parked on a branch. That is a
+gap in the audit method, not a one-off slip.
+
+**Also found.** The repository has two remotes on divergent lineages: the
+public GitHub `origin`, which depends on the public mcplib module, and a second
+remote on internal infrastructure, which depends on an internally hosted mcplib
+at a much older version. The branch tracked the internal remote, which rejected
+the push with HTTP 403. The owner confirmed GitHub is canonical. The internal
+host and group path are deliberately not recorded here: this file is published
+to a public repository.
+
+**Resolution.** The branch was already correctly based on `origin/main` — a
+rebase was verified to be a no-op, HEAD unchanged at `3e4499b`. Its upstream was
+retargeted from `gitlab` to `origin`, and `origin/main` was fast-forwarded to
+`3e4499b`, landing the CI hardening, the binary-only installers, MADR/PLAN 0001,
+and the Go floor raise together. Verified on `main` after the merge:
+`go build`/`go vet`/`go test ./...` clean, `./scripts/install_test.sh` 31 passed
+/ 0 failed, `govulncheck` reports no vulnerabilities, and `go.mod` declares
+`go 1.26.6`.
+
+**Audit method corrected.** Criterion 1 above now requires the canonical
+published branch. A future sweep must read `git show <canonical-ref>:go.mod`
+rather than the working tree.
 
 ## 11. Rollback and Recovery
 
