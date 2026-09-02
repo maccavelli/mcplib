@@ -1,0 +1,148 @@
+name: Publish self-update release
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Caller artifact containing the complete staged release
+        required: true
+        type: string
+      products-json:
+        description: JSON array of exact product basenames
+        required: true
+        type: string
+      platforms-json:
+        description: JSON array of objects with only os and arch
+        required: true
+        type: string
+      extra-assets-json:
+        description: JSON array of extra basenames; [] means none
+        required: true
+        type: string
+      bridge-release:
+        description: Permits the Magic Remote compatibility set only
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require a strict stable tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "publish-selfupdate-release: ref is not a tag" >&2
+            exit 1
+          fi
+          tag="${{ github.ref_name }}"
+          if ! printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "publish-selfupdate-release: $tag is not a strict stable tag" >&2
+            exit 1
+          fi
+
+      - name: Check gh release capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release verify --help >/dev/null
+          gh release view --json isImmutable --help >/dev/null
+
+      - name: Refuse an existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "publish-selfupdate-release: release $tag already exists (including drafts)" >&2
+            exit 1
+          fi
+
+      - name: Check out the called workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # job.workflow_repository / job.workflow_sha identify the called
+          # workflow commit. fromJSON(toJSON(job)) is required because
+          # actionlint v1.7.12's job type does not yet list those fields.
+          repository: ${{ fromJSON(toJSON(job)).workflow_repository }}
+          ref: ${{ fromJSON(toJSON(job)).workflow_sha }}
+          persist-credentials: false
+          path: .mcplib-release-tools
+
+      - name: Download the staged release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: staging
+
+      - name: Validate the staged file set
+        shell: bash
+        env:
+          PRODUCTS_JSON: ${{ inputs.products-json }}
+          PLATFORMS_JSON: ${{ inputs.platforms-json }}
+          EXTRAS_JSON: ${{ inputs.extra-assets-json }}
+          BRIDGE: ${{ inputs.bridge-release }}
+        run: |
+          set -euo pipefail
+          chmod +x .mcplib-release-tools/scripts/verify-selfupdate-release.sh
+          .mcplib-release-tools/scripts/verify-selfupdate-release.sh \
+            --dir staging \
+            --products "$PRODUCTS_JSON" \
+            --platforms "$PLATFORMS_JSON" \
+            --extras "$EXTRAS_JSON" \
+            --bridge "$BRIDGE" \
+            --tag "${{ github.ref_name }}" \
+            --repository "${{ github.repository }}"
+
+      - name: Create a draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          gh release create "$tag" --draft --verify-tag --generate-notes
+          # Upload the explicit validated file list. --clobber is forbidden.
+          # shellcheck disable=SC2046
+          gh release upload "$tag" $(find staging -type f -print | sort)
+
+      - name: Attest the staged files
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: staging/*
+
+      - name: Publish the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit "${{ github.ref_name }}" --draft=false
+
+      - name: Wait for immutability and release attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          deadline=$((SECONDS + 120))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            immutable=$(gh release view "$tag" --json isImmutable --jq .isImmutable || true)
+            if [ "$immutable" = "true" ] && gh release verify "$tag"; then
+              echo "publish-selfupdate-release: $tag is immutable and verified"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "publish-selfupdate-release: timed out waiting for immutability of $tag" >&2
+          exit 1

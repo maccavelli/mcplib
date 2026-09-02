@@ -11,4 +11,9 @@
 // entry. It does not prove publisher signature authenticity. Additional
 // Verifier implementations may be composed after that integrity check
 // without changing discovery, staging, or installation APIs.
+//
+// Consumers publish through the reusable workflow
+// .github/workflows/publish-selfupdate-release.yml at the exact mcplib
+// module-tag commit. That workflow is the only supported publication path
+// for the canonical asset contract.
 package selfupdate

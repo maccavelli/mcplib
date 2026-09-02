@@ -54,6 +54,17 @@ make -C scripts/go test-lib lint-lib
 
 There is no `build` / `install` / `vendor` target: this module is a library only.
 
+## Self-update releases
+
+`mcplib/selfupdate` is the shared CLI updater. Consumers publish GitHub
+Releases through the reusable workflow
+`.github/workflows/publish-selfupdate-release.yml`, pinned to the mcplib
+module tag's commit SHA. The workflow validates exact
+`<product>-<goos>-<goarch>[.exe]` assets plus `SHA256SUMS`, attests the
+staged files, and publishes only an immutable complete release. It never
+uses `--clobber`. Runtime verification is release-asset integrity, not
+publisher signature authenticity.
+
 ## When you change mcplib
 
 1. `make -C scripts/go/mcplib test lint`
