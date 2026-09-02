@@ -30,3 +30,8 @@ jobs:
       - name: verify self-update release fixtures
         if: runner.os == 'Linux'
         run: ./scripts/verify-selfupdate-release_test.sh
+
+      - name: Verify the release guard and its workflow contract
+        run: |
+          ./scripts/refuse-existing-release_test.sh
+          ./scripts/check-workflow-gh-repo.sh

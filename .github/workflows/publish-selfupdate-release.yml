@@ -50,22 +50,13 @@ jobs:
 
       - name: Check gh release capabilities
         shell: bash
+        # No GH_REPO here on purpose: these are --help probes, which resolve no
+        # repository. Every OTHER gh step in this workflow needs it, because
+        # the job never checks the calling repository out at top level.
         run: |
           set -euo pipefail
           gh release verify --help >/dev/null
           gh release view --json isImmutable --help >/dev/null
-
-      - name: Refuse an existing release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="${{ github.ref_name }}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "publish-selfupdate-release: release $tag already exists (including drafts)" >&2
-            exit 1
-          fi
 
       - name: Check out the called workflow commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +69,24 @@ jobs:
           persist-credentials: false
           path: .mcplib-release-tools
 
+      # Runs AFTER the tools checkout so it can call the shared script, and
+      # still BEFORE the artifact download and any release mutation. The logic
+      # lives in a script so its three outcomes are testable with a stubbed gh
+      # (MADR 0007); an inline copy would drift from the tested one.
+      - name: Refuse an existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          chmod +x .mcplib-release-tools/scripts/refuse-existing-release.sh
+          .mcplib-release-tools/scripts/refuse-existing-release.sh "${{ github.ref_name }}"
+
+      # No checkout of the CALLING repository is added here. actions/checkout
+      # defaults to clean: true, which removes untracked files, and staging/
+      # holds the downloaded, validated release assets. gh resolves the
+      # repository from GH_REPO instead (MADR 0007).
       - name: Download the staged release artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -107,6 +116,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="${{ github.ref_name }}"
@@ -124,6 +134,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           gh release edit "${{ github.ref_name }}" --draft=false
@@ -132,6 +143,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="${{ github.ref_name }}"
