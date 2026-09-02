@@ -49,7 +49,7 @@ func validatePlatformFields(p Platform) error {
 
 func exactAssetName(product string, platform Platform) string {
 	name := product + "-" + platform.OS + "-" + platform.Arch
-	if platform.OS == "windows" {
+	if platform.OS == goosWindows {
 		name += ".exe"
 	}
 	return name

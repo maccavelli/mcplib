@@ -299,6 +299,14 @@ type Target struct {
 	Dir string
 	// Base is the executable basename.
 	Base string
+
+	identity fileIdentity
+}
+
+type fileIdentity struct {
+	info  os.FileInfo
+	size  int64
+	mtime int64
 }
 
 // InstallRequest is the payload for InstallSession.Install.
@@ -376,6 +384,8 @@ type InstallOptions struct {
 // DefaultLockTimeout is the lock acquisition bound when InstallOptions leaves
 // LockTimeout unset.
 const DefaultLockTimeout time.Duration = 5 * time.Second
+
+const goosWindows = "windows"
 
 // EventKind is a structured progress event.
 type EventKind uint8
