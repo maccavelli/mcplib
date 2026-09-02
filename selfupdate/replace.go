@@ -90,5 +90,5 @@ func syncDirectory(dir string) error {
 }
 
 func isUnsupportedSync(err error) bool {
-	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOENT)
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOENT) || isUnsupportedDirSync(err)
 }

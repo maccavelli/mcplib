@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -40,7 +41,11 @@ func TestNativeReplaceRunningCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exe := filepath.Join(home, "helper")
+	helperName := "helper"
+	if runtime.GOOS == goosWindows {
+		helperName = "helper.exe"
+	}
+	exe := filepath.Join(home, helperName)
 	in, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)

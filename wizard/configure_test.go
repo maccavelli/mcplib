@@ -100,6 +100,10 @@ func TestConfigureLLM_LocalProviderSkipsKey(t *testing.T) {
 		// Two inputs: the endpoint, then the manual model id (Ollama has no
 		// static catalog, so the flow falls through to manual entry).
 		inputs: []string{"http://localhost:11434", "llama3.2:latest"},
+		// Unreachable Ollama (CI) asks to try a different endpoint. A running
+		// local daemon never issues that Confirm; leftover scripted answers
+		// are ignored.
+		confirms: []bool{false},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{AllowEnv: true})
 	if err != nil {
@@ -123,9 +127,10 @@ func TestConfigureLLM_LocalProviderSkipsKey(t *testing.T) {
 func TestConfigureLLM_NoModelsAndNoneEnteredErrors(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
-		t:       t,
-		selects: []int{providerIdx(t, llmprovider.ProviderOllama)},
-		inputs:  []string{"http://localhost:11434", ""},
+		t:        t,
+		selects:  []int{providerIdx(t, llmprovider.ProviderOllama)},
+		inputs:   []string{"http://localhost:11434", ""},
+		confirms: []bool{false},
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{}); err == nil {
 		t.Error("expected an error when no model is available and none is entered")

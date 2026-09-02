@@ -17,6 +17,10 @@ type applyResult struct {
 	oldDigest     string
 }
 
+func isUnsupportedDirSync(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}
+
 func replaceTarget(target Target, staging string) (applyResult, error) {
 	info, err := os.Lstat(target.Path)
 	if err != nil {

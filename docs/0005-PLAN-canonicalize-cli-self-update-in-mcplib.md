@@ -1306,6 +1306,10 @@ Wait for the exact pushed main commit to pass the Linux, macOS, and Windows CI
 jobs. Confirm that the remote main SHA equals the reviewed local HEAD. Only
 then, under the same explicit publication authorization, run:
 
+~~First push of `9c076e2` failed CI (run 33628586778).~~ See
+[Deviation 2026-09-02 — G1 CI failures](#deviation-2026-09-02--g1-ci-failures).
+A follow-up commit is required before tagging.
+
     test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/main | awk '{print $1}')"
     git tag -a v1.3.0 -m "mcplib v1.3.0"
     git push origin refs/tags/v1.3.0
@@ -1324,6 +1328,38 @@ Section 23. Every consumer calls the reusable workflow at that SHA, with a
 
 Do not move or overwrite the tag. If a defect is found after publication,
 revert on main and publish v1.3.1 after review.
+
+### Deviation 2026-09-02 — G1 CI failures
+
+**Found.** After pushing main at `9c076e22d1459e80fedc451a28f2f49cdbcec6a5`,
+CI run [33628586778](https://github.com/maccavelli/mcplib/actions/runs/33628586778)
+failed on ubuntu-24.04, macos-15, and windows-2025. `v1.3.0` was not created.
+
+1. Pre-existing: `wizard.TestConfigureLLM_LocalProviderSkipsKey` failed with
+   `unexpected Confirm("Try a different endpoint?")`. The same failure is on
+   origin/main run 33268493827 (2026-08-29). The test scripts an Ollama
+   endpoint at `http://localhost:11434` and does not answer the Confirm that
+   `resolveBaseURL` issues when `ValidateOllamaURL` fails. GitHub runners have
+   no Ollama; a developer machine with Ollama running does not take that
+   branch, which is why the test passed locally. The sibling
+   `TestConfigureLLM_NoModelsAndNoneEnteredErrors` uses the same endpoint.
+2. New in Phase 3: Windows `File.Sync` on a directory returns
+   `ERROR_ACCESS_DENIED`. `isUnsupportedSync` only treated `EINVAL`/`ENOENT`,
+   so standalone and managed installs failed. The native helper was named
+   `helper` without `.exe`, so `exec.Command` failed with
+   `executable file not found`.
+
+**Decision.** Fix both. Do not skip or loosen tests. Wizard change is
+test-only: script `Confirm` false so an unreachable endpoint continues. Windows:
+treat directory `ERROR_ACCESS_DENIED` as unsupported sync; `MoveFileEx`
+`WRITE_THROUGH` remains the durability path. Name the native helper
+`helper.exe` on Windows.
+
+**Files added to G1 scope.** `wizard/configure_test.go`;
+`selfupdate/replace.go`; `selfupdate/replace_unix.go`;
+`selfupdate/replace_windows.go`; `selfupdate/replace_test.go`;
+`selfupdate/replace_windows_test.go`; `selfupdate/replace_native_test.go`;
+this PLAN.
 
 ## 12. Phase 6 — Migrate prepare-commit-msg as the Standalone Canary
 
@@ -2153,7 +2189,7 @@ Populate during approved implementation.
 | 3 Installers/native | pending | | | |
 | 4 Coordinator/UX | pending | | | |
 | 5 Shared release workflow | pending | | | |
-| G1 mcplib v1.3.0 | pending authorization | | | |
+| G1 mcplib v1.3.0 | in progress | 9c076e2 pushed; tag blocked | CI 33628586778 failed: wizard Ollama Confirm (pre-existing on 33268493827) and Windows dir sync ACCESS_DENIED plus helper.exe | 2026-09-02: fix wizard tests, Windows unsupported dir sync, native helper .exe; then re-push and tag |
 | 6 Prepare canary | pending | | | |
 | 7 Magic bridge | pending | | | |
 | 8 Recall | pending | | | |

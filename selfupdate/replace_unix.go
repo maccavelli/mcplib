@@ -11,6 +11,10 @@ type applyResult struct {
 	backup string
 }
 
+func isUnsupportedDirSync(error) bool {
+	return false
+}
+
 func replaceTarget(target Target, staging string) (applyResult, error) {
 	info, err := os.Lstat(target.Path)
 	if err != nil {

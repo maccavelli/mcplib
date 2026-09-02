@@ -2,8 +2,10 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -82,5 +84,21 @@ func TestChmodStagingUsesPermOnly(t *testing.T) {
 	}
 	if st.Mode().Perm() != info.Mode().Perm() {
 		t.Fatalf("perm = %s, want %s", st.Mode().Perm(), info.Mode().Perm())
+	}
+}
+
+func TestSyncDirectoryOnTempRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := syncDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIsUnsupportedSync(t *testing.T) {
+	if !isUnsupportedSync(syscall.EINVAL) {
+		t.Fatal("EINVAL must be treated as unsupported directory sync")
+	}
+	if isUnsupportedSync(errors.New("boom")) {
+		t.Fatal("generic errors must remain fatal")
 	}
 }
