@@ -1,8 +1,8 @@
 ---
 status: accepted
-date: 2026-09-01
+date: 2026-09-02
 decision-makers: mcplib maintainers
-consulted: magic-cli-remote, mcp-server-recall, prepare-commit-msg, mcp-server-magictools
+consulted: magic-cli-remote, mcp-server-recall, prepare-commit-msg, mcp-server-magictools, mcp-server-socratic-thinker, mcp-server-duckduckgo
 informed: all mcplib consumers
 ---
 
@@ -312,7 +312,8 @@ files and native tests:
 * Unix: same-directory exclusive staging, synced content, a recoverable backup, atomic rename
   over the target, and directory sync where supported;
 * Windows: a documented Win32 replacement/move primitive through `golang.org/x/sys/windows`, a
-  backup and rollback path, and no claim stronger than the native API provides;
+  backup and rollback path, explicit reporting plus next-run cleanup when the active image keeps
+  that backup open after commit, and no claim stronger than the native API provides;
 * every OS: regular-file and basename validation, a per-target update lock, explicit symlink
   resolution policy, cleanup that cannot follow an attacker-chosen staging symlink, and a native
   test that updates a temporary copy while it is executing.
@@ -503,7 +504,9 @@ func (u *Updater) Run(ctx context.Context, request Request) (Result, error)
 func ExitCode(result Result, err error) int
 ```
 
-The standard constructor supplies the canonical policy:
+The exported component constructors and explicit `Updater` composition supply
+the canonical policy without hiding security-relevant choices in a single
+convenience constructor:
 
 * strict SemVer backed by `golang.org/x/mod/semver` with full-tag validation;
 * exact raw-binary platform asset selection;
@@ -546,7 +549,8 @@ validate request
   → snapshot lifecycle and stop only when managed
   → replace executable and retain rollback material
   → reconcile managed definition, start, and verify health
-  → commit by removing backup and releasing the stable lock
+  → commit by removing backup, or recording the narrowly classified Windows
+    running-image backup for next-run cleanup, and releasing the stable lock
 ```
 
 Every failure after staging removes the staging file. Once a managed service has been stopped,
@@ -589,8 +593,10 @@ The managed policy preserves Magic Remote's matrix:
 | Present | Running | Stop, replace, reconcile, start, wait healthy; rollback on failure |
 | Present | Down | Replace, reconcile, start, wait healthy; rollback on failure |
 
-Whether a failed definition reconcile is fatal is an explicit product policy. It is not hidden as
-a logged warning in the generic replacer.
+The canonical v1 policy treats a failed definition reconcile as fatal. Once a managed update has
+stopped a service, any stop, reconcile, start, or health failure enters the common binary and
+definition rollback path. This replaces Magic Remote's current best-effort reconcile behavior;
+it is not hidden as a logged warning in the generic replacer.
 
 ### Version and Build Identity
 
@@ -716,8 +722,9 @@ Compliance is confirmed by all of the following:
   malformed and duplicate checksum lines, GitHub digest mismatch, manifest mismatch, redirects,
   token-origin policy, timeouts, cancellation, cleanup, and rate-limit errors.
 * Filesystem tests cover symlinked invocation, differently named symlink target, staging collision,
-  concurrent updates, stale backup, permission denial, full disk/write failure, interrupted apply,
-  rollback failure, and package-manager target refusal.
+  concurrent updates, stale backup, Windows pending-backup receipt validation and cleanup,
+  permission denial, full disk/write failure, interrupted apply, rollback failure, and
+  package-manager target refusal.
 * Native Linux, macOS, and Windows tests update a temporary executable copy while it is running
   and verify old-or-new recoverability at every injected failure point.
 * Managed lifecycle tests cover the absent/running/down matrix, reconcile failure policy, failed
@@ -729,6 +736,10 @@ Compliance is confirmed by all of the following:
 * Recall's and MagicTools' update commands never start the MCP server or initialize its datastore
   merely to check or apply an update.
 * Recall's stdout remains JSON-RPC-clean according to its established redirection contract.
+* Socratic Thinker's update command starts no config watcher, Recall client, metrics store,
+  telemetry, dashboard, or MCP server merely to check or apply an update.
+* DuckDuckGo's update command creates no config/cache file and starts no datastore, browser,
+  search engine, tool registry, transport, or MCP server merely to check or apply an update.
 * `prepare-commit-msg --yes` is observably used, and a plain update no longer performs an
   unconfirmed replacement.
 * Magic Remote retains independent `mcremote`/`mcrelay` lifecycle behavior and no-unit binary-only
@@ -812,6 +823,13 @@ phases, release gates, and acceptance criteria. This addendum preserves the
 original decision rationale rather than retroactively presenting the two later
 adopters as part of the initial investigation.
 
+On 2026-09-02, the accepted decision and proposed plan were re-evaluated
+against all seven current working trees (mcplib plus six consumers). The
+targeted package tests passed again. The review fixed the managed-reconcile
+policy in this record and made the plan's lock transaction, immutable-release
+administrative gate, Magic Remote bridge filenames, and completion boundary
+explicit; it did not change the chosen option.
+
 ### Primary Research Sources
 
 * [Go 1.26 release notes](https://go.dev/doc/go1.26)
@@ -825,6 +843,7 @@ adopters as part of the initial investigation.
 * [GitHub REST API best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)
 * [GitHub REST API rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 * [GitHub immutable releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
+* [GitHub repository immutable-release REST endpoints](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository)
 * [GitHub artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 * [GitHub Actions secure-use reference](https://docs.github.com/en/actions/reference/security/secure-use)
 * [SLSA provenance distribution](https://slsa.dev/spec/draft/distributing-provenance)
@@ -865,18 +884,26 @@ adopters as part of the initial investigation.
 * `mcp-server-duckduckgo/Makefile`
 * `mcp-server-duckduckgo/.github/workflows/ci.yml`
 
-### Review Questions
+### Resolved Follow-on Decisions
 
-The proposed outcome is complete without answers to these questions, but reviewer decisions can
-change its trade-offs before acceptance:
+The implementation review completed on 2026-09-02 resolved the questions left open at initial
+acceptance without changing the selected architecture:
 
-* Should runtime authenticity verification be mandatory in the first shared release, and if so,
-  should the trust root be an embedded Ed25519 key, Sigstore identity policy, or TUF metadata?
-* Is exact `--version` sufficient authorization for a rollback, or should rollback additionally
-  require a distinct `--allow-downgrade` flag?
-* Which package-manager-owned paths or install markers must the default target policy refuse in
-  the first release?
-* Should a managed service-definition reconcile failure abort and roll back every product, or
-  remain an explicit per-product policy as proposed?
-* What support window is required before Magic Remote can remove its legacy `BASE.N` normalizer
-  and version-suffixed asset selector?
+* Runtime v1 verifies immutable GitHub release metadata, the GitHub asset digest when present,
+  and the exact `SHA256SUMS` entry. Build and immutable-release attestations are generated and
+  remain independently inspectable, but runtime attestation verification is deferred.
+* An exact lower `--version` is sufficient rollback intent. Apply still requires confirmation or
+  `--yes`; no separate `--allow-downgrade` flag is added.
+* The default target policy accepts a regular non-symlink executable beneath the current user's
+  canonical home directory. A consumer may add an explicit canonical absolute
+  operator-authorized root. The six
+  standard integrations add no system-package, Homebrew Cellar, Nix, Snap, Flatpak, Scoop,
+  Chocolatey, or WindowsApps root.
+* Every managed stop, definition reconcile, start, or health failure is fatal and enters the
+  shared rollback path. Rollback errors are joined with the initiating error.
+* Magic Remote's v0.16.0 bridge remains the latest release for at least 90 days. v0.17.0 is the
+  first proposed canonical-only release; the installed-version normalizer is removed only in a
+  later patch after v0.17.0 passes native update smoke.
+
+The associated plan fixes the exact API, limits, file changes, verification commands, release
+gates, and acceptance criteria that implement these decisions.

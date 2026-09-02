@@ -1,11 +1,11 @@
 ---
 status: proposed
-date: 2026-09-01
+date: 2026-09-02
 associated-madr: 0005-MADR-canonicalize-cli-self-update-in-mcplib.md
 decision-makers: mcplib maintainers
 ---
 
-# Implementation Plan: Canonicalize CLI Self-Update in mcplib
+# Implement Canonical CLI Self-Update in mcplib
 
 > Paired with [0005-MADR-canonicalize-cli-self-update-in-mcplib.md](0005-MADR-canonicalize-cli-self-update-in-mcplib.md).
 > This plan implements the shared Go package, the canonical release workflow,
@@ -29,17 +29,19 @@ Execution rules:
    Stop only for an overlapping change; preserve unrelated owner work exactly.
 3. Never commit a local replace directive for mcplib. Consumer work begins only
    after the mcplib version in Gate G1 is publicly resolvable.
-4. End every implementation phase with a green repository and one commit in
-   each repository touched by that phase.
+4. End every mutating implementation phase with a green repository and one
+   commit in each repository touched by that phase. Read-only gates and audits
+   record their evidence in Section 23 but do not manufacture empty commits.
 5. Do not push, create or move a tag, publish a release, enable release
    immutability, or open a pull request without explicit authorization in the
    same turn. Plan approval alone is not that authorization.
-6. In magic-cli-remote, run the repository wrapper
-   make pre-add-check with the phase's explicit changed-Go-file list before staging,
-   run make race before
-   the phase commit, and invoke git commit --no-edit. Do not pass -m.
-7. In the other repositories, run gofmt and per-file golint for every changed
-   Go file before staging, then the repository checks named by the phase.
+6. In magic-cli-remote, run `make pre-add-check` with the phase's explicit
+   changed-Go-file list before staging, run `make race` before the phase commit,
+   and invoke `git commit --no-edit`. Do not pass `-m`.
+7. In repositories that provide a Go pre-commit wrapper, run that wrapper for
+   every changed Go file. Otherwise run gofmt and per-file golint for every
+   changed Go file before staging. Then run the repository checks named by the
+   phase.
 8. Record command output, commit IDs, release URLs, deviations, and rollback
    actions in Section 23 during execution. Do not silently widen a phase.
 
@@ -54,8 +56,8 @@ The plan was written against the following read-only snapshot:
 
 | Repository | Branch | HEAD | Go directive | mcplib dependency | Working-tree note |
 |---|---|---|---|---|---|
-| mcplib | main | f5b7771dc8c6 | 1.26.5 | self | accepted MADR/PLAN 0005 committed; scope-extension edit only |
-| magic-cli-remote | master | 4ab9d63268df | 1.26.5 | none | clean; newer commit changes only mobile notification files and MADR 0129 |
+| mcplib | main | dc1221873b17 | 1.26.5 | self | clean before this review; accepted MADR 0005, proposed PLAN 0005, and six-consumer scope extension committed |
+| magic-cli-remote | master | 1b7abccc0747 | 1.26.5 | none | one owner-modified Dart diagnostics file; commits since the prior snapshot affect mobile code and MADRs 0128-0130, not Go updater code |
 | prepare-commit-msg | main | 79cdba965289 | 1.26.6 | v1.2.0 | clean |
 | mcp-server-recall | main | e22b9adf8c43 | 1.26.5 | v1.2.0 | clean |
 | mcp-server-magictools | main | c672a720f8c3 | 1.26.5 | v1.2.0 | owner MADR/PLAN 0002 files present |
@@ -63,7 +65,8 @@ The plan was written against the following read-only snapshot:
 | mcp-server-duckduckgo | main | 9a312807504f | 1.26.5 | v1.2.0 | clean |
 
 The local toolchain was go1.26.5 darwin/arm64 except that prepare-commit-msg
-selected go1.26.6 from its module directive.
+selected go1.26.6 from its module directive. The targeted tests in Section 1.2
+were rerun on 2026-09-02 and passed at these heads; Recall completed in 51.916s.
 
 Before changing a repository, run:
 
@@ -79,6 +82,7 @@ plan before implementing rather than applying a stale mechanical edit.
 
 The MADR's targeted baseline tests passed:
 
+    (mcplib) go test ./...
     (magic-cli-remote) go test ./internal/update ./internal/cli ./internal/relay
     (prepare-commit-msg) go test ./internal/selfupdate .
     (mcp-server-recall) go test ./cmd/mcp-server-recall
@@ -149,6 +153,10 @@ The implementation shall follow these primary sources:
   enable the repository setting before the first protected release, because it
   is not retroactive; assemble a draft completely, then publish so its tag and
   assets become immutable together.
+* [GitHub repository immutable-release REST endpoints](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository):
+  checking requires repository Administration read and enabling requires
+  Administration write, so these operations are an administrator gate rather
+  than a GITHUB_TOKEN workflow step.
 * [GitHub artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations):
   grant id-token: write and attestations: write and attest the exact published
   files.
@@ -163,7 +171,7 @@ The implementation shall follow these primary sources:
   MOVEFILE_WRITE_THROUGH with an explicit backup and rollback; make no POSIX
   atomicity claim for Windows.
 
-Version selection for the new module dependencies is fixed as of 2026-09-01:
+Version selection for the new module dependencies is fixed as of 2026-09-02:
 golang.org/x/mod v0.40.0 and golang.org/x/sys v0.47.0. Both declare Go 1.25
 and therefore remain compatible with the Go 1.26.5 floor.
 
@@ -175,7 +183,8 @@ Ship one public github.com/maccavelli/mcplib/selfupdate implementation and one
 reusable release-publication workflow, migrate the two existing commands, add
 commands to Recall, MagicTools, Socratic Thinker, and DuckDuckGo, and make all
 six consumers' observable CLI behavior and release contract identical except
-for product lifecycle and supported platform data.
+for product lifecycle, supported platform data, and the documented stdout versus
+stderr routing needed to keep MCP protocol streams clean.
 
 ### In scope
 
@@ -205,8 +214,8 @@ for product lifecycle and supported platform data.
 
 ## 3. Defaults Resolved for Deterministic Execution
 
-These values close the review questions in MADR 0005 for this implementation.
-Changing one requires editing the MADR and this plan before execution.
+These values implement the resolved follow-on decisions in MADR 0005. Changing
+one requires editing the MADR and this plan before execution.
 
 1. Runtime trust baseline: verify HTTPS GitHub metadata, uploaded asset state,
    positive bounded size, GitHub's sha256 digest when present, and the exact
@@ -223,7 +232,7 @@ Changing one requires editing the MADR and this plan before execution.
 5. Target ownership: the default self-update policy allows only a regular file
    beneath the current user's home directory, rejects a symlink invocation, and
    rejects a target outside the allowed roots before downloading. Consumers may
-   add an explicit absolute user-owned root. The standard commands do not add
+   add an explicit canonical absolute operator-authorized root. The standard commands do not add
    /usr, /opt, /nix/store, Snap, Flatpak, Homebrew Cellar, Chocolatey, Scoop, or
    WindowsApps roots.
 6. Managed reconcile: any stop, definition reconcile, start, or health failure
@@ -259,12 +268,44 @@ Changing one requires editing the MADR and this plan before execution.
     Consumers may trim the leading v only for presentation. Magic Remote alone
     normalizes an already-installed legacy BASE.N or BASE.N.gHASH identity to
     vBASE before constructing the Request.
-15. Reporter and cleanup failures: an event-reporting error before replacement
-    starts aborts the operation. After replacement starts, retain the first
-    reporting error but finish reconcile and health or their rollback path. If
-    the installation becomes healthy, return Applied true plus joined reporting,
-    backup-cleanup, or unlock errors; those post-commit errors do not roll back
-    an otherwise healthy installation.
+15. Reporter and cleanup failures: all events through EventInstalling are
+    emitted before Installer.Install and a reporting error aborts before
+    replacement. Installers do not call Reporter. EventComplete is emitted only
+    after Install returns a healthy committed result and Close has been
+    attempted. A terminal reporting, backup-cleanup, or unlock error returns
+    Applied true plus the joined error and does not roll back an otherwise
+    healthy installation. The narrowly classified Windows running-image
+    sharing violation instead returns PendingBackup and the synced cleanup
+    receipt defined in Section 4.4; it is not reported as a failed update.
+16. Administrative immutability check: the repository setting endpoint requires
+    repository Administration permission, which a normal workflow GITHUB_TOKEN
+    cannot request. Gate G2 therefore enables and verifies the setting with an
+    explicitly authorized administrator token before a release tag is pushed.
+    The reusable workflow verifies the published release itself is immutable;
+    it does not claim that its contents:write token can inspect repository
+    administration settings.
+
+### 3.1 Frozen consumer asset matrices
+
+The workflow inputs and release acceptance checks use these exact matrices. A
+platform addition or removal is outside this plan and requires review before a
+consumer phase changes it.
+
+| Consumer/product | Exact platform pairs | Declared non-manifest extras |
+|---|---|---|
+| prepare-commit-msg | linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64 | none |
+| mcremote and mcrelay | linux/amd64, linux/arm64, darwin/arm64, windows/amd64 | `install.sh`, `install.ps1`, and `magic-cli-remote-<tag>-arm64.apk` |
+| mcp-server-recall | linux/amd64, linux/arm64, darwin/arm64, windows/amd64 | `install.sh`, `install.ps1` |
+| mcp-server-magictools | linux/amd64, darwin/arm64, windows/amd64 | `install.sh`, `install.ps1` |
+| mcp-server-socratic-thinker | linux/amd64, darwin/arm64, windows/amd64 | `install.sh`, `install.ps1` |
+| mcp-server-duckduckgo | linux/amd64, darwin/arm64, windows/amd64 | none |
+
+For the Magic Remote v0.16.0 bridge only, the release file set also contains
+one byte-identical compatibility copy per product/platform and
+`SHA256SUMS-0.16.0`; the bridge validator derives those names instead of taking
+them through extra-assets-json. The APK's exact bridge basename is
+`magic-cli-remote-v0.16.0-arm64.apk`. `SHA256SUMS` is mandatory manifest data,
+not an entry in extra-assets-json.
 
 ## 4. Exact Public Package Contract
 
@@ -323,6 +364,7 @@ changes after mcplib v1.3.0 require a new reviewed plan.
         InstalledDigest  string
         ServiceInstalled bool
         ServiceWasRunning bool
+        PendingBackup    string
     }
 
     var ErrUpdateAvailable error
@@ -334,6 +376,16 @@ changes after mcplib v1.3.0 require a new reviewed plan.
     var ErrMutableRelease error
     var ErrRateLimited error
 
+    type RateLimitError struct {
+        StatusCode int
+        RetryAfter time.Duration
+        Reset      time.Time
+        Remaining int64
+    }
+
+    func (e *RateLimitError) Error() string
+    func (e *RateLimitError) Unwrap() error
+
     func ExitCode(result Result, err error) int
 
 ExitCode returns 10 only when ErrUpdateAvailable is in the error chain, 1 for
@@ -341,12 +393,19 @@ all other errors, and 0 otherwise. Run returns Result plus
 ErrUpdateAvailable when check mode finds any different explicitly actionable
 target. The library never calls os.Exit.
 
+RateLimitError unwraps to ErrRateLimited. Missing numeric headers use zero
+values, and malformed optional rate-limit headers also produce zero values
+rather than guessed guidance. Retry-After supports both delta-seconds and
+HTTP-date using an unexported injected clock in tests.
+
 Request validation requires product to match
 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and rejects an unknown build kind,
 partial platform values, positional arguments at the consumer boundary, check
 plus yes, and check plus force. A non-zero platform must exactly match an entry
 supplied to the selector; OS and architecture strings are never interpolated
-without that allow-list match.
+without that allow-list match. NewExactAssetSelector rejects duplicate platform
+pairs and requires each OS and architecture field to match
+`^[a-z0-9][a-z0-9_]*$`.
 
 Operation classification is fixed by this table:
 
@@ -425,6 +484,17 @@ GitHubSource is a concrete exported implementation constructed from:
 
     func NewGitHubSource(GitHubOptions) (*GitHubSource, error)
 
+NewGitHubSource requires a non-nil Client, clones its value, and never mutates
+the caller's client. APIBaseURL nil means `https://api.github.com`; any supplied
+base is normalized once and must have no user information, query, or fragment.
+Repository owner/name and UserAgent are validated against control characters
+and path separators before any URL is constructed. An empty Token triggers the
+documented GH_TOKEN/GITHUB_TOKEN lookup; a non-empty explicit token wins.
+Each canonical consumer passes one `http.Client{Timeout: 15 * time.Minute}` and
+the same DefaultLimits value to GitHubOptions and Config; its 15-minute child
+context is the outer deadline for discovery, download, installation, and
+managed recovery.
+
 HTTP test servers may use loopback HTTP. Any non-loopback source must be HTTPS.
 Asset bodies are fetched from the asset API path derived from owner, repository,
 and asset ID, not from a browser URL supplied by metadata.
@@ -442,42 +512,51 @@ and asset ID, not from a browser URL supplied by metadata.
         Product       string
         Release       Release
         Selection     Selection
-        StagedPath    string
         Size          int64
         SHA256        string
         ManifestSHA256 string
         GitHubSHA256  string
+        Open          func() (io.ReadCloser, error)
     }
 
     type Verifier interface {
         Verify(context.Context, Verification) error
     }
 
-    type StagedArtifact struct {
+    type TransformRequest struct {
+        Product       string
+        Platform      Platform
         Path          string
-        Size          int64
         ReleaseDigest string
-        InstalledDigest string
     }
 
     type Transformer interface {
-        Transform(context.Context, StagedArtifact) (StagedArtifact, error)
+        Transform(context.Context, TransformRequest) error
+    }
+
+    type StagedArtifact struct {
+        Path            string
+        Size            int64
+        ReleaseDigest   string
+        InstalledDigest string
     }
 
 The built-in verifier strictly parses SHA256SUMS: exactly two fields, optional
 binary marker only, 64 lowercase-normalized hex characters, basename equal to
 the selected ManifestName, no duplicate filename, and no path traversal.
-Additional verifiers run after built-in integrity succeeds. The default
-transformer is a no-op. Magic Remote's Darwin-only codesign transformer is
-consumer code and must recompute InstalledDigest after codesign --verify
---strict succeeds.
+Additional verifiers run after built-in integrity succeeds and receive only a
+factory for a new read-only descriptor, not a writable staging path. The
+default transformer is a no-op. Magic Remote's Darwin-only codesign transformer
+is consumer code and runs codesign plus codesign --verify --strict. After every
+transform, the coordinator requires the path still belongs to the locked
+session, reopens it, rechecks the executable size limit, and computes
+InstalledDigest itself; a transformer cannot assert its own digest.
 
 ### 4.4 Target and installer contracts
 
     type TargetPolicy struct {
         ExecutablePath string
         AllowedRoots   []string
-        AllowSymlink   bool
     }
 
     type Target struct {
@@ -488,20 +567,28 @@ consumer code and must recompute InstalledDigest after codesign --verify
 
     type InstallRequest struct {
         Product  string
-        Target   Target
         Artifact StagedArtifact
     }
 
     type InstallResult struct {
         Target             string
         Backup             string
+        Applied            bool
         ServiceInstalled   bool
         ServiceWasRunning  bool
+        PendingBackup      string
     }
 
     type Installer interface {
         ResolveTarget(context.Context) (Target, error)
+        Begin(context.Context, Target) (InstallSession, error)
+    }
+
+    type InstallSession interface {
+        Target() Target
+        CreateStaging(context.Context) (*os.File, string, error)
         Install(context.Context, InstallRequest) (InstallResult, error)
+        Close() error
     }
 
     type Lifecycle interface {
@@ -528,14 +615,48 @@ consumer code and must recompute InstalledDigest after codesign --verify
         LockTimeout  time.Duration
     }
 
+    const DefaultLockTimeout time.Duration = 5 * time.Second
+
     func NewStandaloneInstaller(InstallOptions) (*StandaloneInstaller, error)
     func NewManagedInstaller(*StandaloneInstaller, Lifecycle, Reconciler) (*ManagedInstaller, error)
 
-Target resolution occurs before network work. Apply mode re-resolves and
-revalidates after acquiring the lock. The stable lock file is a dedicated
-basename beside the executable. Unix uses an advisory x/sys/unix lock; Windows
-uses LockFileEx. A second process times out with ErrConcurrentUpdate and never
-touches staging, backup, or service state.
+Target resolution occurs before network work. Apply mode passes that exact
+Target value to Begin after confirmation. Begin acquires the lock, re-resolves
+and revalidates the path, compares the original and locked file identities, and
+returns a session only if they match. Target carries an unexported built-in
+identity snapshot; callers treat values as opaque and do not construct or
+modify them. The session owns the stable lock, its anchored os.Root, every
+staging/backup basename, and cleanup through Close. Run always defers Close and
+joins its error without hiding an earlier failure.
+
+ExecutablePath empty selects os.Executable. AllowedRoots are additive to the
+mandatory canonical user-home root; an empty slice adds nothing. LockTimeout
+zero selects DefaultLockTimeout and a negative duration is invalid. The six
+canonical integrations do not set ExecutablePath or add a root.
+
+CreateStaging uses os.CreateTemp in the locked target directory, returns the
+open 0600 file plus its absolute path, and registers the basename for cleanup.
+The downloader writes, hashes, syncs, and closes that file. Install accepts only
+an artifact created by the same session. InstallResult.Applied distinguishes a
+healthy committed installation from a pre-commit failure when backup cleanup,
+reporting, or session close also returns an error.
+
+The stable lock file is a dedicated basename beside the executable. Unix opens
+it relative to the anchored directory with no-follow semantics and uses an
+advisory x/sys/unix lock; Windows rejects reparse points and uses LockFileEx. A
+second process times out with ErrConcurrentUpdate and never touches staging,
+backup, or service state.
+
+Windows has one explicit post-commit cleanup exception. If deleting the renamed
+old executable fails with a native sharing violation attributable to the still-
+running updater image, Install writes an exclusively created, synced cleanup
+receipt with a user-only Windows DACL containing only the random backup basename
+and its pre-update digest, returns that basename as PendingBackup, and treats
+the installation as successful. Any other backup
+cleanup failure remains an Applied true error. The next Begin under the same
+target lock validates the receipt, regular-file/reparse status, basename, and
+digest, removes that backup and receipt before network work, and fails closed if
+it cannot do so. No glob-based stale-backup deletion is permitted.
 
 Unix apply creates a random same-directory backup link or synced copy while
 the old target remains live, renames the synced staging file over the target,
@@ -548,6 +669,19 @@ if installing the new name fails.
 ### 4.5 Reporting, confirmation, construction, and limits
 
     type EventKind uint8
+
+    const (
+        EventUnknown EventKind = iota
+        EventResolvingTarget
+        EventFetchingRelease
+        EventSelected
+        EventDownloadingManifest
+        EventDownloadingBinary
+        EventVerified
+        EventTransforming
+        EventInstalling
+        EventComplete
+    )
 
     type Event struct {
         Kind       EventKind
@@ -602,10 +736,12 @@ if installing the new name fails.
     func New(Config) (*Updater, error)
     func (u *Updater) Run(context.Context, Request) (Result, error)
 
-New rejects nil mandatory collaborators and invalid limits. Consumers compose
-NewGitHubSource, NewStrictVersionPolicy, NewExactAssetSelector, the installer,
-and the text adapters explicitly; v1.3.0 does not add a second convenience
-constructor that could hide security-relevant defaults.
+New rejects nil Source, Versions, Assets, Installer, Reporter, or Confirmer and
+rejects invalid limits. An empty Verifiers slice is valid, and a nil Transformer
+means the built-in no-op transform. Consumers compose NewGitHubSource,
+NewStrictVersionPolicy, NewExactAssetSelector, the installer, and the text
+adapters explicitly; v1.3.0 does not add a second convenience constructor that
+could hide security-relevant defaults.
 
 ### 4.6 Coordinator state machine
 
@@ -624,31 +760,40 @@ Run owns this exact order:
    no body download or filesystem/service mutation.
 7. If not yes, require a TTY and confirm the fully selected operation. A decline
    returns Declined true and nil error.
-8. Acquire the target lock; re-resolve and revalidate the target beneath the
-   same allowed root. Compare the initial and locked file identities with
-   os.SameFile plus size and modification time; return ErrConcurrentUpdate if
-   the target changed while metadata or confirmation was in progress.
+8. Call Installer.Begin with the original Target. Begin acquires the target
+   lock, re-resolves and revalidates beneath the same allowed root, and compares
+   the initial and locked file identities with os.SameFile plus size and
+   modification time. Return ErrConcurrentUpdate if the target changed while
+   metadata or confirmation was in progress. Register an idempotent deferred
+   InstallSession.Close as a safety net; the success and error paths also call
+   Close explicitly so its error can be joined before returning.
 9. Download the exact manifest within its limit and parse the one required
    entry.
-10. Stream the binary through a limit reader and SHA-256 hasher into an
-    os.CreateTemp file in the target directory; sync and close it.
+10. Ask the locked session to create staging. Stream the binary through a limit
+    reader and SHA-256 hasher into that open file; sync and close it.
 11. Require actual size to equal API size and each available digest to agree.
-12. Run additional verifiers, then the optional post-verification transformer.
+12. Run additional verifiers through fresh read-only descriptors, then the
+    optional post-verification transformer. Revalidate the registered staging
+    path, size, and installed digest after transformation.
 13. Snapshot managed lifecycle, stop only an installed service, apply the
     binary while retaining rollback material, reconcile, start, and wait healthy.
 14. Once a managed service has been stopped, any later failure enters one
     recovery path. Restore the definition if reconcile began, restore the
     binary if replacement began, start and health-check the prior binary when
     the service was installed, and join every recovery error with the original.
-15. On success, remove backup and staging names, sync where supported, release
-    the lock, emit the terminal event, and return Applied true.
+15. On success, Install removes backup and staging names and syncs where
+    supported, subject only to the documented Windows running-image receipt.
+    Close releases the lock. Emit the terminal event and return Applied true.
+    Join other cleanup, Close, or terminal-report errors with the successful
+    result without initiating rollback after the health commit point.
 
-Every Reporter call is checked. A reporting failure before replacement starts
-returns immediately. After replacement starts, record the first reporting error
-and continue the required lifecycle or rollback work. Once the replacement and
-lifecycle are healthy, backup-removal, unlock, and reporting errors return the
-successful Result with Applied true and joined error details; none initiates
-rollback solely after the commit point.
+Every Reporter call is checked. Events through EventInstalling occur before the
+opaque Installer.Install call, so a reporting failure returns before
+replacement. Installers never call Reporter. EventComplete occurs only after a
+healthy committed Install result and the deferred session cleanup attempt.
+Backup-removal, unlock, and terminal-report errors return the successful Result
+with Applied true and joined error details; none initiates rollback solely after
+the commit point.
 
 Every error wraps its operation and product while preserving errors.Is and
 errors.As behavior. Tokens, checksum bodies, release notes, and filesystem
@@ -664,8 +809,9 @@ contents are never included in errors.
 ### Steps
 
 1. Apply reviewer edits.
-2. Set both frontmatter status values to accepted and retain date 2026-09-01
-   unless acceptance occurs on a later date, in which case update both dates.
+2. Confirm the MADR remains accepted. Set the plan status to accepted and set
+   its date to the plan-acceptance date. Change the MADR date again only if
+   acceptance includes another decision change.
 3. Confirm the plan filename exactly mirrors the MADR identifier and slug.
 4. Run:
 
@@ -728,13 +874,11 @@ Modified:
 
 ### Verification and commit
 
-    gofmt -w selfupdate
-    golint selfupdate/doc.go
-    golint selfupdate/types.go
-    golint selfupdate/errors.go
-    golint selfupdate/version.go
-    golint selfupdate/assets.go
-    golint selfupdate/checksums.go
+    gofmt -w selfupdate/*.go
+
+Run `golint FILE` separately for every changed Go file, including test files,
+then run:
+
     go mod tidy
     go test ./selfupdate
     go vet ./selfupdate
@@ -778,15 +922,20 @@ Modified:
    decoding that detects overflow and trailing JSON rather than silently
    truncating or accepting a second value. Close every response body on every
    path.
-4. Preserve status, Retry-After, X-RateLimit-Remaining, and
-   X-RateLimit-Reset in a typed RateLimitError.
+4. Return RateLimitError for HTTP 429 and for HTTP 403 when
+   X-RateLimit-Remaining is zero or Retry-After is present. Preserve status,
+   Retry-After, X-RateLimit-Remaining, and X-RateLimit-Reset in its typed
+   fields; other non-success statuses return a bounded sanitized HTTP error.
 5. Download assets through the GitHub asset API URL derived from the asset ID,
    using Accept application/octet-stream. Never authorize a metadata-provided
    browser URL.
 6. Require uploaded state, positive advertised size, maximum size, and valid
    sha256 digest when supplied.
-7. Implement bounded manifest fetch, streaming executable write, SHA-256,
-   exact advertised-size validation, File.Sync, Close, and cleanup.
+7. Implement bounded manifest fetch and a streaming executable downloader that
+   writes to a caller-supplied io.Writer while computing SHA-256 and enforcing
+   the advertised and hard sizes. The locked installation session added in
+   Phase 3 owns file creation, sync, close, and cleanup; Phase 2 tests the
+   downloader with bounded in-memory and temporary-file writers.
 8. Test one reusable client, required headers, token order, no token on foreign
    redirect, 200 and 302 asset responses, cancellation, timeout, JSON overflow,
    manifest overflow, binary overflow, short and long body versus advertised
@@ -831,6 +980,13 @@ New:
 * selfupdate/replace_windows.go
 * selfupdate/replace_test.go
 * selfupdate/replace_native_test.go
+* selfupdate/session.go
+* selfupdate/session_test.go
+* selfupdate/cleanup.go
+* selfupdate/cleanup_test.go
+* selfupdate/cleanup_windows.go
+* selfupdate/cleanup_windows_test.go
+* selfupdate/cleanup_other.go
 * selfupdate/standalone.go
 * selfupdate/standalone_test.go
 * selfupdate/managed.go
@@ -846,6 +1002,8 @@ Modified:
 ### Steps
 
 1. Implement home-root defaults with component-aware filepath.Rel checks.
+   Canonicalize every allowed root, require it to exist as a directory, reject
+   a filesystem root, and deduplicate it with platform-appropriate case rules.
    Reject empty, relative, root-directory, non-regular, detected symlink, or
    outside-root targets before network work. Lstat the raw absolute path from
    os.Executable or the explicit policy before EvalSymlinks; because
@@ -855,45 +1013,66 @@ Modified:
    basename.
 2. Open an os.Root for the resolved target directory and use validated
    basenames for staging, backup, lock, rename, and cleanup.
-3. Create random staging with os.CreateTemp in that directory and random backup
-   names; never use .staging, .old, or .prev as a shared fixed path.
-4. Implement the stable advisory lock in OS-specific files and a bounded
-   context-aware acquisition loop.
-5. Promote x/sys v0.47.0 to a direct requirement when the Unix and Windows lock
+3. Implement Installer.Begin and InstallSession. Begin acquires the lock,
+   revalidates the exact Target returned before network access, compares its
+   identity, and returns a session owning the lock and os.Root. Close is
+   idempotent, removes registered staging material, closes the root, and
+   releases the lock while joining all cleanup errors.
+4. Create random staging through InstallSession.CreateStaging with os.CreateTemp
+   in that directory and random backup names; never use .staging, .old, or
+   .prev as a shared fixed path. Reject an artifact not registered to the same
+   session.
+5. Implement the stable advisory lock in OS-specific files and a bounded
+   context-aware acquisition loop. Open Unix lock files with O_NOFOLLOW; reject
+   a non-regular lock or a Windows reparse-point lock before LockFileEx.
+6. Promote x/sys v0.47.0 to a direct requirement when the Unix and Windows lock
    and replacement files import it.
-6. Implement Unix backup-without-gap, atomic rename-over-target, permissions,
+7. Implement Unix backup-without-gap, atomic rename-over-target, permissions,
    file sync, directory sync, rollback, and cleanup. Before replacement, chmod
    staging to the old target's FileMode.Perm value; do not copy setuid, setgid,
    or sticky bits. The random same-directory temp remains owned by the invoking
    user.
-7. Implement Windows LockFileEx and MoveFileEx replacement with documented
-   flags, unique backup, bounded retry, rollback, and joined errors.
-8. Implement StandaloneInstaller as the sole owner of the replacer and its
-   ResolveTarget method.
-9. Implement ManagedInstaller's absent/running/down matrix. Never install a
+8. Implement Windows LockFileEx and MoveFileEx replacement with documented
+   flags, unique backup, bounded retry, rollback, and joined errors. Classify
+   only the native sharing violation for the renamed currently running image as
+   PendingBackup; exclusively create and sync its exact-basename/digest cleanup
+   receipt with a user-only Windows DACL.
+9. At Begin, process only the exact cleanup receipt while holding the target
+   lock. Validate schema, basename, regular-file/reparse state, and digest
+   before removal; sync receipt creation/removal and reject malformed,
+   mismatched, or undeletable state. Never discover backups with a glob.
+10. Implement StandaloneInstaller as the sole owner of target resolution,
+   session construction, and replacement.
+11. Implement ManagedInstaller's absent/running/down matrix. Never install a
    missing service. Always start and health-check a previously installed service
    after update, including one that began down.
-10. Add injected unexported filesystem operation seams for deterministic
+12. Add injected unexported filesystem operation seams for deterministic
    failures after every state transition without adding a public mock
    filesystem interface.
-11. Require Reconciler implementations to return their restoration receipt even
+13. Require Reconciler implementations to return their restoration receipt even
     when Reconcile reports a partial-write error. ManagedInstaller calls Restore
     for any receipt indicating changed state, including the error return path.
-12. Add native helper-process tests that copy an executing test binary to a
+14. Add native helper-process tests that copy an executing test binary to a
     temporary user-allowed root, replace it while running, and assert old-or-new
     recoverability on Linux, macOS, and Windows.
-13. Expand mcplib CI to run go test on ubuntu-24.04, macos-15, and windows-2025.
+15. Expand mcplib CI to run go test on ubuntu-24.04, macos-15, and windows-2025.
     Retain Linux lint/vet and add gofmt plus go mod tidy-diff gates. Pin actions
-    to reviewed commit SHAs.
+    to reviewed commit SHAs: actions/checkout
+    3d3c42e5aac5ba805825da76410c181273ba90b1 (v7.0.1) and
+    actions/setup-go b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    (v7.0.0). Any new action is pinned and recorded before the phase commit.
 
 ### Required failure tests
 
 * differently named symlink invocation;
 * staging collision and attacker-created symlink;
+* attacker-created lock symlink or Windows reparse point;
 * two concurrent update attempts;
 * target replacement between confirmation and lock acquisition;
 * stale but unlocked lock file;
 * stale backup;
+* valid, malformed, digest-mismatched, symlink/reparse, and undeletable Windows
+  pending-backup receipts;
 * permission denial;
 * injected short write, sync failure, close failure, rename failure, and
   directory-sync failure;
@@ -921,7 +1100,9 @@ tests, module files, and workflow changes. Do not push.
 ### Acceptance
 
 Every apply failure has one tested rollback path; Windows comments describe
-native guarantees without calling the two-step operation atomic.
+native guarantees without calling the two-step operation atomic. A successful
+Windows update can retain only the reported, receipted running-image backup,
+and the next Begin proves deterministic cleanup.
 
 ## 9. Phase 4 — Add Coordinator, Text UX, and Public Examples
 
@@ -947,9 +1128,11 @@ Modified:
 ### Steps
 
 1. Implement New and Run in the exact Section 4.6 order.
-2. Make all collaborators immutable after construction so one Updater is safe
-   for sequential reuse; document whether concurrent Run calls are supported.
-   The initial contract rejects concurrent runs on one target through the lock.
+2. Make all collaborators immutable after construction. One Updater is safe for
+   sequential reuse and has a non-blocking in-process run guard: overlapping
+   Run calls on the same instance return ErrConcurrentUpdate before invoking a
+   collaborator. Separate Updater instances and processes converge on the
+   per-target filesystem lock.
 3. Implement all Event kinds and stable plain-text rendering without ANSI
    escapes. Escape C0/C1 control characters and collapse remote CR/LF so a tag,
    URL, diagnostic, or detail cannot inject terminal lines or workflow commands.
@@ -960,12 +1143,18 @@ Modified:
    do not infer interactivity only from os.ModeCharDevice.
 5. Ensure yes bypasses only confirmation and decline is a successful result.
 6. Implement no-op, upgrade, reinstall, rollback, local-build, and check
-   results. Return ErrUpdateAvailable only in check mode.
+   results. Return ErrUpdateAvailable only in check mode. When PendingBackup is
+   non-empty, EventComplete and text output identify the exact retained path and
+   state that the next apply will validate and remove it before downloading.
 7. Add a failure-boundary state-machine test table that records exact call order
-   and asserts no later stage runs after a failure.
-8. Test partial writes, writer failure before replacement, writer failure after
-   replacement, terminal-control injection, and cleanup/unlock failure at the
-   post-health commit boundary.
+   and asserts no later stage runs after a failure. Add an overlapping-Run test
+   proving the in-process guard returns ErrConcurrentUpdate without invoking a
+   collaborator.
+8. Test partial writes, writer failure before Install, terminal writer failure
+   after a healthy Install, verifier descriptor closure, a transformer that exceeds the
+   size limit or replaces staging with a symlink/non-regular file,
+   terminal-control injection, PendingBackup rendering, and cleanup/unlock
+   failure at the post-health commit boundary.
 9. Add examples for standalone CLI use, custom reporting, and managed service
    composition. Do not import Cobra in package or examples.
 10. Document the trust guarantee as release-asset integrity, not publisher
@@ -1012,9 +1201,9 @@ The workflow_call contract is:
 | Input | Type | Meaning |
 |---|---|---|
 | artifact-name | string | caller artifact containing the complete staged release |
-| products-json | string | exact executable basenames; one normally, two for Magic Remote |
-| platforms-json | string | exact OS-architecture suffixes, including Windows extension rule |
-| extra-assets-json | string | explicit installers, APKs, and temporary bridge files |
+| products-json | string | JSON string array of exact product basenames, for example `["mcremote","mcrelay"]` |
+| platforms-json | string | JSON array of exact objects with only `os` and `arch`, for example `[{"os":"linux","arch":"amd64"},{"os":"windows","arch":"amd64"}]`; the validator adds `.exe` only for Windows |
+| extra-assets-json | string | JSON string array of exact extra basenames such as installers and APKs; `[]` means none |
 | bridge-release | boolean | permits the Magic Remote compatibility set only |
 
 The caller grants contents: write, id-token: write, and attestations: write.
@@ -1035,28 +1224,43 @@ No custom secret is accepted; the caller's GITHUB_TOKEN is used.
 5. Parse SHA256SUMS and require exactly one entry for every canonical binary and
    no entry for installer scripts or other extras.
 6. For bridge-release, additionally require the exact Magic Remote compatibility
-   filenames and SHA256SUMS-tag-version and prove each compatibility binary is
-   byte-identical to its canonical counterpart.
-7. Query the caller repository's immutable-releases endpoint and require
-   enabled true before creating any release state.
+   filenames with the leading `v` removed from the suffix and exact
+   `SHA256SUMS-0.16.0`; prove each compatibility binary is byte-identical to its
+   canonical counterpart. Reject bridge-release unless the caller repository is
+   `maccavelli/magic-cli-remote` and the tag is exactly `v0.16.0`.
+7. Treat the completed G2 administrative immutability gate as a precondition of
+   pushing the tag that triggers the caller. Do not query the immutable-releases
+   settings endpoint with GITHUB_TOKEN: that endpoint requires repository
+   Administration permission, which a normal called workflow cannot request.
 8. Create a draft with gh release create --draft --verify-tag and generated
    notes. Upload the explicit file list without --clobber.
 9. Generate provenance for the exact staged files with
    actions/attest-build-provenance pinned to commit
-   977bb373ede98d70efdf65b84cb5f73e068dcc2a.
+   96278af6caaf10aea03fd8d33a09a777ca52d62f.
 10. Publish only after validation, upload, and attestation succeed.
-11. Query the published release's isImmutable field and fail unless true.
+11. Poll the published release's isImmutable field and `gh release verify` at
+    five-second intervals for at most two minutes; fail unless both prove the
+    release is immutable and its automatic release attestation is available.
+    This bounded poll handles post-publication propagation only; it never
+    uploads or edits. This is defense in depth—the authorized pre-tag G2 setting
+    check is what prevents publication while the repository setting is disabled.
 12. Put all file-set and manifest validation in
     `.mcplib-release-tools/scripts/verify-selfupdate-release.sh`. Do not
     maintain a second inline validator.
-13. Pin actions/checkout to d23441a48e516b6c34aea4fa41551a30e30af803
-    (v6), actions/download-artifact to
-    37930b1c2abaa49bbe596cd826c3c89aef350131 (v7), and
-    actions/attest-build-provenance to the v3 commit above. Any other action
+13. Pin actions/checkout to 3d3c42e5aac5ba805825da76410c181273ba90b1
+    (v7.0.1), actions/download-artifact to
+    3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c (v8.0.1), and
+    actions/attest-build-provenance to
+    96278af6caaf10aea03fd8d33a09a777ca52d62f (v3.2.0). These tag-to-commit
+    mappings were verified with git ls-remote on 2026-09-02. Any other action
     introduced into this workflow must also use a verified full commit SHA.
 14. Add scripts/verify-selfupdate-release_test.sh with valid, missing,
     duplicate, extra, malformed, and bridge artifact directories. It performs
     no publication.
+15. Before creating a draft, require `gh release verify --help` and
+    `gh release view --json isImmutable --help` to succeed. The reviewed local
+    baseline is gh 2.98.0; a runner lacking these capabilities fails before it
+    creates release state.
 
 ### Verification and commit
 
@@ -1074,8 +1278,10 @@ Commit after all commands pass. Do not push.
 ### Acceptance
 
 The shared workflow contains no --clobber path, cannot publish a partial
-release, and rejects undeclared assets. It ships in the same mcplib release as
-the Go API, and every consumer call uses the exact commit behind that tag.
+release, and rejects undeclared assets. Paired with the pre-tag G2
+administrative check, it publishes only an immutable release. It ships in the
+same mcplib release as the Go API, and every consumer call uses the exact commit
+behind that tag.
 
 ## 11. Gate G1 — Publish mcplib v1.3.0
 
@@ -1095,10 +1301,16 @@ This gate is external and blocks all consumer dependency commits.
     git tag --list v1.3.0
     git ls-remote --tags origin refs/tags/v1.3.0
     git push origin main
+
+Wait for the exact pushed main commit to pass the Linux, macOS, and Windows CI
+jobs. Confirm that the remote main SHA equals the reviewed local HEAD. Only
+then, under the same explicit publication authorization, run:
+
+    test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/main | awk '{print $1}')"
     git tag -a v1.3.0 -m "mcplib v1.3.0"
     git push origin refs/tags/v1.3.0
 
-After CI succeeds:
+After tag CI succeeds:
 
     GOPROXY=https://proxy.golang.org go list -m github.com/maccavelli/mcplib@v1.3.0
     git rev-list -n 1 v1.3.0
@@ -1188,7 +1400,8 @@ exit 0, 10, and 1.
     git diff --check
 
 The rg command must return no production implementation hit. Commit after all
-checks pass. Do not push.
+checks pass. Stage only this phase's files, run `make verify-staged` against the
+exact staged snapshot, and commit only if it passes. Do not push.
 
 ### Acceptance
 
@@ -1275,8 +1488,15 @@ Deleted:
     to the three-part tag. This changes release identity only; Android update
     behavior remains out of scope.
 11. Stage v0.16.0 canonical exact binaries and SHA256SUMS plus byte-identical
-    product-platform-v0.16.0 compatibility copies and SHA256SUMS-0.16.0.
-    Include the existing APK and installer scripts as declared extra assets.
+    `<product>-<goos>-<goarch>-0.16.0[.exe]` compatibility copies and
+    `SHA256SUMS-0.16.0`. The compatibility suffix deliberately omits the
+    leading `v`: the legacy AssetFor returns that filename suffix and
+    SumsAsset then requests the manifest with the identical suffix
+    (`internal/update/github.go:81-128`). Include the existing APK and installer
+    scripts as declared extra assets. Add a fixture that runs the unmodified
+    legacy selector against the complete staged bridge asset list and proves it
+    selects the compatibility binary, compatibility manifest, and matching
+    checksum entry for every product/platform pair.
 12. Update installer checksum lookup to prefer the exact canonical entry.
     Do not make the shared CLI updater read old versioned manifests.
 13. Call the reusable release workflow at the exact G1 workflow SHA
@@ -1366,7 +1586,11 @@ Modified:
 
 ### Verification and commit
 
-Run gofmt and per-file golint, then:
+Run the repository's pre-commit wrapper against the exact changed Go list:
+
+    scripts/go-precheck.sh cmd/mcp-server-recall/update.go cmd/mcp-server-recall/update_test.go cmd/mcp-server-recall/root.go cmd/mcp-server-recall/root_test.go cmd/mcp-server-recall/main.go cmd/mcp-server-recall/main_test.go cmd/mcp-server-recall/version.go
+
+Then run:
 
     make test
     go test -race ./cmd/mcp-server-recall ./internal/config
@@ -1377,7 +1601,9 @@ Run gofmt and per-file golint, then:
     go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml
     git diff --check
 
-Commit after all pass. Do not push.
+Stage only this phase's files, rerun `scripts/go-precheck.sh` with the same Go
+list against the staged content through the repository hook, and commit after
+all checks pass. Do not push.
 
 ### Acceptance
 
@@ -1396,11 +1622,11 @@ New:
 * cmd/mcp-server-magictools/update_service_test.go
 * cmd/mcp-server-magictools/service_refresh.go
 * cmd/mcp-server-magictools/service_refresh_test.go
+* cmd/mcp-server-magictools/root_test.go
 
 Modified:
 
 * cmd/mcp-server-magictools/root.go
-* cmd/mcp-server-magictools/root_test.go
 * cmd/mcp-server-magictools/main.go
 * cmd/mcp-server-magictools/main_test.go
 * cmd/mcp-server-magictools/version.go
@@ -1687,7 +1913,10 @@ tag stops execution and requires a reviewed replacement version.
 ### 18.1 Repository setting gate
 
 Before pushing the first tag for each repository, and only with same-turn
-authorization, enable and verify immutable releases:
+authorization, use `gh auth status` to prove the active operator credential is
+a user or GitHub App credential with repository Administration write access;
+the Actions GITHUB_TOKEN is insufficient for this endpoint. Then enable and
+verify immutable releases:
 
     gh api --method PUT -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" repos/maccavelli/REPOSITORY/immutable-releases
     gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2026-03-10" repos/maccavelli/REPOSITORY/immutable-releases --jq ".enabled"
@@ -1701,28 +1930,39 @@ For one repository at a time:
 1. Fetch and prove the proposed tag is absent locally and remotely.
 2. Run that repository's complete verification contract.
 3. Push the implementation branch only after explicit authorization.
-4. Create an annotated strict tag and push that exact ref only after explicit
+4. Re-run Section 18.1's GET with the administrator credential immediately
+   before tagging and require `.enabled == true`.
+5. Create an annotated strict tag and push that exact ref only after explicit
    authorization.
-5. Wait for build, native, shared publication, and attestation jobs.
-6. Verify:
+6. Wait for build, native, shared publication, and attestation jobs.
+7. Verify:
 
        gh release view TAG --json tagName,isDraft,isPrerelease,isImmutable
        gh release download TAG --dir TEMP_DIRECTORY
        (cd TEMP_DIRECTORY && sha256sum -c SHA256SUMS)
+       if [ -f TEMP_DIRECTORY/SHA256SUMS-0.16.0 ]; then (cd TEMP_DIRECTORY && sha256sum -c SHA256SUMS-0.16.0); fi
        gh release verify TAG
+       for file in TEMP_DIRECTORY/*; do gh release verify-asset TAG "$file"; done
 
-7. Compare the downloaded file list byte-for-byte with the declared matrix.
+8. Compare the downloaded file list byte-for-byte with the declared matrix.
    Magic v0.16.0 is the only release allowed declared bridge extras.
-8. Never rerun publication against a completed tag. A fix receives a new patch.
+9. Never rerun publication against a completed tag. A fix receives a new patch.
 
 ### 18.3 Native update smoke
 
-Run on Linux, macOS, and Windows runners:
+Run on Linux, macOS, and Windows runners. Create each executable fixture in an
+exclusive random directory beneath the runner user's canonical home directory,
+not the default system temporary directory, so the smoke exercises the same
+default TargetPolicy shipped to users. Remove the fixture directory after the
+process exits and all pending-backup assertions finish.
 
 * Prepare: copy the previous published binary, run update --yes, and require the
-  new version.
+  new version; then run the new binary with update --force --yes and require a
+  successful verified reinstall.
 * Magic Remote bridge: copy v0.15.3's legacy binary, run update --yes with no
-  service definition, and require v0.16.0. This is the critical bridge proof.
+  service definition, and require v0.16.0. Then use the v0.16.0 shared updater
+  for a verified forced reinstall from the canonical exact asset. These are the
+  critical old-selector and new-selector bridge proofs.
 * Recall and MagicTools: copy the new release binary, run update --check and
   require 0; then run update --force --yes and require a successful verified
   reinstall without service initialization.
@@ -1730,8 +1970,10 @@ Run on Linux, macOS, and Windows runners:
   --check and require 0; then run update --force --yes and require a verified
   reinstall while config, datastore, browser, dashboard, telemetry, and MCP
   startup sentinels remain untouched.
-* All: corrupt a fixture manifest and require exit 1 with the original
-  executable digest unchanged.
+* All: use each repository's native smoke harness and injected loopback release
+  source to serve a corrupt fixture manifest; require exit 1 with the original
+  executable digest unchanged. Do not attempt to alter a live immutable
+  release or add a production CLI flag for the test source.
 
 Managed service update smoke is manual on one disposable host per supported
 service manager because CI must not install persistent user services:
@@ -1740,11 +1982,13 @@ service manager because CI must not install persistent user services:
 2. capture running state and definition digest;
 3. update to the new exact tag;
 4. require new version, installed definition, running health, and no stale
-   backup;
+   backup; on Windows, an explicitly reported PendingBackup is allowed only
+   while the updater process is still alive, and the next update invocation
+   must consume its validated receipt before network access;
 5. inject a health failure in a fixture build and require binary plus definition
    rollback.
 
-## 19. Phase 12 — Deduplication Audit and Legacy Removal
+## 19. Phase 12 — Deduplication and Completion Audit
 
 ### Immediate audit after all six repository migrations
 
@@ -1766,14 +2010,22 @@ Also run:
 
 in every consumer and require v1.3.0 or a reviewed later patch.
 
-### Deferred Magic cleanup trigger
+Record the exact search output, module versions, six consumer release URLs,
+native-smoke results, and any allowed adapter hits in Section 23. Update this
+plan's status to complete only when every Section 20 criterion is satisfied,
+then run markdown and diff checks and commit that execution-record update in
+mcplib. This documentation commit is the phase's only mutation.
 
-Do not remove bridge support until both conditions are true:
+### Deferred Magic cleanup is a separate follow-up plan
+
+The initial shared-self-update plan does not remain open for the bridge support
+window. Create and approve a new linked implementation plan before removing
+bridge code. That plan may begin only when both conditions are true:
 
 1. at least 90 days have elapsed since v0.16.0 publication; and
 2. v0.17.0, the first canonical-only release, has passed native update smoke.
 
-At that point create a small follow-up phase:
+The follow-up plan must:
 
 * delete internal/updateclient/legacy.go and its tests;
 * remove the installed-version normalization path;
@@ -1803,6 +2055,8 @@ The plan is complete only when all statements are true:
 6. Local builds require force; force bypasses no security validation.
 7. All GitHub API/body/token/redirect/rate-limit and limit tests pass.
 8. All filesystem, concurrency, native replacement, and rollback tests pass.
+   Windows tests additionally prove the pending running-image backup receipt is
+   narrow, reported, digest-consistent, and consumed before the next download.
 9. All managed lifecycle matrix and rollback tests pass.
 10. Recall, MagicTools, Socratic Thinker, and DuckDuckGo each keep their
     stdout JSON-RPC-clean for `update` and initialize nothing more than the
@@ -1828,8 +2082,9 @@ The plan is complete only when all statements are true:
     attested, and never uploaded with --clobber.
 15. Magic v0.16.0 proves a legacy binary can cross the bridge.
 16. The release file list matches each product's existing platform matrix.
-17. Every phase has one green commit per touched repository and no unapproved
-    push or tag occurred.
+17. Every mutating phase has one green commit per touched repository, every
+    read-only gate/audit has recorded evidence, and no unapproved push or tag
+    occurred.
 
 ## 21. Rollback and Recovery
 
@@ -1857,6 +2112,18 @@ The shared workflow leaves a failed release as a draft. It refuses to reuse it.
 An operator must inspect the draft and its attestations, explicitly delete the
 incomplete draft if appropriate, and rerun from the same immutable source tag.
 No workflow automatically deletes release state.
+
+### Post-publication verification timeout
+
+Never rerun the publication job after a draft has been published. If the
+workflow's bounded immutable-field or release-attestation poll times out, use
+the G2 administrator credential to inspect the existing release and run
+`gh release verify TAG` plus `gh release verify-asset TAG FILE` for every
+downloaded declared asset. If the release is immutable and every asset verifies,
+record the delayed propagation as a deviation and continue without mutation. If
+the published release is mutable or any asset fails, stop rollout, preserve the
+evidence, and prepare a reviewed new patch release; do not upload to, delete, or
+reuse the affected tag automatically.
 
 ## 22. File Summary
 
@@ -1894,4 +2161,7 @@ Populate during approved implementation.
 | 10 Socratic Thinker | pending | | | |
 | 11 DuckDuckGo | pending | | | |
 | G2 product releases | pending authorization | | | |
-| 12 Audit/legacy cleanup | deferred | | | |
+| 12 Deduplication/completion audit | pending | | | |
+
+Deferred Magic bridge cleanup is intentionally not an execution-record row; it
+requires the separately approved follow-up plan described in Section 19.
