@@ -1348,18 +1348,26 @@ failed on ubuntu-24.04, macos-15, and windows-2025. `v1.3.0` was not created.
    so standalone and managed installs failed. The native helper was named
    `helper` without `.exe`, so `exec.Command` failed with
    `executable file not found`.
+3. Follow-up on run 33629500170 (Linux/macOS green): Windows
+   `TestInjectedRenameFailure` still passed because replacement used
+   `MoveFileEx`, not the injected `os.Rename` seam. Native backup deletion
+   of the still-running image returned `ERROR_ACCESS_DENIED`, not
+   `ERROR_SHARING_VIOLATION`, so it was not classified as `PendingBackup`.
 
-**Decision.** Fix both. Do not skip or loosen tests. Wizard change is
-test-only: script `Confirm` false so an unreachable endpoint continues. Windows:
-treat directory `ERROR_ACCESS_DENIED` as unsupported sync; `MoveFileEx`
-`WRITE_THROUGH` remains the durability path. Name the native helper
-`helper.exe` on Windows.
+**Decision.** Fix all of the above. Do not skip or loosen tests. Wizard change
+is test-only: script `Confirm` false so an unreachable endpoint continues.
+Windows: treat directory `ERROR_ACCESS_DENIED` as unsupported sync;
+`MoveFileEx` `WRITE_THROUGH` remains the durability path. Name the native
+helper `helper.exe` on Windows. Inject `replacePath` so both Unix rename and
+Windows `MoveFileEx` share one test seam. Treat backup-delete
+`ERROR_ACCESS_DENIED` as the same running-image busy condition as a sharing
+violation (`PendingBackup` + cleanup receipt).
 
 **Files added to G1 scope.** `wizard/configure_test.go`;
 `selfupdate/replace.go`; `selfupdate/replace_unix.go`;
 `selfupdate/replace_windows.go`; `selfupdate/replace_test.go`;
 `selfupdate/replace_windows_test.go`; `selfupdate/replace_native_test.go`;
-this PLAN.
+`selfupdate/fs_test.go`; this PLAN.
 
 ## 12. Phase 6 — Migrate prepare-commit-msg as the Standalone Canary
 

@@ -21,6 +21,10 @@ func isUnsupportedDirSync(err error) bool {
 	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }
 
+func replacePathOS(oldpath, newpath string) error {
+	return moveFileReplace(oldpath, newpath)
+}
+
 func replaceTarget(target Target, staging string) (applyResult, error) {
 	info, err := os.Lstat(target.Path)
 	if err != nil {
@@ -40,11 +44,11 @@ func replaceTarget(target Target, staging string) (applyResult, error) {
 	if err := backupFile(target.Path, backup); err != nil {
 		return applyResult{}, fmt.Errorf("selfupdate: backup target: %w", err)
 	}
-	if err := moveFileReplace(staging, target.Path); err != nil {
+	if err := replacePath(staging, target.Path); err != nil {
 		return applyResult{}, joinRemove(fmt.Errorf("selfupdate: replace target: %w", err), backup)
 	}
 	if err := syncDirFn(target.Dir); err != nil && !isUnsupportedSync(err) {
-		if rerr := moveFileReplace(backup, target.Path); rerr != nil {
+		if rerr := replacePath(backup, target.Path); rerr != nil {
 			return applyResult{backup: backup, oldDigest: oldDigest}, fmt.Errorf("selfupdate: sync directory: %w", err)
 		}
 		return applyResult{}, fmt.Errorf("selfupdate: sync directory: %w", err)
@@ -79,12 +83,16 @@ func isSharingViolation(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 }
 
+func isBusyRunningImage(err error) bool {
+	return isSharingViolation(err) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}
+
 func commitReplacement(target Target, result applyResult) (pending string, err error) {
 	if result.backup == "" {
 		return "", nil
 	}
 	if err := osRemove(result.backup); err != nil {
-		if isSharingViolation(err) {
+		if isBusyRunningImage(err) {
 			if werr := writeCleanupReceipt(target, result); werr != nil {
 				return "", errors.Join(fmt.Errorf("selfupdate: remove backup: %w", err), werr)
 			}
@@ -99,7 +107,7 @@ func rollbackReplacement(target Target, result applyResult) error {
 	if result.backup == "" {
 		return fmt.Errorf("selfupdate: no backup to restore")
 	}
-	if err := moveFileReplace(result.backup, target.Path); err != nil {
+	if err := replacePath(result.backup, target.Path); err != nil {
 		return fmt.Errorf("selfupdate: restore backup: %w", err)
 	}
 	return syncDirFn(target.Dir)

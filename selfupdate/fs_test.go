@@ -9,11 +9,11 @@ import (
 
 func TestInjectedRenameFailure(t *testing.T) {
 	_, exe := withTempHome(t)
-	prev := osRename
-	osRename = func(oldpath, newpath string) error {
+	prev := replacePath
+	replacePath = func(oldpath, newpath string) error {
 		return errors.New("injected rename failure")
 	}
-	t.Cleanup(func() { osRename = prev })
+	t.Cleanup(func() { replacePath = prev })
 
 	inst, err := NewStandaloneInstaller(InstallOptions{TargetPolicy: TargetPolicy{ExecutablePath: exe}})
 	if err != nil {

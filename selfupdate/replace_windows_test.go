@@ -18,3 +18,13 @@ func TestIsUnsupportedDirSyncAccessDenied(t *testing.T) {
 		t.Fatal("unrelated Windows errors must remain fatal")
 	}
 }
+
+func TestBusyRunningImageIncludesAccessDenied(t *testing.T) {
+	err := &os.PathError{Op: "remove", Path: `old.exe`, Err: windows.ERROR_ACCESS_DENIED}
+	if !isBusyRunningImage(err) {
+		t.Fatal("deleting a running image that returns ACCESS_DENIED must be PendingBackup")
+	}
+	if !isBusyRunningImage(windows.ERROR_SHARING_VIOLATION) {
+		t.Fatal("SHARING_VIOLATION must remain PendingBackup")
+	}
+}

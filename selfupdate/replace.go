@@ -8,11 +8,12 @@ import (
 )
 
 var (
-	osRename  = os.Rename
-	osChmod   = os.Chmod
-	osRemove  = os.Remove
-	osLink    = os.Link
-	syncDirFn = syncDirectory
+	osRename    = os.Rename
+	osChmod     = os.Chmod
+	osRemove    = os.Remove
+	osLink      = os.Link
+	syncDirFn   = syncDirectory
+	replacePath = replacePathOS
 )
 
 func randomSibling(dir, prefix string) (string, error) {

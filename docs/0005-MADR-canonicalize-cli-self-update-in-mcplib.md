@@ -830,6 +830,13 @@ policy in this record and made the plan's lock transaction, immutable-release
 administrative gate, Magic Remote bridge filenames, and completion boundary
 explicit; it did not change the chosen option.
 
+On 2026-09-02, G1 CI on windows-2025 showed that deleting the renamed
+running-image backup returns `ERROR_ACCESS_DENIED` rather than only
+`ERROR_SHARING_VIOLATION`. That error is the same busy-file condition and
+is classified as `PendingBackup` with a cleanup receipt. Directory
+`ERROR_ACCESS_DENIED` on `File.Sync` remains an unsupported-sync no-op,
+not a failed install. The chosen option is unchanged.
+
 ### Primary Research Sources
 
 * [Go 1.26 release notes](https://go.dev/doc/go1.26)
