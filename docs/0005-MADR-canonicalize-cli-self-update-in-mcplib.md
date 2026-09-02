@@ -23,7 +23,7 @@ have two independent implementations and two missing implementations:
 | `mcp-server-magictools` | No update command | None | Build output uses exact unversioned names; publication adds version-suffixed copies and a second manifest |
 
 The two existing implementations therefore contain 1,823 production lines before their test
-suites, yet the next two products would still start from nothing. Thirteen sibling modules
+suites, yet the next two products would still start from nothing. Twelve sibling modules
 already import `github.com/maccavelli/mcplib`; it is the natural ownership boundary for the
 portable update mechanism.
 
@@ -375,7 +375,7 @@ Canonicalization must retain the strongest behavior already present:
 * Interactive safety by default without making tests depend on a real TTY.
 * Consumer-owned lifecycle, rendering, CLI framework, and platform matrix.
 * Additive-first migration so `mcplib` can release before consumers remove their internal code.
-* A public API small enough to support across the 13 current consumers.
+* A public API small enough to support across the 12 current consumers.
 
 ## Considered Options
 
@@ -799,6 +799,19 @@ Compliance is confirmed by all of the following:
 
 ## More Information
 
+### Post-Acceptance Implementation-Scope Extension
+
+On 2026-09-01, after this decision was accepted, the implementation scope was
+extended to add the same canonical standalone update command to
+`mcp-server-socratic-thinker` and `mcp-server-duckduckgo`. Neither repository
+had an updater, service lifecycle requirement, or a new architectural variation
+at the time of extension. The package boundary, CLI contract, release contract,
+decision outcome, and original 1,823-line duplication measurement are
+unchanged. The associated proposed plan records the later repository evidence,
+phases, release gates, and acceptance criteria. This addendum preserves the
+original decision rationale rather than retroactively presenting the two later
+adopters as part of the initial investigation.
+
 ### Primary Research Sources
 
 * [Go 1.26 release notes](https://go.dev/doc/go1.26)
@@ -843,6 +856,14 @@ Compliance is confirmed by all of the following:
 * `mcp-server-magictools/cmd/mcp-server-magictools/service.go`
 * `mcp-server-magictools/Makefile`
 * `mcp-server-magictools/.github/workflows/ci.yml`
+* `mcp-server-socratic-thinker/cmd/mcp-server-socratic-thinker/root.go`
+* `mcp-server-socratic-thinker/internal/config/config.go`
+* `mcp-server-socratic-thinker/Makefile`
+* `mcp-server-socratic-thinker/.github/workflows/ci.yml`
+* `mcp-server-duckduckgo/cmd/mcp-server-duckduckgo/root.go`
+* `mcp-server-duckduckgo/internal/config/config.go`
+* `mcp-server-duckduckgo/Makefile`
+* `mcp-server-duckduckgo/.github/workflows/ci.yml`
 
 ### Review Questions
 

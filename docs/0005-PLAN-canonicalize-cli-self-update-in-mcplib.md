@@ -10,8 +10,9 @@ decision-makers: mcplib maintainers
 > Paired with [0005-MADR-canonicalize-cli-self-update-in-mcplib.md](0005-MADR-canonicalize-cli-self-update-in-mcplib.md).
 > This plan implements the shared Go package, the canonical release workflow,
 > both existing updater migrations, and new update commands for Recall and
-> MagicTools. It does not authorize implementation, repository-setting changes,
-> pushes, tags, or releases; each external mutation remains an explicit gate.
+> MagicTools, Socratic Thinker, and DuckDuckGo. It does not authorize
+> implementation, repository-setting changes, pushes, tags, or releases; each
+> external mutation remains an explicit gate.
 
 <!-- markdownlint-disable MD013 MD024 MD029 MD036 -->
 
@@ -40,7 +41,7 @@ Execution rules:
 7. In the other repositories, run gofmt and per-file golint for every changed
    Go file before staging, then the repository checks named by the phase.
 8. Record command output, commit IDs, release URLs, deviations, and rollback
-   actions in Section 21 during execution. Do not silently widen a phase.
+   actions in Section 23 during execution. Do not silently widen a phase.
 
 No datastore migration, configuration migration, automatic background polling,
 or Android updater change is part of this plan.
@@ -53,11 +54,13 @@ The plan was written against the following read-only snapshot:
 
 | Repository | Branch | HEAD | Go directive | mcplib dependency | Working-tree note |
 |---|---|---|---|---|---|
-| mcplib | main | 5786e6d49b94 | 1.26.5 | self | untracked MADR/PLAN 0005 only |
-| magic-cli-remote | master | 8b67bcbea08a | 1.26.5 | none | unrelated Android/MADR 0129 owner changes present |
+| mcplib | main | f5b7771dc8c6 | 1.26.5 | self | accepted MADR/PLAN 0005 committed; scope-extension edit only |
+| magic-cli-remote | master | 4ab9d63268df | 1.26.5 | none | clean; newer commit changes only mobile notification files and MADR 0129 |
 | prepare-commit-msg | main | 79cdba965289 | 1.26.6 | v1.2.0 | clean |
 | mcp-server-recall | main | e22b9adf8c43 | 1.26.5 | v1.2.0 | clean |
 | mcp-server-magictools | main | c672a720f8c3 | 1.26.5 | v1.2.0 | owner MADR/PLAN 0002 files present |
+| mcp-server-socratic-thinker | ci/harden-release-pipeline | f62221a76ece | 1.26.5 | v1.2.0 | clean; two committed CI-hardening changes not on main |
+| mcp-server-duckduckgo | main | 9a312807504f | 1.26.5 | v1.2.0 | clean |
 
 The local toolchain was go1.26.5 darwin/arm64 except that prepare-commit-msg
 selected go1.26.6 from its module directive.
@@ -80,15 +83,19 @@ The MADR's targeted baseline tests passed:
     (prepare-commit-msg) go test ./internal/selfupdate .
     (mcp-server-recall) go test ./cmd/mcp-server-recall
     (mcp-server-magictools) go test ./cmd/mcp-server-magictools
+    (mcp-server-socratic-thinker) go test ./cmd/mcp-server-socratic-thinker
+    (mcp-server-duckduckgo) go test ./cmd/mcp-server-duckduckgo
 
 Production updater code is currently 1,823 lines:
 
 | Repository | Files | Production lines | Material behavior |
 |---|---|---:|---|
 | magic-cli-remote | internal/update/*.go excluding tests, internal/cli/update.go, internal/relay/update.go | 992 | confirmation, exit 10, service healing, definition refresh, rollback; no exact version |
-| prepare-commit-msg | internal/selfupdate/*.go excluding tests plus main.go binding | 831 | exact version and six targets; yes is unused, check-available exits 0 |
+| prepare-commit-msg | internal/selfupdate/*.go excluding tests; main.go runUpdate binding is ~29 additional lines | 831 (selfupdate subpackage) | exact version and six targets; yes is unused, check-available exits 0 |
 | Recall | none | 0 | no update command |
 | MagicTools | none | 0 | no update command |
+| Socratic Thinker | none | 0 | no update command |
+| DuckDuckGo | none | 0 | no update command or effective stamped version variable |
 
 The plan preserves the strongest behavior, deletes both general-purpose local
 implementations after migration, and permits only consumer lifecycle adapters
@@ -112,8 +119,16 @@ adapters.
 | MagicTools already has Linux, macOS, and Windows service commands | cmd/mcp-server-magictools/service.go and service_windows.go |
 | Prepare builds canonical exact assets unchanged | scripts/verify-release.sh and .github/workflows/ci.yml:53-70 |
 | Recall and MagicTools build exact assets, then publish extra suffixed copies | Recall ci.yml:307-350; MagicTools ci.yml:305-342 |
-| All four current publish jobs permit replacement with --clobber | each repository's release job |
+| The original four current publish jobs permit replacement with --clobber | each repository's release job |
 | Magic Remote allocates and pushes build/BASE.N tags | Makefile:1-8, scripts/next-build-version.sh, ci.yml:144-200 |
+| Socratic Thinker globally initializes Viper/fsnotify before every command | cmd/mcp-server-socratic-thinker/root.go:41-48; internal/config/config.go:32-69 |
+| Socratic Thinker builds three exact binaries, then publishes versioned copies, aliases, two manifests, and installers with --clobber | Makefile:19-31; ci.yml:115-164,250-342 |
+| Socratic Thinker's RawVersion defaults to v4.4.4 although its latest observed tag is v1.0.2 | cmd/mcp-server-socratic-thinker/version.go:9-11; local tag list |
+| Socratic Thinker's CI hardening is committed on ci/harden-release-pipeline, not main | commits b220dc8 and f62221a; main at d69cfe9 |
+| DuckDuckGo's global config initializer creates a cache directory and config file before every command | cmd/mcp-server-duckduckgo/root.go:35-37; internal/config/config.go:32-60 |
+| DuckDuckGo opens its BuntDB scraping store only in the serve path | cmd/mcp-server-duckduckgo/serve.go:91-114 |
+| DuckDuckGo builds and publishes three canonical exact binaries plus SHA256SUMS, but uses floating action tags and softprops/action-gh-release | Makefile:19-31; ci.yml:12-70 |
+| DuckDuckGo's Makefile stamps main.RawVersion, but no such variable or Cobra Version assignment exists | Makefile:15-31; cmd/mcp-server-duckduckgo/root.go:14-37 |
 
 ### 1.4 Research constraints incorporated by the plan
 
@@ -158,9 +173,9 @@ and therefore remain compatible with the Go 1.26.5 floor.
 
 Ship one public github.com/maccavelli/mcplib/selfupdate implementation and one
 reusable release-publication workflow, migrate the two existing commands, add
-commands to Recall and MagicTools, and make their observable CLI behavior and
-release contract identical except for product lifecycle and supported platform
-data.
+commands to Recall, MagicTools, Socratic Thinker, and DuckDuckGo, and make all
+six consumers' observable CLI behavior and release contract identical except
+for product lifecycle and supported platform data.
 
 ### In scope
 
@@ -173,6 +188,8 @@ data.
 * standalone and managed-service installation;
 * Magic Remote codesign transformation and legacy bridge;
 * release immutability, draft assembly, attestations, and no-clobber publication;
+* standalone adoption by Socratic Thinker and DuckDuckGo without config,
+  datastore, telemetry, dashboard, browser, or MCP-server startup;
 * CLI tests and native Linux/macOS/Windows replacement tests.
 
 ### Out of scope
@@ -1088,7 +1105,7 @@ After CI succeeds:
 
 Do not begin a consumer phase until the module command resolves v1.3.0. Record
 the second command's exact 40-character commit as the mcplib workflow SHA in
-Section 21. Every consumer calls the reusable workflow at that SHA, with a
+Section 23. Every consumer calls the reusable workflow at that SHA, with a
 `# v1.3.0` comment; no consumer calls it through a branch or movable tag.
 
 ### Rollback
@@ -1136,9 +1153,10 @@ Deleted after parity tests pass:
    error.
 3. Bind check, force, version, yes, and y exactly once. Reject check plus yes and
    check plus force before source construction.
-4. Add a releaseBuild ldflag variable defaulting false. Local source builds are
-   LocalBuild even if Version resembles a release. Tag builds stamp Version
-   from the tag and releaseBuild=true.
+4. Add a string RawBuildKind linker variable defaulting to `local`. Local source
+   builds are LocalBuild even if Version resembles a release. Tag builds stamp
+   RawVersion from the tag and RawBuildKind=`release`; the binding maps only
+   that exact value to ReleaseBuild. Go linker -X is not used on a bool.
 5. Use the home-root standalone installer, stdout text reporter, terminal
    confirmer, 15-minute signal-aware caller context, and repository
    maccavelli/prepare-commit-msg.
@@ -1148,9 +1166,9 @@ Deleted after parity tests pass:
    exact lower version is reported as rollback, and check available exits 10.
 8. Delete internal/selfupdate only after equivalent tests pass against the
    shared package.
-9. Stamp releaseBuild=true in all six Makefile build targets and extend
+9. Stamp RawBuildKind=release in all six Makefile build targets and extend
    verify-release.sh to execute one native binary and assert both version and
-   release-build identity through an internal diagnostic test seam.
+   release build-kind identity through an internal diagnostic test seam.
 10. Replace the local publish job with the mcplib reusable workflow pinned at
     the exact G1 workflow SHA (`# v1.3.0`). Keep the existing exact six-binary
     build artifact and SHA256SUMS.
@@ -1250,7 +1268,7 @@ Deleted:
 8. Move ErrUpdateAvailable handling in both mains to selfupdate.ExitCode and
    delete imports of internal/update.
 9. Replace the Makefile allocator with VERSION defaulting to a local identity.
-   Tag CI passes the strict tag directly and stamps releaseBuild=true. Local
+   Tag CI passes the strict tag directly and stamps RawBuildKind=release. Local
    build, build-remote, build-relay, run, install, and APK paths create no tags,
    counter file, or remote mutation.
 10. Keep Android versionCode on github.run_number. Set release APK versionName
@@ -1333,8 +1351,8 @@ Modified:
 5. Change Execute to return an error rather than exit. Keep the stdout-to-stderr
    protection, then let main print ordinary errors and map
    selfupdate.ExitCode. Check-available exits 10.
-6. Default RawVersion to dev and add releaseBuild=false. Stamp the strict tag
-   and releaseBuild=true in every release target.
+6. Default RawVersion to dev and RawBuildKind to `local`. Stamp the strict tag
+   and RawBuildKind=release in every release target.
 7. Add tests with an initConfig counter and ServeFunc sentinel proving update
    check/apply touches neither. Assert RealStdout remains unused by updater
    output and captured stdout is protocol-clean.
@@ -1403,8 +1421,8 @@ Modified:
 1. Pin mcplib v1.3.0 and add the canonical Cobra update command.
 2. Make Execute return an error; use the existing exitFunc seam in main to map
    selfupdate.ExitCode. Do not call os.Exit in root.go.
-3. Default RawVersion to dev, add releaseBuild=false, and stamp strict tag plus
-   releaseBuild=true in release targets.
+3. Default RawVersion to dev and RawBuildKind to `local`, then stamp the strict
+   tag plus RawBuildKind=release in release targets.
 4. Construct a lifecycle adapter bound to the resolved target. Installed is
    true only when the OS service definition exists and targets this executable;
    a definition for another binary is treated as absent and never stopped.
@@ -1452,7 +1470,204 @@ Standalone installs update without service calls. A matching installed service
 obeys absent/running/down behavior, definition and binary rollback are tested,
 and no update test initializes MCP or datastore state.
 
-## 16. Gate G2 — Enable Immutability and Roll Out Releases
+## 16. Phase 10 — Add Socratic Thinker Update Without Config or Runtime Startup
+
+### Branch precondition
+
+This phase is based on clean branch `ci/harden-release-pipeline` at
+`f62221a76ece`, whose commits `b220dc8` and `f62221a` add the installer and
+hardened workflow documented by local MADR/PLAN 0001. Do not overwrite or
+recreate that work. At execution time, do exactly one of the following:
+
+1. continue on that branch if it remains the maintainer's integration branch;
+   or
+2. if those commits have merged, switch to the clean intended base and re-read
+   every file below before editing.
+
+If neither condition is true, stop this phase and record the branch divergence
+in Section 23. The canonical immutable-release decision supersedes only local
+MADR 0001's version-suffixed, dual-manifest, and `--clobber` publication
+details; its native testing, installer, cgo, timeout, and action-pinning work is
+retained.
+
+### Files
+
+New:
+
+* cmd/mcp-server-socratic-thinker/update.go
+* cmd/mcp-server-socratic-thinker/update_test.go
+* cmd/mcp-server-socratic-thinker/main_test.go
+
+Modified:
+
+* cmd/mcp-server-socratic-thinker/root.go
+* cmd/mcp-server-socratic-thinker/cmd_extra_test.go
+* cmd/mcp-server-socratic-thinker/main.go
+* cmd/mcp-server-socratic-thinker/version.go
+* cmd/mcp-server-socratic-thinker/serve_extra_test.go
+* Makefile
+* go.mod
+* go.sum
+* .github/workflows/ci.yml
+* scripts/install.sh
+* scripts/install.ps1
+* scripts/install_test.sh
+* README.md
+* docs/0001-MADR-port-magictools-ci-cd-pipeline.md
+* docs/0001-PLAN-port-magictools-ci-cd-pipeline.md
+
+### Steps
+
+1. Pin mcplib v1.3.0 with no replace directive. Add a standalone canonical
+   Cobra update command for repository `maccavelli/mcp-server-socratic-thinker`
+   and the exact linux/amd64, darwin/arm64, and windows/amd64 platform set.
+2. Replace cobra.OnInitialize with a root PersistentPreRunE that calls
+   initConfig for ordinary commands but skips a command annotated
+   `selfupdate.skip-config=true`. Preserve any command pre-run hook by explicit
+   chaining. The update command must not call config.New, start fsnotify, create
+   a Recall client, open the metrics BuntDB, start telemetry, or launch the
+   dashboard or MCP server.
+3. Change Execute to return rootCmd.Execute errors while preserving the existing
+   default serve delegate. Keep stdout redirected to stderr for protocol safety,
+   but let main map selfupdate.ExitCode so check-available exits 10. No package
+   outside main may call os.Exit for update failures.
+4. Default RawVersion to `dev`, retain Version only as the trimmed display
+   value, and add string RawBuildKind=`local`. Every release Makefile target
+   stamps the raw strict tag and RawBuildKind=release; local build/run/install
+   paths remain LocalBuild even when `git describe` resembles a tag. Do not use
+   linker -X on a bool.
+5. Use cmd.Context with a 15-minute child timeout, StandaloneInstaller, stderr
+   reporting/confirmation, Cobra NoArgs, and the four canonical flags. Use an
+   injected updater-construction seam in tests; make no live GitHub call.
+6. Add tests for the complete CLI matrix, exit 0/10/1, local-build force,
+   context cancellation, config-init count zero, RealStdout unused, and
+   sentinels proving serve/dashboard/Recall/metrics/telemetry paths are not
+   invoked by check or apply.
+7. Keep the hardening branch's exact three binaries and build-time SHA256SUMS.
+   Remove release-time version-suffixed copies and the second manifest. Stage
+   install.sh and install.ps1 as declared extras and invoke the reusable
+   workflow at the exact G1 workflow SHA (`# mcplib v1.3.0`).
+8. Change both installers to select the exact canonical platform filename in
+   SHA256SUMS. Preserve their existing binary-only behavior, explicit version
+   option, offline fixtures, install roots, and PowerShell WhatIf behavior.
+9. Append dated supersession notes to local MADR/PLAN 0001 and set their status
+   to superseded. Preserve their original rationale and execution history;
+   identify mcplib MADR 0005 as superseding only release naming and mutable
+   publication behavior.
+10. Update README command, release, installer, exit-code, local-build, and
+    package-manager guidance.
+
+### Verification and commit
+
+Run gofmt and per-file golint, then:
+
+    make test
+    go test -race ./cmd/mcp-server-socratic-thinker ./internal/config
+    make vet
+    make lint
+    sh -n scripts/install.sh
+    shellcheck -s sh scripts/install.sh scripts/install_test.sh
+    sh scripts/install_test.sh
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml
+    rg -n -- "--clobber|SHA256SUMS-[${]?[A-Za-z_]|softprops/action-gh-release" .github scripts Makefile
+    git diff --check
+
+The rg command may match only quoted historical text in docs, not an executable
+workflow or installer path. Stage only the files listed by this phase, rerun
+the checks against the staged Go list, and commit. Do not push.
+
+### Acceptance
+
+Socratic Thinker exposes the canonical CLI and exact assets; update starts no
+config watcher or runtime component; the hardened native tests and binary-only
+installers remain; and no mutable or version-suffixed publication path remains.
+
+## 17. Phase 11 — Add DuckDuckGo Update and Canonical Release Identity
+
+### Files
+
+New:
+
+* cmd/mcp-server-duckduckgo/update.go
+* cmd/mcp-server-duckduckgo/update_test.go
+* cmd/mcp-server-duckduckgo/version.go
+* cmd/mcp-server-duckduckgo/version_test.go
+* cmd/mcp-server-duckduckgo/main_test.go
+
+Modified:
+
+* cmd/mcp-server-duckduckgo/root.go
+* cmd/mcp-server-duckduckgo/root_test.go
+* cmd/mcp-server-duckduckgo/main.go
+* cmd/mcp-server-duckduckgo/serve_test.go
+* Makefile
+* go.mod
+* go.sum
+* .github/workflows/ci.yml
+* README.md
+
+### Steps
+
+1. Pin mcplib v1.3.0 with no replace directive. Add a standalone canonical
+   Cobra update command for repository `maccavelli/mcp-server-duckduckgo` and
+   the exact linux/amd64, darwin/arm64, and windows/amd64 platform set.
+2. Replace cobra.OnInitialize(config.Load) with a root PersistentPreRunE that
+   calls a narrow loadConfig seam for ordinary commands and skips commands
+   annotated `selfupdate.skip-config=true`. Update check/apply must not create
+   the cache directory or config.yaml currently written by config.Load.
+3. Add RawVersion=`dev`, Version display normalization, and string
+   RawBuildKind=`local` in version.go. Assign RootCmd.Version. Change every tag
+   build to pass the strict raw tag and RawBuildKind=release; local build/run/
+   install paths remain LocalBuild. Remove the ineffective linker assumption
+   that main.RawVersion exists without defining it, and do not use linker -X on
+   a bool.
+4. Make Execute return an error and let main map selfupdate.ExitCode. Preserve
+   the existing stdout-to-stderr protection, route update output to stderr, use
+   cmd.Context with a 15-minute child timeout, and reject positional arguments.
+5. Use StandaloneInstaller only. Update must not acquire the serve singleton
+   lock, create its data directory, open or seed BuntDB, construct the browser/
+   search engine, register MCP tools, or start stdio transport.
+6. Add the full CLI matrix and injected updater tests. Set a temporary user
+   cache directory and assert check/apply leave it absent; replace serve RunE
+   with a restored test sentinel and assert it remains uncalled; assert
+   OriginalStdout receives no updater output.
+7. Preserve the already-canonical exact three-binary plus SHA256SUMS artifact
+   set. Make tag builds explicitly use VERSION="$GITHUB_REF_NAME", verify the
+   native binary reports the trimmed tag and release build-kind identity, and reject
+   every undeclared artifact.
+8. Expand CI to the shared native Linux/macOS/Windows quality and update-smoke
+   gates. Pin every action reference modified or added by this phase to a
+   verified full commit SHA. Remove softprops/action-gh-release and call the
+   reusable workflow at the exact G1 workflow SHA (`# mcplib v1.3.0`) with an
+   empty extras list.
+9. Update README with the update command, version behavior, exit codes,
+   supported platforms, self-update ownership limits, and immutable release
+   contract. Do not add installer scripts or service behavior in this phase.
+
+### Verification and commit
+
+Run gofmt and per-file golint, then:
+
+    make test
+    go test -race ./cmd/mcp-server-duckduckgo ./internal/config ./internal/store
+    make vet
+    make lint
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml
+    rg -n "softprops/action-gh-release|uses: .*@v[0-9]|api.github.com/repos/.*/releases" .github cmd internal
+    git diff --check
+
+The rg command must return no production or workflow hit. Stage only the files
+listed by this phase, rerun checks against the staged Go list, and commit. Do
+not push.
+
+### Acceptance
+
+DuckDuckGo gains a real stamped release identity and the canonical CLI; update
+creates no config, datastore, browser, search, registry, transport, or server
+state; and its exact three-platform assets publish only through the immutable
+shared workflow.
+
+## 18. Gate G2 — Enable Immutability and Roll Out Releases
 
 Each repository is a separate stop-and-authorize gate. The latest local tags in
 the Section 1 snapshot and proposed feature-release tags are:
@@ -1463,11 +1678,13 @@ the Section 1 snapshot and proposed feature-release tags are:
 | magic-cli-remote | v0.15.3 | v0.16.0 bridge |
 | mcp-server-recall | v2.0.0 | v2.1.0 |
 | mcp-server-magictools | v1.0.3 | v1.1.0 |
+| mcp-server-socratic-thinker | v1.0.2 | v1.1.0 |
+| mcp-server-duckduckgo | v1.0.2 | v1.1.0 |
 
 The gate fetches remote tags again before acting; any newly occupied proposed
 tag stops execution and requires a reviewed replacement version.
 
-### 16.1 Repository setting gate
+### 18.1 Repository setting gate
 
 Before pushing the first tag for each repository, and only with same-turn
 authorization, enable and verify immutable releases:
@@ -1477,7 +1694,7 @@ authorization, enable and verify immutable releases:
 
 Expected result is true. Do not tag if the check fails.
 
-### 16.2 Per-repository release gate
+### 18.2 Per-repository release gate
 
 For one repository at a time:
 
@@ -1498,7 +1715,7 @@ For one repository at a time:
    Magic v0.16.0 is the only release allowed declared bridge extras.
 8. Never rerun publication against a completed tag. A fix receives a new patch.
 
-### 16.3 Native update smoke
+### 18.3 Native update smoke
 
 Run on Linux, macOS, and Windows runners:
 
@@ -1509,6 +1726,10 @@ Run on Linux, macOS, and Windows runners:
 * Recall and MagicTools: copy the new release binary, run update --check and
   require 0; then run update --force --yes and require a successful verified
   reinstall without service initialization.
+* Socratic Thinker and DuckDuckGo: copy the new release binary, run update
+  --check and require 0; then run update --force --yes and require a verified
+  reinstall while config, datastore, browser, dashboard, telemetry, and MCP
+  startup sentinels remain untouched.
 * All: corrupt a fixture manifest and require exit 1 with the original
   executable digest unchanged.
 
@@ -1523,13 +1744,13 @@ service manager because CI must not install persistent user services:
 5. inject a health failure in a fixture build and require binary plus definition
    rollback.
 
-## 17. Phase 10 — Deduplication Audit and Legacy Removal
+## 19. Phase 12 — Deduplication Audit and Legacy Removal
 
-### Immediate audit after all four migrations
+### Immediate audit after all six repository migrations
 
 Run from the common parent directory:
 
-    rg -n "api.github.com/repos/.*/releases|SHA256SUMS|ParseSemver|ParseVersion|ReplaceExecutable|DownloadAndVerify|MoveFileEx" magic-cli-remote prepare-commit-msg mcp-server-recall mcp-server-magictools --glob '*.go'
+    rg -n "api.github.com/repos/.*/releases|SHA256SUMS|ParseSemver|ParseVersion|ReplaceExecutable|DownloadAndVerify|MoveFileEx" magic-cli-remote prepare-commit-msg mcp-server-recall mcp-server-magictools mcp-server-socratic-thinker mcp-server-duckduckgo --glob '*.go'
 
 Allowed production hits:
 
@@ -1566,12 +1787,12 @@ At that point create a small follow-up phase:
 
 Do not delete old immutable release assets or tags.
 
-## 18. Global Acceptance Criteria
+## 20. Global Acceptance Criteria
 
 The plan is complete only when all statements are true:
 
 1. mcplib/selfupdate builds and tests with Go 1.26.5.
-2. All four CLIs expose:
+2. Every migrated executable exposes:
 
        update [--check] [--force] [--version vX.Y.Z] [--yes|-y]
 
@@ -1583,8 +1804,21 @@ The plan is complete only when all statements are true:
 7. All GitHub API/body/token/redirect/rate-limit and limit tests pass.
 8. All filesystem, concurrency, native replacement, and rollback tests pass.
 9. All managed lifecycle matrix and rollback tests pass.
-10. Recall stdout remains protocol-clean and neither MCP server initializes its
-    server or datastore merely to update.
+10. Recall, MagicTools, Socratic Thinker, and DuckDuckGo each keep their
+    stdout JSON-RPC-clean for `update` and initialize nothing more than the
+    sentinels required to bind flags. The minimum proven set is:
+
+    * Recall: no Viper, no fsnotify, no datastore open, no `serve.RunE`.
+    * MagicTools: no `db.NewStore`, no `NewOrchestratorApp`, no stdout
+      hijack, no `ServeFunc`.
+    * Socratic Thinker: no `config.New`, no fsnotify, no Recall client, no
+      metrics BuntDB, no telemetry, no dashboard, no `serve.RunE`.
+    * DuckDuckGo: no `config.Load` (no cache directory, no `config.yaml`
+      write), no serve singleton lock, no BuntDB open or seed, no browser
+      or search engine, no MCP tool registration, no stdio transport.
+
+    Each consumer's check and apply paths assert the relevant counters and
+    sentinels remain at their zero or sentinel values.
 11. Prepare yes is observably used; Magic commands propagate caller context.
 12. No general updater implementation remains outside mcplib; consumer code is
     limited to version normalization, product configuration, lifecycle,
@@ -1597,7 +1831,7 @@ The plan is complete only when all statements are true:
 17. Every phase has one green commit per touched repository and no unapproved
     push or tag occurred.
 
-## 19. Rollback and Recovery
+## 21. Rollback and Recovery
 
 ### Before publication
 
@@ -1624,7 +1858,7 @@ An operator must inspect the draft and its attestations, explicitly delete the
 incomplete draft if appropriate, and rerun from the same immutable source tag.
 No workflow automatically deletes release state.
 
-## 20. File Summary
+## 22. File Summary
 
 | Repository | Added | Modified | Deleted |
 |---|---|---|---|
@@ -1633,12 +1867,14 @@ No workflow automatically deletes release state.
 | magic-cli-remote | one shared product adapter and tests | both bindings/mains, service adapter, build/release/install/docs | internal/update; build allocator scripts |
 | mcp-server-recall | update binding/tests | root/main/version, build/release/install/docs, module files | none |
 | mcp-server-magictools | update and managed service adapters/tests | root/main/version/service, build/release/install/docs, module files | none |
+| mcp-server-socratic-thinker | standalone update binding/tests | root/main/version, build/release/install/docs, module files | none |
+| mcp-server-duckduckgo | standalone update/version bindings and tests | root/main/serve tests, build/release/docs, module files | none |
 
 Exact generated go.sum changes are accepted only when explained by the pinned
 mcplib, x/mod, and x/sys graph. No unrelated dependency upgrade belongs in
 these commits.
 
-## 21. Execution Record
+## 23. Execution Record
 
 Populate during approved implementation.
 
@@ -1655,5 +1891,7 @@ Populate during approved implementation.
 | 7 Magic bridge | pending | | | |
 | 8 Recall | pending | | | |
 | 9 MagicTools | pending | | | |
+| 10 Socratic Thinker | pending | | | |
+| 11 DuckDuckGo | pending | | | |
 | G2 product releases | pending authorization | | | |
-| 10 Audit/legacy cleanup | deferred | | | |
+| 12 Audit/legacy cleanup | deferred | | | |
