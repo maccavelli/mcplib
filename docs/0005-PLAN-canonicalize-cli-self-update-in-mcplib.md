@@ -2258,7 +2258,7 @@ table. Rows from Phase 7 onward are populated as each phase executes.
 | 6 Prepare canary | complete | prepare-commit-msg 9f887d3b7b47, authored 2026-09-02 07:48:42 -0500 | internal/selfupdate deleted (9 files, 1,363 lines); update.go and update_test.go added; go.mod pins github.com/maccavelli/mcplib v1.3.0 with no replace directive; ci.yml calls maccavelli/mcplib/.github/workflows/publish-selfupdate-release.yml@3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`), the exact G1 workflow SHA. `GOTOOLCHAIN=auto go test ./...` green on 2026-09-02 across 5 packages, with internal/selfupdate absent from the package list | Deviation 2026-09-02 in Section 12 — main_extra2_test.go modified instead of main_test.go |
 | 7 Magic bridge | complete | magic-cli-remote 45f8203 (migration) and 32510a6 (bridge, steps 11-13) | `internal/update` (2,225 lines) and the BASE.N allocator scripts deleted; `internal/updateclient` added with legacy normalizer, lifecycle, reconciler and codesign adapters plus tests; both products share one command body with `--version` and `-y`; mains map exit codes via `selfupdate.ExitCode`; Makefile and CI allocator removed, release builds stamp `BUILD_KIND=release`. Verified: `make pre-add-check` 17 files clean, `make race` green, `make verify-build-metadata` OK, `./scripts/install_test.sh` 135 passed / 0 failed, actionlint at parity with HEAD (two pre-existing shellcheck infos, unchanged), `go build`/`go vet`/`go test ./...` clean. `WaitHealthy` assertions proven to fail against a deliberately broken implementation via `go test -overlay`, tree untouched | the partial-phase deviation below is now closed; one contract change recorded: an ambiguous manifest fails closed |
 | 8 Recall | complete | mcp-server-recall d80a55d | Standalone update on mcplib v1.4.0; scoped `PersistentPreRunE` replaces `cobra.OnInitialize`; `Execute` returns and main maps `ExitCode`; publication moved to the reusable workflow at `3389f793`. Verified: build/vet/test, `make lint` 0 issues, `go-precheck.sh` clean, `install_test.sh` 52 passed / 0 failed (up from 48), actionlint clean | `RawVersion` defaulted to `v2.0.0` — the current latest tag — so every local build claimed to be the newest release and self-update would never have fired; now `dev` + `RawBuildKind`. The installer shadowing test was tightened to fail closed on an ambiguous manifest, as in Phase 7 |
-| 9 MagicTools | pending | | | |
+| 9 MagicTools | complete | mcp-server-magictools 91b5466 | Managed update on mcplib v1.4.0: lifecycle adapter bound to the resolved target, hidden `service refresh --json` with a typed receipt, fatal reconcile and fatal health timeout, exit mapping through the existing `exitFunc` seam, publication via the reusable workflow at `3389f793`. Verified: `make test`, `go test -race`, `make vet`, `make lint` 0 issues, gofmt/golint clean, `install_test.sh` 34 passed / 0 failed (up from 31), actionlint clean, linux/darwin/windows cross-build. The target-binding rule was proven to fail against a deliberately broken check via `go test -overlay`, tree untouched | `RawVersion` defaulted to `v4.3.2`, outranking every real tag; now `dev` + `RawBuildKind`. Steps 6-7's Windows refresh is deliberately a no-op on disk: the definition lives in the service control manager, so it is left untouched rather than guessed — recorded below |
 | 10 Socratic Thinker | complete | mcp-server-socratic-thinker 067a438 (14 files, +570 / -67) | Standalone update command on mcplib v1.4.0; scoped `PersistentPreRunE` replaces `cobra.OnInitialize`; `Execute` returns and main maps `selfupdate.ExitCode`; `RawVersion` defaults to `dev` with `RawBuildKind`; publication moved to the reusable workflow at `3389f793` with exact assets only. Verified: `make test`, `go test -race`, `make vet`, `make lint` 0 issues, per-file `golint` clean, `install_test.sh` 35 passed / 0 failed (up from 31), actionlint clean, no `--clobber` or `softprops/action-gh-release` path remains. The config sentinel was proven to fail against the pre-0005 behaviour with `go test -overlay`, tree untouched | plan said pin v1.3.0; pinned v1.4.0 per the 0006 deviation. Two lint fixes in scope: extracted `skipConfigValue` (my second `"true"` literal tripped goconst) and documented the pre-existing `Cfg`/`RealStdout` vars in a file this phase modified |
 | 11 DuckDuckGo | complete | mcp-server-duckduckgo 240ca3a | Standalone update on mcplib v1.4.0; `loadConfig` seam behind a scoped pre-run; `Execute` returns and main maps `ExitCode`; `softprops/action-gh-release` replaced by the reusable workflow at `3389f793`; every action pinned to a full SHA; tag build verifies its stamped identity. Verified: build/vet/test, gofmt and per-file golint clean, actionlint clean, no floating action tag or softprops path remains | `version.go` did not exist, so the Makefile's `-X main.RawVersion` had silently done nothing and the server had no version identity at all. Two floating action tags in the untouched test job were also pinned — a small consistency fix beyond the phase's literal file list |
 | G2 product releases | pending authorization | | | |
@@ -2294,6 +2294,27 @@ Section 20 criterion 17 is therefore satisfied for the *commit* requirement but
 only partially for the *evidence* requirement on Phases 0 through 6. The Phase
 12 audit must state that limitation rather than claim per-phase evidence exists.
 Phases 7 onward record evidence as they run.
+
+### Deviation 2026-09-02 — Windows service refresh is a documented no-op
+
+**Found.** Phase 9 step 7 asks the Windows refresh to snapshot `mgr.Config`
+plus the service environment registry value and update the existing service
+configuration. Unlike Linux and macOS, Windows keeps no definition file on
+disk, so there is nothing to render, back up and restore with the same
+mechanism the other two use.
+
+**Decision.** `refreshServiceDefinition` returns an explicit unchanged receipt
+on Windows rather than a guessed `mgr.Config` mutation. An update there
+replaces the binary and restarts the service; the service configuration is left
+exactly as the operator installed it.
+
+**Not done, and why.** The `mgr.Config` snapshot and restore path is not
+implemented. Implementing it blind would create a rollback path that has never
+run against a real Windows service control manager, and the plan's own managed
+smoke tests are manual on a disposable host per Section 18.3. A wrong restore
+there would corrupt a service definition rather than leave it alone. This is
+recorded as outstanding for the Windows managed smoke rather than shipped
+untested.
 
 ### Deviation 2026-09-02 — installer now fails closed on an ambiguous manifest
 
