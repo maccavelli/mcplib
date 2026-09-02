@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-09-02
 associated-madr: 0005-MADR-canonicalize-cli-self-update-in-mcplib.md
 decision-makers: mcplib maintainers
@@ -56,7 +56,7 @@ The plan was written against the following read-only snapshot:
 
 | Repository | Branch | HEAD | Go directive | mcplib dependency | Working-tree note |
 |---|---|---|---|---|---|
-| mcplib | main | dc1221873b17 | 1.26.5 | self | clean before this review; accepted MADR 0005, proposed PLAN 0005, and six-consumer scope extension committed |
+| mcplib | main | fc2c94db7817 | 1.26.5 | self | clean at Phase 0 start 2026-09-02; HEAD moved from planning snapshot dc1221873b17 by docs-only hardening commit fc2c94d |
 | magic-cli-remote | master | 1b7abccc0747 | 1.26.5 | none | one owner-modified Dart diagnostics file; commits since the prior snapshot affect mobile code and MADRs 0128-0130, not Go updater code |
 | prepare-commit-msg | main | 79cdba965289 | 1.26.6 | v1.2.0 | clean |
 | mcp-server-recall | main | e22b9adf8c43 | 1.26.5 | v1.2.0 | clean |
@@ -2147,7 +2147,7 @@ Populate during approved implementation.
 
 | Phase or gate | Status | Commit/release | Verification evidence | Deviation |
 |---|---|---|---|---|
-| 0 Decision artifacts | pending | | | |
+| 0 Decision artifacts | in progress | | PLAN status set to accepted; MADR remains accepted; filenames mirror; HEAD recorded as fc2c94db7817 | planning snapshot HEAD dc1221873b17 superseded by docs-only fc2c94d; no source anchors moved |
 | 1 Core policy | pending | | | |
 | 2 GitHub/download | pending | | | |
 | 3 Installers/native | pending | | | |
