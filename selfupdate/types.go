@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -536,4 +537,15 @@ type Config struct {
 
 // Updater is the coordinator. Unexported collaborator fields are populated
 // by New and are immutable afterwards.
-type Updater struct{}
+type Updater struct {
+	source      ReleaseSource
+	versions    VersionPolicy
+	assets      AssetSelector
+	verifiers   []Verifier
+	transformer Transformer
+	installer   Installer
+	reporter    Reporter
+	confirmer   Confirmer
+	limits      Limits
+	running     atomic.Bool
+}

@@ -8,5 +8,7 @@
 //
 // Baseline verification proves release-asset integrity: HTTPS GitHub
 // metadata, the GitHub asset digest when present, and the exact SHA256SUMS
-// entry. It does not prove publisher signature authenticity.
+// entry. It does not prove publisher signature authenticity. Additional
+// Verifier implementations may be composed after that integrity check
+// without changing discovery, staging, or installation APIs.
 package selfupdate

@@ -14,6 +14,7 @@ Shared Go library for MCP servers and related tools in this monorepo.
 |---------|------|
 | `mcplib` (root) | Server helpers, stdio transport, prompts, diagnostics, orchestrator utilities |
 | `mcplib/llmprovider` | LLM provider adapters: OpenAI, Claude, Gemini, Grok, plus the OpenCode Zen/Go, Hugging Face and Kilo gateways |
+| `mcplib/selfupdate` | Canonical CLI self-update: GitHub Releases discovery, exact assets, SHA-256 integrity, and locked replacement |
 | `mcplib/schema` | Schema helpers |
 | `mcplib/logging` | Redaction / sanitization helpers |
 | `mcplib/fastpath` | Fast-path helpers |
