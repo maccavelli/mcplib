@@ -2256,7 +2256,7 @@ table. Rows from Phase 7 onward are populated as each phase executes.
 | 5 Shared release workflow | complete | 9c076e2 | Added files match Section 10 exactly: publish-selfupdate-release.yml, verify-selfupdate-release.sh, and its test harness; ci.yml, doc.go, and README modified | none |
 | G1 mcplib v1.3.0 | complete | tag v1.3.0 at 3e64e3078c875a3dc3ffe235952be9f76c1ac787; https://github.com/maccavelli/mcplib/releases/tag/v1.3.0 | main CI 33629927085 green (ubuntu-24.04, macos-15, windows-2025); tag CI 33630084419 green; `GOPROXY=https://proxy.golang.org go list -m github.com/maccavelli/mcplib@v1.3.0` resolved. Reusable workflow SHA is 3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`). | 2026-09-02: first push 9c076e2 failed (33628586778); wizard Ollama Confirm (pre-existing 33268493827); Windows dir sync ACCESS_DENIED, helper.exe, replacePath seam, backup-delete ACCESS_DENIED as PendingBackup. Fixes in 758209c and 3e64e30. |
 | 6 Prepare canary | complete | prepare-commit-msg 9f887d3b7b47, authored 2026-09-02 07:48:42 -0500 | internal/selfupdate deleted (9 files, 1,363 lines); update.go and update_test.go added; go.mod pins github.com/maccavelli/mcplib v1.3.0 with no replace directive; ci.yml calls maccavelli/mcplib/.github/workflows/publish-selfupdate-release.yml@3e64e3078c875a3dc3ffe235952be9f76c1ac787 (`# v1.3.0`), the exact G1 workflow SHA. `GOTOOLCHAIN=auto go test ./...` green on 2026-09-02 across 5 packages, with internal/selfupdate absent from the package list | Deviation 2026-09-02 in Section 12 — main_extra2_test.go modified instead of main_test.go |
-| 7 Magic bridge | **partial** — code migration complete, release pipeline not | magic-cli-remote 45f8203 (38 files, +1,265 / -2,768) | `internal/update` (2,225 lines) and the BASE.N allocator scripts deleted; `internal/updateclient` added with legacy normalizer, lifecycle, reconciler and codesign adapters plus tests; both products share one command body with `--version` and `-y`; mains map exit codes via `selfupdate.ExitCode`; Makefile and CI allocator removed, release builds stamp `BUILD_KIND=release`. Verified: `make pre-add-check` 17 files clean, `make race` green, `make verify-build-metadata` OK, `./scripts/install_test.sh` 135 passed / 0 failed, actionlint at parity with HEAD (two pre-existing shellcheck infos, unchanged), `go build`/`go vet`/`go test ./...` clean. `WaitHealthy` assertions proven to fail against a deliberately broken implementation via `go test -overlay`, tree untouched | steps 11, 12 and 13 not done — see the deviation below |
+| 7 Magic bridge | complete | magic-cli-remote 45f8203 (migration) and 32510a6 (bridge, steps 11-13) | `internal/update` (2,225 lines) and the BASE.N allocator scripts deleted; `internal/updateclient` added with legacy normalizer, lifecycle, reconciler and codesign adapters plus tests; both products share one command body with `--version` and `-y`; mains map exit codes via `selfupdate.ExitCode`; Makefile and CI allocator removed, release builds stamp `BUILD_KIND=release`. Verified: `make pre-add-check` 17 files clean, `make race` green, `make verify-build-metadata` OK, `./scripts/install_test.sh` 135 passed / 0 failed, actionlint at parity with HEAD (two pre-existing shellcheck infos, unchanged), `go build`/`go vet`/`go test ./...` clean. `WaitHealthy` assertions proven to fail against a deliberately broken implementation via `go test -overlay`, tree untouched | the partial-phase deviation below is now closed; one contract change recorded: an ambiguous manifest fails closed |
 | 8 Recall | pending | | | |
 | 9 MagicTools | pending | | | |
 | 10 Socratic Thinker | pending | | | |
@@ -2295,7 +2295,28 @@ only partially for the *evidence* requirement on Phases 0 through 6. The Phase
 12 audit must state that limitation rather than claim per-phase evidence exists.
 Phases 7 onward record evidence as they run.
 
-### Deviation 2026-09-02 — Phase 7 committed partially; steps 11-13 outstanding
+### Deviation 2026-09-02 — installer now fails closed on an ambiguous manifest
+
+**Found.** Step 12 asked the installer to prefer the exact canonical checksum
+entry. Making it simply prefer canonical broke
+`scripts/install_test.sh`'s "alias line does not shadow the versioned line",
+which appends a bogus canonical line to a legacy manifest and required the
+install to still succeed. That test was guarding a real shadowing vector: once
+canonical entries are legitimate, a preference in **either** direction lets an
+appended line authorize a substituted binary.
+
+**Decision.** Neither preference is safe, so the installer looks up both shapes
+and refuses to choose: a manifest carrying a canonical *and* a versioned entry
+for the same product/platform now exits 2 without installing. A conforming
+release never contains both — `SHA256SUMS` lists canonical names only and the
+bridge's `SHA256SUMS-0.16.0` lists compatibility names only.
+
+**Test updated, not loosened.** The assertion changed from exit 0 to exit 2 and
+was renamed to state the stronger guarantee, with a new case proving a
+canonical-only manifest installs and an added check that an ambiguous manifest
+leaves an existing install untouched. Suite: 139 passed / 0 failed, up from 135.
+
+### Deviation 2026-09-02 — Phase 7 committed partially; steps 11-13 outstanding — CLOSED 2026-09-02
 
 **Found.** Phase 7 bundles two separable bodies of work: the Go migration onto
 `mcplib/selfupdate`, and the v0.16.0 release-pipeline bridge. The migration is
@@ -2316,12 +2337,24 @@ published release, which Gate G2 has not authorized. They were left whole
 rather than half-built: a bridge fixture that has never run against a real
 asset list is exactly the kind of check this plan's own rule says not to trust.
 
-**Consequence of stopping here.** magic-cli-remote can build, test and run
-`update` against the canonical contract, but it **cannot yet publish a release
-that a pre-v0.16.0 client can consume**. Tagging v0.16.0 before steps 11-13
-land would strand every installed legacy binary, because the old selector needs
-the version-suffixed asset names this repository no longer stages. Gate G2 for
-this repository must not run until those steps are complete.
+**Closed 2026-09-02 by commit 32510a6.** Steps 11, 12 and 13 are complete and
+the consequence below no longer applies. Retained for the record.
+
+**Consequence of stopping here — corrected 2026-09-02.** The original wording
+here said a release would strand pre-v0.16.0 clients. Reading the release job
+shows the opposite. It still renames every asset to
+`<product>-<goos>-<goarch>-<VER>` and writes `SHA256SUMS-<VER>`, and `VER` is
+now the bare tag base, so tagging v0.16.0 would publish exactly the
+`mcremote-linux-amd64-0.16.0` and `SHA256SUMS-0.16.0` names the legacy selector
+asks for: **old clients would work**.
+
+The canonical half is what is broken. `SHA256SUMS` is a copy of
+`SHA256SUMS-<VER>`, so it lists version-suffixed names, and the unversioned
+aliases are deliberately excluded from it (`ci.yml:847`). The shared selector
+picks `mcremote-linux-amd64`, looks for that exact basename in `SHA256SUMS`,
+and fails with `ErrIntegrity`. **Every migrated client would fail.** Gate G2 for
+this repository must not run until steps 11-13 are complete, in either
+direction.
 
 ### Deviation 2026-09-02 — Go floor raised to 1.26.6 and consumers repin v1.4.0
 
