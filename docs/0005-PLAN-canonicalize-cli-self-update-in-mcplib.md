@@ -2261,7 +2261,7 @@ table. Rows from Phase 7 onward are populated as each phase executes.
 | 9 MagicTools | complete | mcp-server-magictools 91b5466 | Managed update on mcplib v1.4.0: lifecycle adapter bound to the resolved target, hidden `service refresh --json` with a typed receipt, fatal reconcile and fatal health timeout, exit mapping through the existing `exitFunc` seam, publication via the reusable workflow at `3389f793`. Verified: `make test`, `go test -race`, `make vet`, `make lint` 0 issues, gofmt/golint clean, `install_test.sh` 34 passed / 0 failed (up from 31), actionlint clean, linux/darwin/windows cross-build. The target-binding rule was proven to fail against a deliberately broken check via `go test -overlay`, tree untouched | `RawVersion` defaulted to `v4.3.2`, outranking every real tag; now `dev` + `RawBuildKind`. Steps 6-7's Windows refresh is deliberately a no-op on disk: the definition lives in the service control manager, so it is left untouched rather than guessed — recorded below |
 | 10 Socratic Thinker | complete | mcp-server-socratic-thinker 067a438 (14 files, +570 / -67) | Standalone update command on mcplib v1.4.0; scoped `PersistentPreRunE` replaces `cobra.OnInitialize`; `Execute` returns and main maps `selfupdate.ExitCode`; `RawVersion` defaults to `dev` with `RawBuildKind`; publication moved to the reusable workflow at `3389f793` with exact assets only. Verified: `make test`, `go test -race`, `make vet`, `make lint` 0 issues, per-file `golint` clean, `install_test.sh` 35 passed / 0 failed (up from 31), actionlint clean, no `--clobber` or `softprops/action-gh-release` path remains. The config sentinel was proven to fail against the pre-0005 behaviour with `go test -overlay`, tree untouched | plan said pin v1.3.0; pinned v1.4.0 per the 0006 deviation. Two lint fixes in scope: extracted `skipConfigValue` (my second `"true"` literal tripped goconst) and documented the pre-existing `Cfg`/`RealStdout` vars in a file this phase modified |
 | 11 DuckDuckGo | complete | mcp-server-duckduckgo 240ca3a | Standalone update on mcplib v1.4.0; `loadConfig` seam behind a scoped pre-run; `Execute` returns and main maps `ExitCode`; `softprops/action-gh-release` replaced by the reusable workflow at `3389f793`; every action pinned to a full SHA; tag build verifies its stamped identity. Verified: build/vet/test, gofmt and per-file golint clean, actionlint clean, no floating action tag or softprops path remains | `version.go` did not exist, so the Makefile's `-X main.RawVersion` had silently done nothing and the server had no version identity at all. Two floating action tags in the untouched test job were also pinned — a small consistency fix beyond the phase's literal file list |
-| G2 product releases | 18.1 complete; 18.2 in progress (2 of 6 released) | no commit (repository settings) | Immutable releases enabled and verified on all six product repositories on 2026-09-02 via `PUT` then `GET repos/maccavelli/<repo>/immutable-releases` with `X-GitHub-Api-Version: 2026-03-10`, using the operator's own credential (`gh auth status`: account maccavelli, classic token, `repo` scope). Every repository read `enabled=false` before and `enabled=true` after, re-verified on a second independent read: prepare-commit-msg, magic-cli-remote, mcp-server-recall, mcp-server-magictools, mcp-server-socratic-thinker, mcp-server-duckduckgo. All six proposed tags confirmed absent on the remote at that moment. mcplib is deliberately NOT in scope: it is consumed as a Go module through the proxy, publishes no release assets, and its workflow integrity comes from the full-SHA pin | the endpoint and API version the MADR cited were confirmed to exist and respond as documented; the earlier caveat that they were unverified is resolved |
+| G2 product releases | 18.1 and 18.2 complete (6 of 6 released); 18.3 native smoke pending | no commit (repository settings) | Immutable releases enabled and verified on all six product repositories on 2026-09-02 via `PUT` then `GET repos/maccavelli/<repo>/immutable-releases` with `X-GitHub-Api-Version: 2026-03-10`, using the operator's own credential (`gh auth status`: account maccavelli, classic token, `repo` scope). Every repository read `enabled=false` before and `enabled=true` after, re-verified on a second independent read: prepare-commit-msg, magic-cli-remote, mcp-server-recall, mcp-server-magictools, mcp-server-socratic-thinker, mcp-server-duckduckgo. All six proposed tags confirmed absent on the remote at that moment. mcplib is deliberately NOT in scope: it is consumed as a Go module through the proxy, publishes no release assets, and its workflow integrity comes from the full-SHA pin | the endpoint and API version the MADR cited were confirmed to exist and respond as documented; the earlier caveat that they were unverified is resolved |
 | 12 Deduplication/completion audit | pending | | | |
 
 ### Retrospective note on rows 0 through 6
@@ -2315,6 +2315,45 @@ smoke tests are manual on a disposable host per Section 18.3. A wrong restore
 there would corrupt a service definition rather than leave it alone. This is
 recorded as outstanding for the Windows managed smoke rather than shipped
 untested.
+
+### Deviation 2026-09-02 — G2 releases, and two tag-only gates that had never run
+
+**All six products released.** prepare-commit-msg v1.2.0, mcp-server-recall
+v2.1.0, mcp-server-magictools v1.1.0, mcp-server-socratic-thinker v1.1.1,
+mcp-server-duckduckgo v1.1.0, and magic-cli-remote v0.16.0. Every one is
+`isImmutable=true`, non-draft, carries exactly its declared asset set, and its
+`SHA256SUMS` verifies.
+
+**The v0.16.0 bridge is verified against both client generations.** 8 canonical
+entries verify and the manifest lists canonical names only (8 of 8); 8
+compatibility entries verify in `SHA256SUMS-0.16.0`; and all 8
+`<product>-<goos>-<goarch>-0.16.0` copies are **byte-identical** to their
+canonical counterparts, confirmed with `cmp`. The declared extras
+(`install.sh`, `install.ps1`, `magic-cli-remote-v0.16.0-arm64.apk`) are present.
+
+**Two failures on the way, neither caused by this plan's work, both the same
+shape.** A gate that runs only on tags cannot be exercised before the release
+that depends on it:
+
+* prepare-commit-msg v1.1.4 and socratic-thinker v1.1.0 failed at draft
+  creation because mcplib's reusable workflow never set `GH_REPO`. Fixed under
+  MADR/PLAN 0007 and released as mcplib v1.4.1; all six consumers repinned.
+  Neither tag produced a release.
+* magic-cli-remote's Android manifest-surface gate, added after v0.15.3 and
+  never run since, looked for the merged manifest at an AGP 8 path. Under AGP 9
+  the directory is `merged_manifest` (singular) and the task is
+  `processReleaseMainManifest`. Fixed in `14e55d2` by searching the app
+  module's intermediates for the main-manifest task output and failing closed
+  on 0 or >1 matches, with the failure now printing the on-disk tree.
+
+**Tags retired, not reused in place.** v1.1.4 and the first two v0.16.0 tags
+produced no release; v0.16.0 was deleted and re-cut twice at the owner's
+explicit direction. prepare-commit-msg was cut as **v1.2.0** per Section 18
+rather than the patch-shaped v1.1.4, and socratic-thinker took v1.1.1.
+
+**Durable fix.** magic-cli-remote's APK job now also runs on
+`workflow_dispatch`, so it can be exercised without burning a tag. That is what
+turned the third bridge attempt from a guess into a verified change.
 
 ### Deviation 2026-09-02 — installer now fails closed on an ambiguous manifest
 
