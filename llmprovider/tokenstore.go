@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,14 @@ type OAuthSession struct {
 	TokenURL   string
 	Store      TokenStore
 	HTTPClient *http.Client
+	mu         sync.Mutex
+	inflight   *tokenFuture
+}
+
+type tokenFuture struct {
+	done chan struct{}
+	tok  Token
+	err  error
 }
 
 // TokenStore interface (Phase 2 introduces this; Phase 3 adds methods that

@@ -367,9 +367,9 @@ Grok listing is unchanged: session bearer on `api.x.ai/v1/models` (probe: 200).
 |---|---|---|---|
 | 1 | `Token`, `TokenSource`, `StaticToken` | `llmprovider/token.go`, `token_test.go` | — |
 | 2 | `TokenStore` + `FileTokenStore` `0600` | `tokenstore.go`, `tokenstore_file.go`, `tokenstore_file_unix.go`, `tokenstore_file_windows.go`, `tokenstore_test.go`; corrective pass adds `tokenstore_file_unix_test.go` | corrective pass also modifies `token.go`, `token_test.go`, and the Phase 2 files |
-| 3 | `OAuthSession` refresh + persist-before-use | `oauth_session.go`, `oauth_session_test.go` | `tokenstore.go` (add `mu`, `inflight`, and `tokenFuture` when they become used) |
+| 3 | `OAuthSession` refresh + persist-before-use | `oauth_constants.go` (initially `DefaultOpenAIIssuer` and the private xAI token URL fallback), `oauth_session.go`, `oauth_session_test.go` | `tokenstore.go` (add `mu`, `inflight`, and `tokenFuture` when they become used) |
 | 4 | `AuthMethod` on descriptors | — | `descriptor.go`, `descriptor_test.go` |
-| 5 | PKCE, OpenAI loopback 1455/1457, Grok ephemeral loopback, device-code | `oauth_constants.go`, `oauth_pkce.go`, `oauth_loopback.go`, `oauth_device.go`, `*_test.go` | — |
+| 5 | PKCE, OpenAI loopback 1455/1457, Grok ephemeral loopback, device-code | ~~`oauth_constants.go`,~~ `oauth_pkce.go`, `oauth_loopback.go`, `oauth_device.go`, `*_test.go` | `oauth_constants.go` (extend the Phase 3 file with the remaining locked constants) |
 | 6 | OpenAI transport branch + ChatGPT catalog | `openai_chatgpt.go`, `openai_chatgpt_test.go` | `openai.go`, `provider.go`, `models_catalog.go`, `models_catalog_test.go`, `discovery.go`, `discovery_test.go` |
 | 7 | Grok `TokenSource` on `api.x.ai` | `grok_oauth_test.go` | `grok.go`, `provider.go` |
 | 8 | Wizard auth-method step, import, orchestrated guard | `wizard/auth.go`, `wizard/import.go`, `wizard/auth_test.go`, `wizard/import_test.go` | `wizard/configure.go`, `configure_test.go` |
@@ -486,6 +486,25 @@ Corrective scope: `docs/0008-PLAN-subscription-auth-for-llm-providers.md`,
 new `llmprovider/tokenstore_file_unix_test.go`.
 
 ## Phase 3 — `OAuthSession` refresh
+
+### Approved constant-placement deviation (2026-09-13)
+
+Phase 3's specified `ChatGPT()` API depends on `DefaultOpenAIIssuer`, but the
+original phase table did not create `oauth_constants.go` until Phase 5. The
+maintainer approved the recommended resolution: Phase 3 creates
+`oauth_constants.go` with `DefaultOpenAIIssuer`, and Phase 5 extends that file
+with the remaining locked constants. This preserves §0.1.8 and the exported API
+without a temporary duplicate or literal. Phase 3 scope therefore adds
+`llmprovider/oauth_constants.go`; the architectural decision is unchanged, so
+the MADR needs no amendment.
+
+The first amendment named only `DefaultOpenAIIssuer`. Implementation then
+exposed the same ordering issue for §0.1.11's empty-`TokenURL` xAI fallback.
+The maintainer approved adding private ~~`defaultGrokOAuthTokenURL`~~ to the
+same Phase 3 file. The mandatory lint gate identified `Token` in that private
+identifier as a G101 credential false positive, so a follow-up approval renamed
+it to `defaultGrokOAuthRefreshURL` without suppressing the security check.
+Phase 5 still owns the remaining locked OAuth constants.
 
 ### Behaviour
 
@@ -1282,6 +1301,9 @@ that already call `NewBackplaneClient` keep doing so.
 | 2026-09-12 | (plan) | Maintainer named prepare-commit-msg as first consumer | Add Phase 10; MagicDev/MagicTools stay out | Phase 10 in this plan |
 | 2026-09-13 | (plan sweep) | Orchestrated-nil was specified backwards; OpenAI setup script would break; host tests used WithBaseURL; loopback tests would fight port 1455; AuthKind "api_key" would churn configs; token_stdin heuristic was fuzzy | Corrections in §0.1, applied in place | none (plan only) |
 | 2026-09-13 | 1–2 audit | Phase 2 commit `9836e94` landed with a red format/lint log; the shared verification block masked intermediate failures; Unix mode test was platform-neutral; `..` validation lacked an isolated case; Phase 3-only scaffold made Phase 2 lint-red; Phase 1 and 2 exported APIs failed per-file `golint` | Stop before Phase 3. Run the approved Phase 2 corrective pass, replace the verification recipe, defer the unused scaffold to Phase 3, prove the adjusted gates in a scratch clone, and record exact results | `docs/0008-PLAN-subscription-auth-for-llm-providers.md`, `llmprovider/token.go`, `token_test.go`, `tokenstore.go`, `tokenstore_file.go`, `tokenstore_file_unix.go`, `tokenstore_file_windows.go`, `tokenstore_test.go`, new `tokenstore_file_unix_test.go`; Phase 3 adds `tokenstore.go` |
+| 2026-09-13 | 3 | `ChatGPT()` requires exported `DefaultOpenAIIssuer`, but the phase table deferred its required `oauth_constants.go` file to Phase 5 | Create `oauth_constants.go` in Phase 3 with `DefaultOpenAIIssuer`; Phase 5 extends it with the remaining locked constants. No MADR amendment: the constant value, API, and file-placement decision are unchanged | new `llmprovider/oauth_constants.go` |
+| 2026-09-13 | 3 | The first constant-placement correction omitted §0.1.11's xAI token URL fallback, which Phase 3 also needs and §0.1.8 requires in `oauth_constants.go` | Add private `defaultGrokOAuthTokenURL` beside `DefaultOpenAIIssuer` in Phase 3; Phase 5 still adds all other OAuth constants. No MADR amendment | no additional file |
+| 2026-09-13 | 3 | `make lint` classified the approved private name `defaultGrokOAuthTokenURL` as a G101 hardcoded-credential finding because it contains `Token`; repeated `Authorization` literals also tripped `goconst` | Rename the private endpoint to `defaultGrokOAuthRefreshURL` and deduplicate the header with a private Phase 3 constant; do not suppress either lint rule. No MADR amendment | no additional file |
 
 ## 12. Execution record
 
@@ -1379,3 +1401,79 @@ ok  github.com/maccavelli/mcplib/wizard       1.134s
 `go list` confirmed `tokenstore_file_unix_test.go` was absent from the Windows
 test file set. The corrective commit containing this record restores Phase 2 to
 a green boundary before Phase 3; it is not a new implementation phase.
+
+### Phase 3 — complete
+
+The commit containing this entry adds `OAuthSession.Token()` refresh,
+persist-before-adoption, per-session single-flight, two-minute refresh skew,
+issuer detection, and the two constants moved forward by the approved
+deviations. It does not add live OAuth, alter `go.mod`, begin Phase 4, or amend
+the MADR; the deviations changed implementation ordering and a private name,
+not architecture.
+
+The four tests were written first. Their initial complete result was red because
+the Phase 3 API did not exist:
+
+```text
+# github.com/maccavelli/mcplib/llmprovider [github.com/maccavelli/mcplib/llmprovider.test]
+llmprovider/oauth_session_test.go:72:20: session.Token undefined (type *OAuthSession has no field or method Token)
+llmprovider/oauth_session_test.go:115:23: session.Token undefined (type *OAuthSession has no field or method Token)
+llmprovider/oauth_session_test.go:175:22: session.Token undefined (type *OAuthSession has no field or method Token)
+llmprovider/oauth_session_test.go:184:21: session.Token undefined (type *OAuthSession has no field or method Token)
+llmprovider/oauth_session_test.go:193:21: session.Token undefined (type *OAuthSession has no field or method Token)
+llmprovider/oauth_session_test.go:208:27: undefined: DefaultOpenAIIssuer
+llmprovider/oauth_session_test.go:209:36: undefined: DefaultOpenAIIssuer
+llmprovider/oauth_session_test.go:215:22: session.ChatGPT undefined (type *OAuthSession has no field or method ChatGPT)
+FAIL  github.com/maccavelli/mcplib/llmprovider [build failed]
+FAIL
+```
+
+After implementation, the test instrument was proved in a scratch clone. The
+verified mutations adopted memory before a failing save, disabled the inflight
+join, reduced the skew to one minute, and removed trailing-slash normalization.
+The complete result showed each named test fail on its intended assertion:
+
+```text
+=== RUN   TestOAuthSession_RefreshPersistsBeforeReturn
+    oauth_session_test.go:77: session.Access = "new-access", want old-access
+    oauth_session_test.go:80: session.Refresh = "new-refresh", want old-refresh
+--- FAIL: TestOAuthSession_RefreshPersistsBeforeReturn (0.00s)
+=== RUN   TestOAuthSession_SingleFlight
+    oauth_session_test.go:150: refresh request count = 2, want 1
+--- FAIL: TestOAuthSession_SingleFlight (0.00s)
+=== RUN   TestOAuthSession_SkewsTwoMinutes
+    oauth_session_test.go:198: inside-skew token = "current-access", calls = 0; want refreshed-access, 1
+--- FAIL: TestOAuthSession_SkewsTwoMinutes (0.00s)
+=== RUN   TestOAuthSession_ChatGPTDetectsIssuer
+=== RUN   TestOAuthSession_ChatGPTDetectsIssuer/exact
+=== RUN   TestOAuthSession_ChatGPTDetectsIssuer/trailing_slash
+    oauth_session_test.go:216: ChatGPT() = false, want true
+=== RUN   TestOAuthSession_ChatGPTDetectsIssuer/different_issuer
+=== RUN   TestOAuthSession_ChatGPTDetectsIssuer/empty
+--- FAIL: TestOAuthSession_ChatGPTDetectsIssuer (0.00s)
+    --- PASS: TestOAuthSession_ChatGPTDetectsIssuer/exact (0.00s)
+    --- FAIL: TestOAuthSession_ChatGPTDetectsIssuer/trailing_slash (0.00s)
+    --- PASS: TestOAuthSession_ChatGPTDetectsIssuer/different_issuer (0.00s)
+    --- PASS: TestOAuthSession_ChatGPTDetectsIssuer/empty (0.00s)
+FAIL
+FAIL  github.com/maccavelli/mcplib/llmprovider  0.656s
+FAIL
+```
+
+The first `make lint` run then exposed the private-name false positive recorded
+in the deviation log plus repeated authorization-header literals. After the
+approved rename and in-scope deduplication, all per-file `golint` checks
+produced no output and the independent phase gates were green:
+
+```text
+gofmt: exit 0, no output
+go vet: exit 0, no output
+make lint: exit 0
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+go test: exit 0
+ok  github.com/maccavelli/mcplib/llmprovider  0.703s
+ok  github.com/maccavelli/mcplib/wizard       1.963s
+go test -race ./llmprovider -run 'TestOAuthSession_' -count=1: exit 0
+ok  github.com/maccavelli/mcplib/llmprovider  1.977s
+```
