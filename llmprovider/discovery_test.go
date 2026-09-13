@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func TestListAvailableModels_Gemini(t *testing.T) {
@@ -88,6 +90,41 @@ func TestListAvailableModels_OpenAI(t *testing.T) {
 	}
 	if len(fallbackModels) == 0 {
 		t.Fatal("expected static catalog fallback")
+	}
+}
+
+func TestListAvailableModelsWithSource_ChatGPTDoesNotHTTP(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		hits++
+		t.Error("ChatGPT model listing made an HTTP request")
+	}))
+	defer srv.Close()
+
+	session := &OAuthSession{
+		Issuer: DefaultOpenAIIssuer,
+		Access: "session-access",
+		Expiry: time.Now().Add(time.Hour),
+	}
+	models, err := ListAvailableModelsWithSource(
+		context.Background(),
+		ProviderOpenAI,
+		session,
+		WithBaseURL(srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("ListAvailableModelsWithSource() error = %v", err)
+	}
+	if !reflect.DeepEqual(models, StaticOpenAIChatGPT) {
+		t.Fatalf("models = %v, want %v", models, StaticOpenAIChatGPT)
+	}
+	models[0] = "mutated"
+	again, err := ListAvailableModelsWithSource(context.Background(), ProviderOpenAI, session)
+	if err != nil {
+		t.Fatalf("second ListAvailableModelsWithSource() error = %v", err)
+	}
+	if hits != 0 || again[0] == "mutated" {
+		t.Fatalf("HTTP hits/second result = %d/%v", hits, again)
 	}
 }
 

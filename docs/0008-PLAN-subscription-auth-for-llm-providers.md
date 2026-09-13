@@ -1771,3 +1771,159 @@ ok  github.com/maccavelli/mcplib/llmprovider  1.682s
 ```
 
 The final line is the race-enabled targeted Phase 5 run.
+
+### Phase 6 — complete
+
+The commit containing this entry makes OpenAI request authentication use a
+`TokenSource` on every request while preserving the existing API-key
+constructor. Static tokens use the Platform host; ChatGPT sessions use the
+Codex backend, account and residency headers, and one refresh-driven retry
+after HTTP 401. It also adds the ChatGPT catalog and makes ChatGPT model
+listing a copied, HTTP-free result. `NewProviderWithSource` accepts OpenAI and
+rejects other providers at this boundary; Grok support remains Phase 7. No
+dependency was added and Phase 7 has not begun.
+
+Following the phase's required sequencing, the first host-lock test was added
+with the temporary Platform-only source constructor. It produced the intended
+behavioral failure rather than only a compile failure:
+
+```text
+=== RUN   TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+=== PAUSE TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+=== CONT  TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+    openai_chatgpt_test.go:39: request URL = https://api.openai.com/v1/responses, want chatgpt.com/backend-api/codex/responses
+--- FAIL: TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.787s
+FAIL
+```
+
+The remaining tests were then added before their APIs and catalog. Their
+initial complete targeted result was red:
+
+```text
+# github.com/maccavelli/mcplib/llmprovider [github.com/maccavelli/mcplib/llmprovider.test]
+llmprovider/discovery_test.go:109:17: undefined: ListAvailableModelsWithSource
+llmprovider/discovery_test.go:118:32: undefined: StaticOpenAIChatGPT
+llmprovider/discovery_test.go:119:44: undefined: StaticOpenAIChatGPT
+llmprovider/discovery_test.go:122:16: undefined: ListAvailableModelsWithSource
+llmprovider/models_catalog_test.go:215:19: undefined: StaticOpenAIChatGPT
+llmprovider/models_catalog_test.go:216:49: undefined: StaticOpenAIChatGPT
+llmprovider/openai_chatgpt_test.go:213:15: undefined: NewProviderWithSource
+FAIL github.com/maccavelli/mcplib/llmprovider [build failed]
+FAIL
+```
+
+Every new Phase 6 gate was proved after implementation in a scratch copy. The
+verified mutations reversed static/ChatGPT hosts, suppressed account and
+residency handling, disabled OAuth retry, admitted Claude to
+`NewProviderWithSource`, forced ChatGPT listing through HTTP, and corrupted the
+ChatGPT catalog. The complete combined result included these intended
+failures. Opaque request-body function pointers in two `%v` request dumps are
+shown as `<body>` and `<get-body>`; all behavior-bearing fields are preserved:
+
+```text
+=== RUN   TestListAvailableModelsWithSource_ChatGPTDoesNotHTTP
+    discovery_test.go:100: ChatGPT model listing made an HTTP request
+    discovery_test.go:119: models = [gpt-4.1-mini gpt-4.1-nano gpt-4o-mini gpt-4.1 gpt-4o o4-mini], want [gpt-broken gpt-5.4-mini gpt-5.3-codex]
+--- FAIL: TestListAvailableModelsWithSource_ChatGPTDoesNotHTTP (0.00s)
+=== RUN   TestStaticOpenAIChatGPTCatalog
+    models_catalog_test.go:216: StaticOpenAIChatGPT = [gpt-broken gpt-5.4-mini gpt-5.3-codex], want [gpt-5.4 gpt-5.4-mini gpt-5.3-codex]
+--- FAIL: TestStaticOpenAIChatGPTCatalog (0.00s)
+=== RUN   TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+=== PAUSE TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+=== RUN   TestOpenAI_StaticKeyDoesNotHitChatGPTHost
+=== PAUSE TestOpenAI_StaticKeyDoesNotHitChatGPTHost
+=== RUN   TestOpenAI_ChatGPTSetsAccountHeader
+=== PAUSE TestOpenAI_ChatGPTSetsAccountHeader
+=== RUN   TestOpenAI_ChatGPTSetsResidencyHeader
+=== PAUSE TestOpenAI_ChatGPTSetsResidencyHeader
+=== RUN   TestOpenAI_OAuth401RetriesOnceAfterRefresh
+=== PAUSE TestOpenAI_OAuth401RetriesOnceAfterRefresh
+=== RUN   TestNewProviderWithSource_RejectsClaude
+=== PAUSE TestNewProviderWithSource_RejectsClaude
+=== RUN   TestNewProvider_APIKeyStillPlatform
+=== PAUSE TestNewProvider_APIKeyStillPlatform
+=== CONT  TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+=== CONT  TestOpenAI_OAuth401RetriesOnceAfterRefresh
+=== CONT  TestNewProviderWithSource_RejectsClaude
+    openai_chatgpt_test.go:214: NewProviderWithSource() error = nil, want unsupported-provider error
+--- FAIL: TestNewProviderWithSource_RejectsClaude (0.00s)
+=== CONT  TestOpenAI_ChatGPTSetsAccountHeader
+=== CONT  TestOpenAI_ChatGPTSetsResidencyHeader
+=== CONT  TestNewProvider_APIKeyStillPlatform
+=== RUN   TestOpenAI_ChatGPTSetsResidencyHeader/namespaced
+=== CONT  TestOpenAI_StaticKeyDoesNotHitChatGPTHost
+=== PAUSE TestOpenAI_ChatGPTSetsResidencyHeader/namespaced
+=== RUN   TestOpenAI_ChatGPTSetsResidencyHeader/root_fallback
+=== PAUSE TestOpenAI_ChatGPTSetsResidencyHeader/root_fallback
+=== RUN   TestOpenAI_ChatGPTSetsResidencyHeader/namespaced_no_constraint_wins
+=== PAUSE TestOpenAI_ChatGPTSetsResidencyHeader/namespaced_no_constraint_wins
+=== CONT  TestOpenAI_ChatGPTSetsResidencyHeader/namespaced
+=== CONT  TestOpenAI_ChatGPTSetsResidencyHeader/namespaced_no_constraint_wins
+=== CONT  TestOpenAI_ChatGPTSetsResidencyHeader/root_fallback
+=== NAME  TestOpenAI_OAuth401RetriesOnceAfterRefresh
+    openai_chatgpt_test.go:203: Generate() error = Post "https://api.openai.com/v1/responses": unexpected request host
+=== NAME  TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost
+    openai_chatgpt_test.go:44: request URL = https://api.openai.com/v1/responses, want chatgpt.com/backend-api/codex/responses
+--- FAIL: TestOpenAI_OAuth401RetriesOnceAfterRefresh (0.00s)
+--- FAIL: TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost (0.00s)
+=== NAME  TestOpenAI_ChatGPTSetsAccountHeader
+    openai_chatgpt_test.go:91: ChatGPT-Account-Id = "", want acct_1
+--- FAIL: TestOpenAI_ChatGPTSetsAccountHeader (0.00s)
+=== NAME  TestNewProvider_APIKeyStillPlatform
+    openai_chatgpt_test.go:234: request URL = &{POST https://chatgpt.com/backend-api/codex/responses HTTP/1.1 1 1 map[Authorization:[Bearer sk-test] Content-Type:[application/json]] {<body>} <get-body> 93 [] false chatgpt.com map[] map[] <nil> map[]   <nil> <nil> <nil>  {{}} <nil> [] map[]}, want api.openai.com/v1/responses
+--- FAIL: TestNewProvider_APIKeyStillPlatform (0.00s)
+=== NAME  TestOpenAI_ChatGPTSetsResidencyHeader/namespaced
+    openai_chatgpt_test.go:145: residency header = "broken", want "eu"
+=== NAME  TestOpenAI_ChatGPTSetsResidencyHeader/namespaced_no_constraint_wins
+    openai_chatgpt_test.go:145: residency header = "broken", want ""
+=== NAME  TestOpenAI_ChatGPTSetsResidencyHeader/root_fallback
+    openai_chatgpt_test.go:145: residency header = "broken", want "us"
+--- FAIL: TestOpenAI_ChatGPTSetsResidencyHeader (0.00s)
+    --- FAIL: TestOpenAI_ChatGPTSetsResidencyHeader/namespaced (0.00s)
+    --- FAIL: TestOpenAI_ChatGPTSetsResidencyHeader/namespaced_no_constraint_wins (0.00s)
+    --- FAIL: TestOpenAI_ChatGPTSetsResidencyHeader/root_fallback (0.00s)
+=== NAME  TestOpenAI_StaticKeyDoesNotHitChatGPTHost
+    openai_chatgpt_test.go:64: request URL = &{POST https://chatgpt.com/backend-api/codex/responses HTTP/1.1 1 1 map[Authorization:[Bearer sk-test] Content-Type:[application/json]] {<body>} <get-body> 93 [] false chatgpt.com map[] map[] <nil> map[]   <nil> <nil> <nil>  {{}} <nil> [] map[]}, want api.openai.com/v1/responses
+--- FAIL: TestOpenAI_StaticKeyDoesNotHitChatGPTHost (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.733s
+FAIL
+```
+
+The combined mutation made the retry test fail on the intentionally reversed
+host before it could exercise the retry assertion. The host mutation was
+therefore restored in the same scratch copy while retry remained disabled; the
+isolated complete result then failed on the first 401 as intended:
+
+```text
+=== RUN   TestOpenAI_OAuth401RetriesOnceAfterRefresh
+=== PAUSE TestOpenAI_OAuth401RetriesOnceAfterRefresh
+=== CONT  TestOpenAI_OAuth401RetriesOnceAfterRefresh
+    openai_chatgpt_test.go:203: Generate() error = llm: authentication failed: openai HTTP 401
+--- FAIL: TestOpenAI_OAuth401RetriesOnceAfterRefresh (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.635s
+FAIL
+```
+
+The scratch copy was moved to Trash after the proof. The working tree was not
+mutated. `git diff --check`, `go vet ./...`, repository lint, the full suite,
+and the race-enabled targeted Phase 6 suite were green:
+
+```text
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+ok  github.com/maccavelli/mcplib              1.452s
+ok  github.com/maccavelli/mcplib/fastpath     1.342s
+ok  github.com/maccavelli/mcplib/hfsc         0.668s
+ok  github.com/maccavelli/mcplib/llmprovider  1.215s
+ok  github.com/maccavelli/mcplib/logging      1.136s
+ok  github.com/maccavelli/mcplib/schema       1.567s
+ok  github.com/maccavelli/mcplib/selfupdate   2.909s
+ok  github.com/maccavelli/mcplib/wizard       1.898s
+ok  github.com/maccavelli/mcplib/llmprovider  1.312s
+```
+
+The final line is the race-enabled targeted Phase 6 run.

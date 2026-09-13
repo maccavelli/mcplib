@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,8 @@ import (
 
 // OpenAIProvider implements Provider using the OpenAI Responses API via standard http client.
 type OpenAIProvider struct {
-	apiKey          string
+	src             TokenSource
+	chatGPT         bool
 	model           string
 	baseURL         string // For testing
 	client          *http.Client
@@ -25,19 +27,7 @@ const defaultOpenAIReasoningEffort = effortMedium
 // NewOpenAI creates a new OpenAI provider instance.
 // Accepts variadic ProviderOption for shared http.Client injection.
 func NewOpenAI(apiKey, model string, opts ...ProviderOption) (*OpenAIProvider, error) {
-	cfg := ApplyOptions(opts)
-	baseURL := "https://api.openai.com/v1"
-	if cfg.BaseURL != "" {
-		baseURL = cfg.BaseURL
-	}
-	return &OpenAIProvider{
-		apiKey:          apiKey,
-		model:           model,
-		baseURL:         baseURL,
-		client:          cfg.HTTPClient,
-		maxTokens:       cfg.MaxTokens,
-		reasoningEffort: cfg.ReasoningEffort,
-	}, nil
+	return NewOpenAIWithSource(NewStaticToken(apiKey), model, opts...)
 }
 
 // Name returns the provider's unique identifier "openai".
@@ -117,6 +107,15 @@ func (p *OpenAIProvider) Continue(ctx context.Context, previousResponseID string
 }
 
 func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
+	response, err := p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
+	var authErr *openAIAuthError
+	if err == nil || !errors.As(err, &authErr) || authErr.status != http.StatusUnauthorized || !expireOpenAISession(p.src) {
+		return response, err
+	}
+	return p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
+}
+
+func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
 	body := map[string]any{
 		jsonKeyModel:        p.model,
 		jsonKeyInput:        itemsToInput(input),
@@ -161,7 +160,19 @@ func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	token, err := p.src.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("openai: acquire token: %w", err)
+	}
+	req.Header.Set(oauthAuthorizationHeader, "Bearer "+token.Value)
+	if p.chatGPT {
+		if accountID := openAIAccountID(p.src); accountID != "" {
+			req.Header.Set(openAIAccountHeader, accountID)
+		}
+		if residency := openAIResidency(token.Value); residency != "" {
+			req.Header.Set(openAIResidencyHeader, residency)
+		}
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -176,7 +187,7 @@ func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		case resp.StatusCode == http.StatusTooManyRequests:
 			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode, Provider: ProviderOpenAI}
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return nil, fmt.Errorf("%w: openai HTTP %d", ErrAuthFailure, resp.StatusCode)
+			return nil, &openAIAuthError{status: resp.StatusCode}
 		case resp.StatusCode >= 500:
 			return nil, fmt.Errorf("%w: openai HTTP %d", ErrProviderUnavailable, resp.StatusCode)
 		default:
@@ -190,16 +201,23 @@ func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool
 // DiscoverModels returns curated chat models available to this key, with an
 // optional short health probe. Never returns the raw /v1/models dump.
 func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listOpenAIModels(ctx, p.apiKey, ProviderConfig{
-		HTTPClient: p.client,
-		BaseURL:    p.baseURL,
-	})
+	listed, err := ListAvailableModelsWithSource(
+		ctx,
+		ProviderOpenAI,
+		p.src,
+		WithHTTPClient(p.client),
+		WithBaseURL(p.baseURL),
+	)
 	if err != nil || len(listed) == 0 {
-		listed = StaticModels(ProviderOpenAI)
+		if p.chatGPT {
+			listed = append([]string(nil), StaticOpenAIChatGPT...)
+		} else {
+			listed = StaticModels(ProviderOpenAI)
+		}
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewOpenAI(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewOpenAIWithSource(p.src, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
 		if err != nil {
 			return "", err
 		}

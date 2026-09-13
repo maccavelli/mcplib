@@ -3,6 +3,7 @@ package llmprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -19,26 +20,41 @@ import (
 // Unlike DiscoverModels(), this performs NO generate health checks and consumes
 // no generation tokens. All calls are wrapped with a 10-second hard timeout.
 func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts ...ProviderOption) ([]string, error) {
+	return ListAvailableModelsWithSource(ctx, providerName, NewStaticToken(apiKey), opts...)
+}
+
+// ListAvailableModelsWithSource lists models using a static or refreshable token source.
+func ListAvailableModelsWithSource(ctx context.Context, providerName string, src TokenSource, opts ...ProviderOption) ([]string, error) {
 	cfg := ApplyOptions(opts)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if strings.EqualFold(providerName, ProviderOpenAI) && isChatGPTTokenSource(src) {
+		return append([]string(nil), StaticOpenAIChatGPT...), nil
+	}
+	if src == nil {
+		return nil, errors.New("model listing: TokenSource is required")
+	}
+	token, err := src.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("model listing: acquire token: %w", err)
+	}
 
 	switch strings.ToLower(providerName) {
 	case ProviderGemini:
-		return listGeminiModels(ctx, apiKey, cfg)
+		return listGeminiModels(ctx, token.Value, cfg)
 	case ProviderOpenAI:
-		return listOpenAIModels(ctx, apiKey, cfg)
+		return listOpenAIModels(ctx, token.Value, cfg)
 	case ProviderClaude:
-		return listClaudeModels(ctx, apiKey, cfg)
+		return listClaudeModels(ctx, token.Value, cfg)
 	case ProviderGrok:
-		return listGrokModels(ctx, apiKey, cfg)
+		return listGrokModels(ctx, token.Value, cfg)
 	case ProviderOpencodeZen, ProviderOpencodeGo:
-		return listOpencodeModels(ctx, strings.ToLower(providerName), apiKey, cfg)
+		return listOpencodeModels(ctx, strings.ToLower(providerName), token.Value, cfg)
 	case ProviderHuggingFace:
-		return listHuggingFaceModels(ctx, apiKey, cfg)
+		return listHuggingFaceModels(ctx, token.Value, cfg)
 	case ProviderKilo:
-		return listKiloModels(ctx, apiKey, cfg)
+		return listKiloModels(ctx, token.Value, cfg)
 	case ProviderOllama:
 		return listOllamaModels(ctx, cfg)
 	default:

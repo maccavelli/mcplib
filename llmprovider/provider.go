@@ -245,3 +245,13 @@ func NewProvider(name, apiKey, model string, opts ...ProviderOption) (Provider, 
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}
 }
+
+// NewProviderWithSource creates a provider that accepts a dynamic token source.
+func NewProviderWithSource(name string, src TokenSource, model string, opts ...ProviderOption) (Provider, error) {
+	switch name {
+	case ProviderOpenAI:
+		return NewOpenAIWithSource(src, model, opts...)
+	default:
+		return nil, fmt.Errorf("provider %q does not accept TokenSource", name)
+	}
+}

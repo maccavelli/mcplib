@@ -44,6 +44,13 @@ var (
 		"o4-mini",
 	}
 
+	// StaticOpenAIChatGPT is the Codex-compatible ChatGPT subscription catalog.
+	StaticOpenAIChatGPT = []string{
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.3-codex",
+	}
+
 	// StaticClaude: current aliases first, then widely available older IDs.
 	StaticClaude = []string{
 		"claude-haiku-4-5",
