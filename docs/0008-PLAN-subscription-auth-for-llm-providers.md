@@ -562,14 +562,36 @@ Phase green. Commit.
 
 Every other descriptor: `AuthMethods` nil or empty. `RequiresAPIKey` unchanged.
 
+### Approved test-sequencing correction (2026-09-13)
+
+The original expected-pass instruction for
+`TestDescriptors_NoOAuthOnOtherProviders` assumed `AuthMethodID`, `AuthMethod`,
+and `ProviderDescriptor.AuthMethods` already existed. They do not exist at the
+Phase 3 boundary, so the test cannot compile against the untouched tree. The
+maintainer approved this corrected Phase 4 sequence:
+
+1. Add only the `AuthMethodID` constants, `AuthMethod`, and the empty
+   `ProviderDescriptor.AuthMethods` field in `descriptor.go`.
+2. Add `TestDescriptors_NoOAuthOnOtherProviders` and observe it pass while all
+   descriptor method lists remain empty.
+3. Prove that expected-pass test in a scratch clone by assigning
+   `browser_oauth` to a non-OAuth provider and observing its intended failure.
+4. Add the remaining Phase 4 tests and observe them fail before populating the
+   OpenAI and Grok method lists.
+
+This changes only sequencing. It adds no files, changes no descriptor contract,
+and requires no MADR amendment.
+
 ### Red tests
 
 * `TestDescriptors_OpenAIAndGrokOfferOAuth` — FAIL until methods exist.
 * `TestDescriptors_NoOAuthOnOtherProviders` — range `Descriptors()`, if
   `ID` not in `{openai,grok}` then no method id is `browser_oauth` or
-  `device_code`. Write this test **first** against current code; it should
-  **PASS already** (empty methods). Keep it. Then add openai/grok methods
-  and confirm it still passes.
+  `device_code`. ~~Write this test **first** against current code; it should
+  **PASS already** (empty methods).~~ Add the compile scaffold first as
+  specified by the approved sequencing correction, then observe the test pass.
+  Keep it, prove it with the deliberate scratch mutation, then add openai/grok
+  methods and confirm it still passes.
 * Extend `TestDescriptors_CoverEveryRegisteredProvider` to require openai
   and grok each contain `api_key` and `browser_oauth`.
 * Defensive copy: mutating `d.AuthMethods[0].Label` must not affect the next
@@ -1304,6 +1326,7 @@ that already call `NewBackplaneClient` keep doing so.
 | 2026-09-13 | 3 | `ChatGPT()` requires exported `DefaultOpenAIIssuer`, but the phase table deferred its required `oauth_constants.go` file to Phase 5 | Create `oauth_constants.go` in Phase 3 with `DefaultOpenAIIssuer`; Phase 5 extends it with the remaining locked constants. No MADR amendment: the constant value, API, and file-placement decision are unchanged | new `llmprovider/oauth_constants.go` |
 | 2026-09-13 | 3 | The first constant-placement correction omitted §0.1.11's xAI token URL fallback, which Phase 3 also needs and §0.1.8 requires in `oauth_constants.go` | Add private `defaultGrokOAuthTokenURL` beside `DefaultOpenAIIssuer` in Phase 3; Phase 5 still adds all other OAuth constants. No MADR amendment | no additional file |
 | 2026-09-13 | 3 | `make lint` classified the approved private name `defaultGrokOAuthTokenURL` as a G101 hardcoded-credential finding because it contains `Token`; repeated `Authorization` literals also tripped `goconst` | Rename the private endpoint to `defaultGrokOAuthRefreshURL` and deduplicate the header with a private Phase 3 constant; do not suppress either lint rule. No MADR amendment | no additional file |
+| 2026-09-13 | 4 | The expected-pass `TestDescriptors_NoOAuthOnOtherProviders` cannot compile at the Phase 3 boundary because the Phase 4 auth-method types and `AuthMethods` field do not yet exist | Add the empty compile scaffold first, observe the test pass, prove it with a non-OAuth-provider scratch mutation, then add the remaining red tests and implementation. No MADR amendment | no additional file |
 
 ## 12. Execution record
 
