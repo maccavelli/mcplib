@@ -601,6 +601,42 @@ Phase green. Commit.
 
 ## Phase 5 — PKCE, loopback, device-code
 
+### Approved public flow boundary (2026-09-13)
+
+The original Phase 5 text specified complete login flows but no callable API.
+Phase 8 is in the separate `wizard` package and cannot invoke unexported
+`llmprovider` functions. The maintainer approved this Phase 5 boundary:
+
+```go
+type OAuthFlowOptions struct {
+    HTTPClient   *http.Client
+    OpenURL      func(string) error
+    InputCode    func(context.Context) (string, error)
+    NotifyDevice func(verificationURL, userCode string)
+    ClientID     string
+    Issuer       string
+}
+
+func LoginBrowserOAuth(
+    ctx context.Context,
+    provider string,
+    opts OAuthFlowOptions,
+) (*OAuthSession, error)
+
+func LoginDeviceOAuth(
+    ctx context.Context,
+    provider string,
+    opts OAuthFlowOptions,
+) (*OAuthSession, error)
+```
+
+Empty `ClientID` and `Issuer` use the locked provider defaults. Grok's
+documented environment overrides are applied when the corresponding option is
+empty. Private clock and sleep fields provide deterministic package tests.
+Unsupported providers return an error. Phase 8 passes its prompter operations
+through the callbacks and persists the returned session. This adds no files to
+the phase and does not change the MADR's architecture.
+
 ### PKCE (`oauth_pkce.go`)
 
 S256: 32 random bytes, base64url no pad verifier; SHA-256 challenge, base64url
@@ -1327,6 +1363,7 @@ that already call `NewBackplaneClient` keep doing so.
 | 2026-09-13 | 3 | The first constant-placement correction omitted §0.1.11's xAI token URL fallback, which Phase 3 also needs and §0.1.8 requires in `oauth_constants.go` | Add private `defaultGrokOAuthTokenURL` beside `DefaultOpenAIIssuer` in Phase 3; Phase 5 still adds all other OAuth constants. No MADR amendment | no additional file |
 | 2026-09-13 | 3 | `make lint` classified the approved private name `defaultGrokOAuthTokenURL` as a G101 hardcoded-credential finding because it contains `Token`; repeated `Authorization` literals also tripped `goconst` | Rename the private endpoint to `defaultGrokOAuthRefreshURL` and deduplicate the header with a private Phase 3 constant; do not suppress either lint rule. No MADR amendment | no additional file |
 | 2026-09-13 | 4 | The expected-pass `TestDescriptors_NoOAuthOnOtherProviders` cannot compile at the Phase 3 boundary because the Phase 4 auth-method types and `AuthMethods` field do not yet exist | Add the empty compile scaffold first, observe the test pass, prove it with a non-OAuth-provider scratch mutation, then add the remaining red tests and implementation. No MADR amendment | no additional file |
+| 2026-09-13 | 5 | Browser and device flows had no callable API, but Phase 8's separate `wizard` package must invoke them without modifying Phase 5 files | Add `OAuthFlowOptions`, `LoginBrowserOAuth`, and `LoginDeviceOAuth` in Phase 5, with private time seams and provider defaults. No MADR amendment | no additional file |
 
 ## 12. Execution record
 
@@ -1594,3 +1631,143 @@ go test: exit 0
 ok  github.com/maccavelli/mcplib/llmprovider  0.630s
 ok  github.com/maccavelli/mcplib/wizard       0.853s
 ```
+
+### Phase 5 — complete
+
+The commit containing this entry adds the approved public browser/device login
+boundary, S256 PKCE, OpenAI's registered-port loopback and Codex JSON device
+protocol, and Grok's ephemeral loopback and RFC 8628 device protocol. Grok
+discovery falls back to the locked production token/device endpoints, and its
+documented issuer/client environment overrides apply only when explicit options
+are empty. No live OAuth was performed, no dependency was added, and Phase 6
+has not begun.
+
+The Phase 5 tests were written first. Their initial complete targeted result was
+red because none of the Phase 5 API or helpers existed:
+
+```text
+# github.com/maccavelli/mcplib/llmprovider [github.com/maccavelli/mcplib/llmprovider.test]
+llmprovider/oauth_device_test.go:36:38: undefined: deviceAuthorizationGrantType
+llmprovider/oauth_device_test.go:49:18: undefined: LoginDeviceOAuth
+llmprovider/oauth_device_test.go:49:71: undefined: OAuthFlowOptions
+llmprovider/oauth_device_test.go:94:12: undefined: LoginDeviceOAuth
+llmprovider/oauth_device_test.go:94:65: undefined: OAuthFlowOptions
+llmprovider/oauth_device_test.go:161:18: undefined: LoginDeviceOAuth
+llmprovider/oauth_device_test.go:161:73: undefined: OAuthFlowOptions
+llmprovider/oauth_loopback_test.go:26:25: undefined: listenFirstAvailable
+llmprovider/oauth_loopback_test.go:44:22: undefined: listenFirstAvailable
+llmprovider/oauth_loopback_test.go:58:24: undefined: openaiLoopbackPorts
+llmprovider/oauth_loopback_test.go:58:24: too many errors
+FAIL github.com/maccavelli/mcplib/llmprovider [build failed]
+FAIL
+```
+
+After implementation, every new gate was proved in a scratch copy. The
+verified mutations truncated the PKCE digest; reversed the OpenAI ports;
+disabled second-port fallback and device-code guidance; changed the OpenAI
+originator; accepted mismatched state; ignored Grok environment overrides;
+changed the discovery fallback and Grok redirect host; admitted an unsupported
+provider; changed the OpenAI device endpoint; ignored `slow_down`; and extended
+the one-second device expiry. The complete test result was:
+
+```text
+=== RUN   TestGrokDevice_SlowDownIncreasesInterval
+=== PAUSE TestGrokDevice_SlowDownIncreasesInterval
+=== RUN   TestGrokDevice_StopsAtExpiry
+=== PAUSE TestGrokDevice_StopsAtExpiry
+=== RUN   TestOpenAIDevice_UsesCodexProtocol
+=== PAUSE TestOpenAIDevice_UsesCodexProtocol
+=== RUN   TestListenFirstAvailable_UsesSecondPortWhenFirstBusy
+=== PAUSE TestListenFirstAvailable_UsesSecondPortWhenFirstBusy
+=== RUN   TestListenFirstAvailable_ErrorsWhenAllBusy
+=== PAUSE TestListenFirstAvailable_ErrorsWhenAllBusy
+=== RUN   TestOpenAILoopbackPortsAre1455Then1457
+=== PAUSE TestOpenAILoopbackPortsAre1455Then1457
+=== RUN   TestBuildAuthorizeURL_OpenAIContract
+=== PAUSE TestBuildAuthorizeURL_OpenAIContract
+=== RUN   TestOAuthCallback_RejectsStateMismatch
+=== PAUSE TestOAuthCallback_RejectsStateMismatch
+=== RUN   TestResolveOAuthFlowConfig_GrokEnvironmentOverrides
+    oauth_loopback_test.go:141: resolved issuer/client = ("https://auth.x.ai", "b1a00492-073a-47ea-816f-4c329264a828")
+--- FAIL: TestResolveOAuthFlowConfig_GrokEnvironmentOverrides (0.00s)
+=== RUN   TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure
+=== PAUSE TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure
+=== RUN   TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange
+=== PAUSE TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange
+=== RUN   TestOAuthLogin_RejectsUnsupportedProvider
+=== PAUSE TestOAuthLogin_RejectsUnsupportedProvider
+=== RUN   TestPKCE_ChallengeIsS256
+=== PAUSE TestPKCE_ChallengeIsS256
+=== CONT  TestGrokDevice_SlowDownIncreasesInterval
+=== CONT  TestBuildAuthorizeURL_OpenAIContract
+=== CONT  TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange
+=== CONT  TestOAuthLogin_RejectsUnsupportedProvider
+    oauth_loopback_test.go:250: LoginBrowserOAuth() error = nil, want unsupported-provider error
+--- FAIL: TestOAuthLogin_RejectsUnsupportedProvider (0.00s)
+=== CONT  TestListenFirstAvailable_UsesSecondPortWhenFirstBusy
+=== CONT  TestPKCE_ChallengeIsS256
+=== NAME  TestBuildAuthorizeURL_OpenAIContract
+    oauth_loopback_test.go:97: authorization query = map[client_id:[app_EMoamEEZ73f0CkXaXp7hrann] code_challenge:[challenge] code_challenge_method:[S256] codex_cli_simplified_flow:[true] id_token_add_organizations:[true] originator:[broken-client] redirect_uri:[http://localhost:1455/auth/callback] response_type:[code] scope:[openid profile email offline_access api.connectors.read api.connectors.invoke] state:[state]], want map[client_id:[app_EMoamEEZ73f0CkXaXp7hrann] code_challenge:[challenge] code_challenge_method:[S256] codex_cli_simplified_flow:[true] id_token_add_organizations:[true] originator:[mcplib] redirect_uri:[http://localhost:1455/auth/callback] response_type:[code] scope:[openid profile email offline_access api.connectors.read api.connectors.invoke] state:[state]]
+--- FAIL: TestBuildAuthorizeURL_OpenAIContract (0.00s)
+=== CONT  TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure
+=== CONT  TestOpenAIDevice_UsesCodexProtocol
+=== NAME  TestPKCE_ChallengeIsS256
+    oauth_pkce_test.go:28: challenge = "rQ", want independently computed S256 "rQoH2exAv8aY9ocQTAt3jGKHHJudYlN24PSuyyIrtOk"
+--- FAIL: TestPKCE_ChallengeIsS256 (0.00s)
+=== CONT  TestOAuthCallback_RejectsStateMismatch
+=== NAME  TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure
+    oauth_loopback_test.go:164: fallback endpoints = llmprovider.oauthEndpoints{Authorization:"https://issuer.example/oauth2/authorize", Token:"https://issuer.example/oauth2/token", Device:"https://auth.x.ai/oauth2/device/code"}
+--- FAIL: TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure (0.00s)
+=== CONT  TestOpenAILoopbackPortsAre1455Then1457
+    oauth_loopback_test.go:59: openaiLoopbackPorts = [1457 1455], want [1455 1457]
+--- FAIL: TestOpenAILoopbackPortsAre1455Then1457 (0.00s)
+=== CONT  TestListenFirstAvailable_ErrorsWhenAllBusy
+=== NAME  TestOAuthCallback_RejectsStateMismatch
+    oauth_loopback_test.go:113: callback status = 200, want 400
+--- FAIL: TestOAuthCallback_RejectsStateMismatch (0.00s)
+=== NAME  TestListenFirstAvailable_ErrorsWhenAllBusy
+    oauth_loopback_test.go:50: error = oauth: callback unavailable: listen tcp 127.0.0.1:62525: bind: address already in use, want device-code guidance
+--- FAIL: TestListenFirstAvailable_ErrorsWhenAllBusy (0.00s)
+=== NAME  TestListenFirstAvailable_UsesSecondPortWhenFirstBusy
+    oauth_loopback_test.go:28: listenFirstAvailable() error = oauth: callback unavailable: listen tcp 127.0.0.1:62522: bind: address already in use
+--- FAIL: TestListenFirstAvailable_UsesSecondPortWhenFirstBusy (0.00s)
+=== CONT  TestGrokDevice_StopsAtExpiry
+=== NAME  TestOpenAIDevice_UsesCodexProtocol
+    oauth_device_test.go:172: LoginDeviceOAuth() error = oauth: OpenAI device-code request failed: 404 Not Found
+--- FAIL: TestOpenAIDevice_UsesCodexProtocol (0.00s)
+=== NAME  TestGrokDevice_SlowDownIncreasesInterval
+    oauth_device_test.go:69: sleep sequence = [1s 1s], want [1s 6s]
+=== NAME  TestGrokDevice_StopsAtExpiry
+    oauth_device_test.go:105: token calls = 2, want at most 1 before expiry
+--- FAIL: TestGrokDevice_StopsAtExpiry (0.00s)
+--- FAIL: TestGrokDevice_SlowDownIncreasesInterval (0.00s)
+=== NAME  TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange
+    oauth_loopback_test.go:240: redirect_uri = "http://localhost:62533/callback", want ephemeral 127.0.0.1 callback
+--- FAIL: TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange (0.01s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.697s
+FAIL
+```
+
+The scratch copy was moved to Trash after the proof. The working tree was not
+mutated. The first lint run found only Phase 5 implementation issues (explicit
+best-effort/cleanup error handling, repeated form keys, and fallback control
+flow); all were corrected within the approved Phase 5 source files. The final
+independent phase gates were green. `git diff --check`, `gofmt -d`, per-file
+`golint`, and `go vet ./...` exited zero with no output:
+
+```text
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+ok  github.com/maccavelli/mcplib              3.059s
+ok  github.com/maccavelli/mcplib/fastpath     0.678s
+ok  github.com/maccavelli/mcplib/hfsc         1.256s
+ok  github.com/maccavelli/mcplib/llmprovider  0.919s
+ok  github.com/maccavelli/mcplib/logging      1.014s
+ok  github.com/maccavelli/mcplib/schema       1.745s
+ok  github.com/maccavelli/mcplib/selfupdate   2.411s
+ok  github.com/maccavelli/mcplib/wizard       2.412s
+ok  github.com/maccavelli/mcplib/llmprovider  1.682s
+```
+
+The final line is the race-enabled targeted Phase 5 run.
