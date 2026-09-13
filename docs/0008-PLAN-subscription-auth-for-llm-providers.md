@@ -1927,3 +1927,172 @@ ok  github.com/maccavelli/mcplib/llmprovider  1.312s
 ```
 
 The final line is the race-enabled targeted Phase 6 run.
+
+### Phase 7 — complete
+
+The commit containing this entry changes Grok request authentication from a
+stored API-key string to a `TokenSource`, while preserving `NewGrok`'s empty
+static-key rejection. Both static keys and OAuth sessions use
+`https://api.x.ai/v1`; every request acquires the current token and sends only
+the standard bearer authorization header. OAuth sessions refresh and retry
+once after HTTP 401, while static keys do not retry. Grok model discovery and
+health probes retain the same source rather than extracting a credential.
+
+Following the phase's required sequencing, the first host-lock test used the
+temporary test-only CLI-proxy constructor. It produced the intended behavioral
+failure:
+
+```text
+=== RUN   TestGrok_SessionUsesAPIXAIHost
+=== PAUSE TestGrok_SessionUsesAPIXAIHost
+=== CONT  TestGrok_SessionUsesAPIXAIHost
+    grok_oauth_test.go:38: request URL = https://cli-chat-proxy.grok.com/v1/responses, want api.x.ai/v1/responses
+--- FAIL: TestGrok_SessionUsesAPIXAIHost (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.744s
+FAIL
+```
+
+The complete initial targeted run, after adding the remaining tests but before
+adding Grok construction from a source, was red. The legacy empty-key behavior
+already passed; the later scratch mutation separately proves the new
+`StaticToken` branch of that combined gate.
+
+```text
+=== RUN   TestGrok_SessionUsesAPIXAIHost
+=== PAUSE TestGrok_SessionUsesAPIXAIHost
+=== RUN   TestGrok_SessionOmitsCLITokenAuthHeader
+=== PAUSE TestGrok_SessionOmitsCLITokenAuthHeader
+=== RUN   TestGrok_EmptyStaticKeyStillRejected
+=== PAUSE TestGrok_EmptyStaticKeyStillRejected
+=== RUN   TestGrok_TokenSourceCalledPerRequest
+=== PAUSE TestGrok_TokenSourceCalledPerRequest
+=== RUN   TestGrok_OAuth401RetriesOnceAfterRefresh
+=== PAUSE TestGrok_OAuth401RetriesOnceAfterRefresh
+=== CONT  TestGrok_SessionUsesAPIXAIHost
+=== CONT  TestGrok_TokenSourceCalledPerRequest
+=== NAME  TestGrok_SessionUsesAPIXAIHost
+    grok_oauth_test.go:34: NewProviderWithSource() error = provider "grok" does not accept TokenSource
+--- FAIL: TestGrok_SessionUsesAPIXAIHost (0.00s)
+=== CONT  TestGrok_EmptyStaticKeyStillRejected
+--- PASS: TestGrok_EmptyStaticKeyStillRejected (0.00s)
+=== CONT  TestGrok_SessionOmitsCLITokenAuthHeader
+    grok_oauth_test.go:68: NewProviderWithSource() error = provider "grok" does not accept TokenSource
+--- FAIL: TestGrok_SessionOmitsCLITokenAuthHeader (0.00s)
+=== NAME  TestGrok_TokenSourceCalledPerRequest
+    grok_oauth_test.go:97: NewProviderWithSource() error = provider "grok" does not accept TokenSource
+--- FAIL: TestGrok_TokenSourceCalledPerRequest (0.00s)
+=== CONT  TestGrok_OAuth401RetriesOnceAfterRefresh
+    grok_oauth_test.go:159: NewProviderWithSource() error = provider "grok" does not accept TokenSource
+--- FAIL: TestGrok_OAuth401RetriesOnceAfterRefresh (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.668s
+FAIL
+```
+
+The first post-implementation build caught a missing `time` import in the
+planned `grok.go` change. It was corrected before any gate was treated as
+green:
+
+```text
+# github.com/maccavelli/mcplib/llmprovider [github.com/maccavelli/mcplib/llmprovider.test]
+llmprovider/grok.go:280:19: undefined: time
+FAIL github.com/maccavelli/mcplib/llmprovider [build failed]
+FAIL
+```
+
+Every new Phase 7 gate was then proved against deliberate breakage in scratch
+copies. The verified combined mutations selected the forbidden CLI proxy,
+added `X-XAI-Token-Auth`, admitted an empty `StaticToken`, and replaced each
+acquired credential with the first token. The first attempted mutation did not
+compile because it left `token` unused, so it established nothing; the scratch
+mutation was corrected and inspected before this complete behavioral result:
+
+```text
+=== RUN   TestGrok_SessionUsesAPIXAIHost
+=== PAUSE TestGrok_SessionUsesAPIXAIHost
+=== RUN   TestGrok_SessionOmitsCLITokenAuthHeader
+=== PAUSE TestGrok_SessionOmitsCLITokenAuthHeader
+=== RUN   TestGrok_EmptyStaticKeyStillRejected
+=== PAUSE TestGrok_EmptyStaticKeyStillRejected
+=== RUN   TestGrok_TokenSourceCalledPerRequest
+=== PAUSE TestGrok_TokenSourceCalledPerRequest
+=== RUN   TestGrok_OAuth401RetriesOnceAfterRefresh
+=== PAUSE TestGrok_OAuth401RetriesOnceAfterRefresh
+=== CONT  TestGrok_SessionUsesAPIXAIHost
+=== CONT  TestGrok_TokenSourceCalledPerRequest
+=== CONT  TestGrok_EmptyStaticKeyStillRejected
+=== CONT  TestGrok_SessionOmitsCLITokenAuthHeader
+=== CONT  TestGrok_OAuth401RetriesOnceAfterRefresh
+=== NAME  TestGrok_EmptyStaticKeyStillRejected
+    grok_oauth_test.go:82: NewProviderWithSource() error = nil, want empty-static-key error
+--- FAIL: TestGrok_EmptyStaticKeyStillRejected (0.00s)
+=== NAME  TestGrok_OAuth401RetriesOnceAfterRefresh
+    grok_oauth_test.go:162: Generate() error = Post "https://cli-chat-proxy.grok.com/v1/responses": unexpected request host
+=== NAME  TestGrok_SessionUsesAPIXAIHost
+    grok_oauth_test.go:44: request URL = https://cli-chat-proxy.grok.com/v1/responses, want api.x.ai/v1/responses
+--- FAIL: TestGrok_OAuth401RetriesOnceAfterRefresh (0.00s)
+--- FAIL: TestGrok_SessionUsesAPIXAIHost (0.00s)
+=== NAME  TestGrok_TokenSourceCalledPerRequest
+    grok_oauth_test.go:106: authorizations/calls = [Bearer first-token Bearer first-token]/2, want [Bearer first-token Bearer second-token]/2
+--- FAIL: TestGrok_TokenSourceCalledPerRequest (0.00s)
+=== NAME  TestGrok_SessionOmitsCLITokenAuthHeader
+    grok_oauth_test.go:54: request unexpectedly contains X-Xai-Token-Auth
+--- FAIL: TestGrok_SessionOmitsCLITokenAuthHeader (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.598s
+FAIL
+```
+
+Because the broken host masked the OAuth retry assertion, the host and token
+replacement were restored in the same scratch copy while retry remained
+disabled. The isolated test then failed on the unretried 401 as intended:
+
+```text
+=== RUN   TestGrok_OAuth401RetriesOnceAfterRefresh
+=== PAUSE TestGrok_OAuth401RetriesOnceAfterRefresh
+=== CONT  TestGrok_OAuth401RetriesOnceAfterRefresh
+    grok_oauth_test.go:162: Generate() error = llm: authentication failed: grok HTTP 401
+--- FAIL: TestGrok_OAuth401RetriesOnceAfterRefresh (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.661s
+FAIL
+```
+
+The locked static-key no-retry behavior has its own gate. A second inspected
+scratch mutation incorrectly allowed static credentials to enter the retry
+path; the gate observed both requests:
+
+```text
+=== RUN   TestGrok_Static401DoesNotRetry
+=== PAUSE TestGrok_Static401DoesNotRetry
+=== CONT  TestGrok_Static401DoesNotRetry
+    grok_oauth_test.go:185: generate calls = 2, want 1
+--- FAIL: TestGrok_Static401DoesNotRetry (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/llmprovider 0.592s
+FAIL
+```
+
+Both scratch copies were moved to Trash after the proofs. The working tree was
+not mutated by any negative test.
+
+The final staged-file `gofmt -d`, per-file `golint`, `go vet ./...`, and
+`git diff --cached --check` gates exited zero with no output. Repository lint,
+the full suite, and the race-enabled targeted Phase 7 suite were green:
+
+```text
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+ok  github.com/maccavelli/mcplib              (cached)
+ok  github.com/maccavelli/mcplib/fastpath     (cached)
+ok  github.com/maccavelli/mcplib/hfsc         (cached)
+ok  github.com/maccavelli/mcplib/llmprovider  0.707s
+ok  github.com/maccavelli/mcplib/logging      (cached)
+ok  github.com/maccavelli/mcplib/schema       (cached)
+ok  github.com/maccavelli/mcplib/selfupdate   (cached)
+ok  github.com/maccavelli/mcplib/wizard       (cached)
+ok  github.com/maccavelli/mcplib/llmprovider  1.665s
+```
+
+The final line is the race-enabled targeted Phase 7 run.

@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // GrokProvider implements Provider using the xAI Grok API (Responses API) via standard http client.
 type GrokProvider struct {
-	apiKey          string
+	src             TokenSource
 	model           string
 	baseURL         string // For testing
 	client          *http.Client
@@ -25,13 +27,23 @@ func NewGrok(apiKey, model string, opts ...ProviderOption) (*GrokProvider, error
 	if apiKey == "" {
 		return nil, fmt.Errorf("grok api key is required")
 	}
+	return newGrokWithSource(NewStaticToken(apiKey), model, opts...)
+}
+
+func newGrokWithSource(src TokenSource, model string, opts ...ProviderOption) (*GrokProvider, error) {
+	if src == nil {
+		return nil, errors.New("grok: TokenSource is required")
+	}
+	if static, ok := src.(*StaticToken); ok && static.Value == "" {
+		return nil, errors.New("grok api key is required")
+	}
 	cfg := ApplyOptions(opts)
-	baseURL := "https://api.x.ai/v1"
+	baseURL := DefaultGrokBaseURL
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
 	}
 	return &GrokProvider{
-		apiKey:          apiKey,
+		src:             src,
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
@@ -138,6 +150,15 @@ func itemsToInput(items []Item) []map[string]any {
 }
 
 func (p *GrokProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
+	response, err := p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
+	var authErr *grokAuthError
+	if err == nil || !errors.As(err, &authErr) || authErr.status != http.StatusUnauthorized || !expireGrokSession(p.src) {
+		return response, err
+	}
+	return p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
+}
+
+func (p *GrokProvider) doGenerateItemsOnce(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
 	body := map[string]any{
 		jsonKeyModel:        p.model,
 		jsonKeyInput:        itemsToInput(input),
@@ -180,7 +201,11 @@ func (p *GrokProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	token, err := p.src.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("grok: acquire token: %w", err)
+	}
+	req.Header.Set(oauthAuthorizationHeader, "Bearer "+token.Value)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -197,7 +222,7 @@ func (p *GrokProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 		case resp.StatusCode == http.StatusTooManyRequests:
 			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode, Provider: ProviderGrok}
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return nil, fmt.Errorf("%w: grok HTTP %d", ErrAuthFailure, resp.StatusCode)
+			return nil, &grokAuthError{status: resp.StatusCode}
 		case resp.StatusCode >= 500:
 			return nil, fmt.Errorf("%w: grok HTTP %d", ErrProviderUnavailable, resp.StatusCode)
 		default:
@@ -211,16 +236,19 @@ func (p *GrokProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 // DiscoverModels returns curated Grok text models available to this key, with an
 // optional short health probe. Falls back to the static catalog.
 func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listGrokModels(ctx, p.apiKey, ProviderConfig{
-		HTTPClient: p.client,
-		BaseURL:    p.baseURL,
-	})
+	listed, err := ListAvailableModelsWithSource(
+		ctx,
+		ProviderGrok,
+		p.src,
+		WithHTTPClient(p.client),
+		WithBaseURL(p.baseURL),
+	)
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderGrok)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewGrok(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := newGrokWithSource(p.src, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
 		if err != nil {
 			return "", err
 		}
@@ -230,4 +258,27 @@ func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		return healthy, nil
 	}
 	return listed, nil
+}
+
+type grokAuthError struct {
+	status int
+}
+
+func (err *grokAuthError) Error() string {
+	return fmt.Sprintf("%v: grok HTTP %d", ErrAuthFailure, err.status)
+}
+
+func (err *grokAuthError) Unwrap() error {
+	return ErrAuthFailure
+}
+
+func expireGrokSession(src TokenSource) bool {
+	session, ok := src.(*OAuthSession)
+	if !ok {
+		return false
+	}
+	session.mu.Lock()
+	session.Expiry = time.Now().Add(-time.Second)
+	session.mu.Unlock()
+	return true
 }

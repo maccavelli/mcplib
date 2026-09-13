@@ -251,6 +251,8 @@ func NewProviderWithSource(name string, src TokenSource, model string, opts ...P
 	switch name {
 	case ProviderOpenAI:
 		return NewOpenAIWithSource(src, model, opts...)
+	case ProviderGrok:
+		return newGrokWithSource(src, model, opts...)
 	default:
 		return nil, fmt.Errorf("provider %q does not accept TokenSource", name)
 	}
