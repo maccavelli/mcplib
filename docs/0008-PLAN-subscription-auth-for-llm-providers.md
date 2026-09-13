@@ -1,6 +1,6 @@
 ---
-status: proposed
-date: 2026-09-12
+status: in-progress
+date: 2026-09-13
 associated-madr: "0008-MADR-subscription-auth-for-llm-providers.md"
 decision-makers: mcplib maintainers
 ---
@@ -8,7 +8,7 @@ decision-makers: mcplib maintainers
 # Implement Browser, API-Key, and Headless Subscription Authentication for OpenAI and xAI Grok
 
 Associated MADR: [0008-MADR-subscription-auth-for-llm-providers.md](0008-MADR-subscription-auth-for-llm-providers.md)
-(accepted, revision 4, 2026-09-12).
+(accepted, revision 5, 2026-09-12).
 
 This plan executes that MADR and nothing else. If execution discovers a fact that
 contradicts the MADR, **stop and amend the MADR** before continuing. Do not
@@ -18,6 +18,12 @@ smuggle a different architecture into a phase.
 > first consumer. Phases 1–9 stay in `mcplib`. Phase 10 is that hook only
 > (sibling repo `../prepare-commit-msg`). MagicDev and MagicTools are still
 > out of this plan.
+>
+> **Plan revision 2026-09-13 (sweep).** Re-read this plan against `mcplib`
+> `69271af`, `wizard/configure_test.go`, `wizard/text_prompter.go` (1-based
+> Select), and `prepare-commit-msg` `internal/ui/setup.go` /
+> `setup_test.go` / `main.go` / `config.go`. Corrections below are applied
+> in place; they do not change the MADR. See §0.1.
 
 ## Goal
 
@@ -68,6 +74,61 @@ the fleet remains out (MADR 0004).
   stdlib `net/http` + `crypto/sha256` + `encoding/base64`.
 * Names below are **the** exported API, not sketches. If a name must change,
   amend this plan before committing.
+* `fakePrompter.Select` indices are **0-based**. `TextPrompter.Select` user
+  input is **1-based** (`wizard/text_prompter.go:149`). mcplib wizard tests
+  use fakePrompter. prepare-commit-msg setup tests type into TextPrompter.
+  Do not mix the two.
+
+### 0.1 Sweep findings (2026-09-13) — locked by this revision
+
+These were ambiguous or wrong in the 2026-09-12 text. The body below matches
+this list.
+
+1. **`Options.Orchestrated == nil` means `mcplib.IsOrchestratorOwned()`, not
+   true.** If nil meant true, every existing `ConfigureLLM` test would return
+   `ErrOrchestrated`. Tests that need a standalone wizard leave it nil (CI is
+   not orchestrated) or set `boolPtr(false)`.
+2. **`prepare-commit-msg` already has an OpenAI interactive script**
+   (`setup_test.go:107` `input := "2\ntest-key\n1\n…"`). After Phase 8 that
+   input is wrong: `2` selects openai, then the **next** line is the new
+   auth-method menu, so `"test-key"` is not a key. Phase 10 **must** change
+   that string to `2\n1\ntest-key\n1\n…` (provider 2, auth method 1 =
+   `api_key`). Gemini `1` and Claude `3` stay valid (no auth-method menu).
+3. **`AuthKind` on disk is `"oauth"` or absent.** Do not write `"api_key"`;
+   empty means API key so existing `config.json` files stay valid without a
+   churn on next configure.
+4. **`token_stdin` heuristic is exact, not "JWT-like".** openai: prefix `sk-`
+   → API key, anything else → ChatGPT access-only session (no refresh).
+   grok: always API key. `CODEX_ACCESS_TOKEN` is read only on openai
+   `token_stdin` when `AllowEnv` is true, same Confirm+MaskSecret as an env
+   API key.
+5. **Keep-existing OAuth** is a `Confirm`, same as keep-existing key, using
+   `MaskSecret(Existing.AccessToken)`. It runs only when
+   `Existing.Kind == CredOAuth` and `Existing.Provider == d.ID`.
+6. **Host-lock tests must not use `WithBaseURL`.** A capturing
+   `http.RoundTripper` records `r.URL` and returns a canned 200 Responses
+   body. `WithBaseURL` would hide the default-host branch.
+7. **OpenAI loopback ports are injected.** Production calls
+   `listenFirstAvailable("127.0.0.1", []int{1455, 1457})`. Tests pass two
+   ephemeral ports so they do not fight a running Codex CLI on 1455.
+8. **OAuth URL constants live in `llmprovider/oauth_constants.go`**, not
+   `constants.go` (that file is JSON field names; stuffing URLs there trips
+   goconst and mixes concerns).
+9. **`FileTokenStore.Load` sets `session.Store = fs`** so a loaded session
+   refreshes to the same directory without the caller remembering.
+10. **`OAuthSession.HTTPClient`**: nil → `defaultHTTPClient()`. Tests assign
+    the httptest client. Refresh POSTs use that client.
+11. **Empty `TokenURL`**: ChatGPT issuer → `{issuer}/oauth/token`; otherwise
+    `https://auth.x.ai/oauth2/token`.
+12. **One 401 retry** on generate for `*OAuthSession` only: on
+    `ErrAuthFailure`, set `Expiry` to the past, call `Token()` again, retry
+    the HTTP once. Static keys do not retry 401 (today's behaviour).
+13. **Phase 8 `configure_test.go`:** current tests select claude, gemini, or
+    ollama only (`selects` second index is the **model**, not auth). They
+    keep working. Any **new** openai/grok wizard test must queue an extra
+    0-based auth-method index after the provider index.
+14. **Phase 10 `go-precheck.sh`** is invoked with the files **actually
+    staged**, not a guessed list. `open.go` is listed only after it exists.
 
 ## 1. Locked constants
 
@@ -158,17 +219,18 @@ type StaticToken struct {
 func NewStaticToken(value string) *StaticToken
 
 type OAuthSession struct {
-    Provider  string
-    Access    string
-    Refresh   string
-    Expiry    time.Time
-    Issuer    string
-    ClientID  string
-    AccountID string // ChatGPT; empty for Grok
-    TokenURL  string
-    Store     TokenStore // optional; required to persist rotation
-    mu        sync.Mutex
-    inflight  *tokenFuture // unexported single-flight
+    Provider   string
+    Access     string
+    Refresh    string
+    Expiry     time.Time
+    Issuer     string
+    ClientID   string
+    AccountID  string // ChatGPT; empty for Grok
+    TokenURL   string // empty → default from issuer, see §0.1.11
+    Store      TokenStore
+    HTTPClient *http.Client // nil → defaultHTTPClient(); tests inject httptest
+    mu         sync.Mutex
+    inflight   *tokenFuture
 }
 
 func (s *OAuthSession) Token(ctx context.Context) (Token, error)
@@ -225,8 +287,9 @@ OpenAI ChatGPT vs Platform is **not** a new provider id. Detection:
 * `*StaticToken` → Platform, `DefaultOpenAIPlatformBaseURL`, `StaticOpenAI`.
 * `*OAuthSession` with `ChatGPT()==true` → Codex host
   `DefaultOpenAIChatGPTBaseURL`, catalog `StaticOpenAIChatGPT`.
-* `WithBaseURL` still overrides the host in tests; ChatGPT-mode tests that
-  pass a Platform host must fail (see Phase 6 negative test).
+* `WithBaseURL` still overrides the host for decode/tool tests. **Default-host
+  tests (A1, A2, A4) use a capturing RoundTripper and must not pass
+  `WithBaseURL`.**
 
 Grok: both sources use `DefaultGrokBaseURL`. Requests set
 `Authorization: Bearer` from `TokenSource.Token` and **never**
@@ -269,9 +332,11 @@ type Options struct {
 }
 ```
 
-When orchestrated (nil pointer resolves true): `ConfigureLLM` returns
-`ErrOrchestrated` without prompting. Callers that want a standalone wizard
-inside tests set `Orchestrated` to `boolPtr(false)`.
+`orchestrated(o)` is: if `o.Orchestrated != nil`, use `*o.Orchestrated`; else
+`mcplib.IsOrchestratorOwned()`. When that is true, `ConfigureLLM` returns
+`ErrOrchestrated` with **zero** Prompter calls. Existing wizard tests leave
+the field nil (the test process is not orchestrated). prepare-commit-msg sets
+`boolPtr(false)` so a stray `MCP_ORCHESTRATOR_OWNED` cannot disable configure.
 
 `ErrOrchestrated` is `var ErrOrchestrated = errors.New("wizard: orchestrated process uses the LLM backplane, not provider OAuth")`.
 
@@ -301,10 +366,10 @@ Grok listing is unchanged: session bearer on `api.x.ai/v1/models` (probe: 200).
 | Phase | Deliverable | New files | Modified files |
 |---|---|---|---|
 | 1 | `Token`, `TokenSource`, `StaticToken` | `llmprovider/token.go`, `token_test.go` | — |
-| 2 | `TokenStore` + `FileTokenStore` `0600` | `tokenstore.go`, `tokenstore_file.go`, `tokenstore_file_unix.go`, `tokenstore_file_windows.go`, `tokenstore_test.go` | — |
-| 3 | `OAuthSession` refresh + persist-before-use | `oauth_session.go`, `oauth_session_test.go` | — |
+| 2 | `TokenStore` + `FileTokenStore` `0600` | `tokenstore.go`, `tokenstore_file.go`, `tokenstore_file_unix.go`, `tokenstore_file_windows.go`, `tokenstore_test.go`; corrective pass adds `tokenstore_file_unix_test.go` | corrective pass also modifies `token.go`, `token_test.go`, and the Phase 2 files |
+| 3 | `OAuthSession` refresh + persist-before-use | `oauth_session.go`, `oauth_session_test.go` | `tokenstore.go` (add `mu`, `inflight`, and `tokenFuture` when they become used) |
 | 4 | `AuthMethod` on descriptors | — | `descriptor.go`, `descriptor_test.go` |
-| 5 | PKCE, OpenAI loopback 1455/1457, Grok ephemeral loopback, device-code | `oauth_pkce.go`, `oauth_loopback.go`, `oauth_device.go`, `*_test.go` | `constants.go` (OAuth string constants) |
+| 5 | PKCE, OpenAI loopback 1455/1457, Grok ephemeral loopback, device-code | `oauth_constants.go`, `oauth_pkce.go`, `oauth_loopback.go`, `oauth_device.go`, `*_test.go` | — |
 | 6 | OpenAI transport branch + ChatGPT catalog | `openai_chatgpt.go`, `openai_chatgpt_test.go` | `openai.go`, `provider.go`, `models_catalog.go`, `models_catalog_test.go`, `discovery.go`, `discovery_test.go` |
 | 7 | Grok `TokenSource` on `api.x.ai` | `grok_oauth_test.go` | `grok.go`, `provider.go` |
 | 8 | Wizard auth-method step, import, orchestrated guard | `wizard/auth.go`, `wizard/import.go`, `wizard/auth_test.go`, `wizard/import_test.go` | `wizard/configure.go`, `configure_test.go` |
@@ -356,42 +421,90 @@ Write it to require `err == nil`.
 }
 ```
 
+   Persist via an unexported `fileRecord` struct with those json tags — **not**
+   by marshalling `OAuthSession` (that would try to serialize `Store` /
+   `HTTPClient` / `mu`).
    `Load` of a missing file returns `(nil, nil)`, not an error.
+   `Load` of a valid file returns `session` with `session.Store = fs`.
    `Save` writes `{dir}/{provider}.json` via temp file + rename, then sets
-   mode `0600` on Unix (`tokenstore_file_unix.go`). Windows: create with
-   `os.OpenFile` and `syscall.O_CREAT` user-only as far as the stdlib allows;
-   skip the `0600` assert in tests tagged `unix`.
-   `NewFileTokenStore` `MkdirAll(dir, 0700)`.
-   Reject `provider` containing `/`, `\`, or `..`.
+   mode `0600` on Unix (`tokenstore_file_unix.go`: `os.Chmod(path, 0o600)`
+   after rename). Windows: `tokenstore_file_windows.go` `chmod0600` is a
+   no-op; tests for mode use `//go:build unix`.
+   `NewFileTokenStore` `MkdirAll(dir, 0o700)`.
+   Reject `provider` that is empty or contains `/`, `\`, or `..`.
 
 2. **Red tests, in this order:**
 
    * `TestFileTokenStore_SaveMode0600` (unix): `stat.Mode().Perm() == 0600`.
-     Implement `Save` **without** chmod first, run, **watch it fail**, then
-     add chmod. This is the MADR confirmation "mode 0600".
+     ~~Implement `Save` **without** chmod first, run, **watch it fail**, then
+     add chmod.~~ `os.CreateTemp` itself creates mode `0600`, so omitting the
+     later chmod cannot prove this gate. The 2026-09-13 correction proves the
+     test by changing the Unix helper to `0644` in a scratch clone and watching
+     the assertion report `mode = 644, want 0600`. This is the MADR
+     confirmation "mode 0600".
    * `TestFileTokenStore_RoundTrip`
    * `TestFileTokenStore_LoadMissingIsNil`
    * `TestFileTokenStore_RejectsPathTraversal`
 
-3. Phase green. Commit.
+3. ~~Phase green. Commit.~~ Commit `9836e94` landed even though the captured
+   Phase 2 `gofmt` and lint checks were red. Complete the corrective pass below
+   and land a corrective commit before Phase 3.
 
 `Save` must not log `access` or `refresh`. A test
 `TestFileTokenStore_DoesNotLogSecrets` is not required if the store never
 calls `slog`; assert the file package imports no `log/slog`.
 
+### Approved Phase 2 corrective pass (2026-09-13)
+
+The maintainer approved this corrective pass after the Phase 1–2 audit. It does
+not change the MADR's architecture.
+
+1. Add the missing Go documentation required by the per-file `golint` gate to
+   the Phase 1 and Phase 2 exported API.
+2. Format `tokenstore.go`; check and propagate the `Close`, cleanup, and final
+   chmod outcomes that `errcheck` reported.
+3. Remove the unused Phase 3-only `mu`, `inflight`, and `tokenFuture` scaffold
+   from Phase 2. Phase 3 adds them to `tokenstore.go` in the same commit that
+   first uses them.
+4. Move `TestFileTokenStore_SaveMode0600` to
+   `tokenstore_file_unix_test.go` with `//go:build unix`; keep the other store
+   tests platform-neutral.
+5. Add a provider id containing `..` but no slash or backslash to
+   `TestFileTokenStore_RejectsPathTraversal` so that rule is independently
+   guarded.
+6. Prove the adjusted tests in a scratch clone: use a `0644` Unix helper for
+   the mode failure and remove only the `..` validation for the traversal
+   failure. Assert both deliberate mutations landed before running the tests.
+7. Run the corrected per-command phase gate plus per-file `golint`. Record the
+   full output and commit only when every check is green.
+
+Corrective scope: `docs/0008-PLAN-subscription-auth-for-llm-providers.md`,
+`llmprovider/token.go`, `llmprovider/token_test.go`,
+`llmprovider/tokenstore.go`, `llmprovider/tokenstore_file.go`,
+`llmprovider/tokenstore_file_unix.go`,
+`llmprovider/tokenstore_file_windows.go`, `llmprovider/tokenstore_test.go`, and
+new `llmprovider/tokenstore_file_unix_test.go`.
+
 ## Phase 3 — `OAuthSession` refresh
 
 ### Behaviour
 
-* If `time.Until(Expiry) > 2*time.Minute` (and Access non-empty), return Access.
-* Else POST `application/x-www-form-urlencoded` to `TokenURL`
-  `grant_type=refresh_token&refresh_token=...&client_id=...`.
-* On HTTP 200, parse `access_token`, optional `refresh_token` (keep old if
-  absent), `expires_in` (default 3600s).
-* If `Store != nil`, `Save` the **new** session. If `Save` fails, return that
-  error and **do not** adopt the new access token in memory.
-* Single-flight: concurrent `Token()` share one refresh.
-* `ChatGPT()` is `strings.TrimRight(Issuer, "/") == DefaultOpenAIIssuer`.
+* If Access is non-empty and `Expiry` is zero: return Access (access-only
+  import / `CODEX_ACCESS_TOKEN`; no refresh).
+* If Access is non-empty and `time.Until(Expiry) > 2*time.Minute`: return Access.
+* Else POST `application/x-www-form-urlencoded` to `tokenURL(s)` (see §0.1.11)
+  `grant_type=refresh_token&refresh_token=...&client_id=...` using
+  `s.HTTPClient` or `defaultHTTPClient()`.
+* On HTTP 200, parse `access_token` (required), optional `refresh_token`
+  (keep old if absent), `expires_in` (default 3600s).
+* Build a **copy** of the session with the new tokens. If `Store != nil`,
+  `Save` that copy **first**. Only if `Save` returns nil, assign the copy
+  into `s`. If `Save` fails, `s.Refresh` is still the old value and
+  `Token()` returns the save error.
+* Missing refresh token when a refresh is required → error
+  `oauth: no refresh token`.
+* Single-flight under `s.mu`.
+* `ChatGPT()` is `strings.TrimRight(s.Issuer, "/") == DefaultOpenAIIssuer`.
 
 ### Red tests
 
@@ -454,20 +567,32 @@ no pad. `TestPKCE_ChallengeIsS256` computes the challenge independently.
 
 ### OpenAI loopback (`oauth_loopback.go`)
 
-* Bind `127.0.0.1:1455`. If `EADDRINUSE`, bind `127.0.0.1:1457`. If both fail,
-  return an error that tells the caller to use device-code. **Do not** pick
-  another port.
+```go
+func listenFirstAvailable(host string, ports []int) (net.Listener, int, error)
+```
+
+Production: `listenFirstAvailable("127.0.0.1", []int{1455, 1457})`. If both
+fail, error text must contain `device-code`. **Do not** fall through to
+`:0`.
+
 * Advertise redirect `http://localhost:{port}/auth/callback` (host
-  `localhost`, not `127.0.0.1`, matching Codex `server.rs`).
+  `localhost`, not `127.0.0.1`, matching Codex `server.rs:176`).
 * Path `/auth/callback`: read `code`, `state`, `error`. State must match.
-  Respond 200 text/html "You can close this window." (no secrets in HTML).
-* Timeout 10 minutes.
-* `OpenURL` is invoked with the authorize URL; a nil/erroring `OpenURL` does
-  not fail the flow (MADR: print/notify the URL).
-* Tests use `httptest` for the **token** exchange and a real loopback bind on
-  1455 in `TestOpenAILoopback_Binds1455Then1457`: occupy 1455 with a dummy
-  listener, assert the flow binds 1457. If the implementation binds a random
-  port, this test fails.
+  Respond 200 `text/html` `You can close this window.` (no code/token in HTML).
+* Timeout 10 minutes (`context.WithTimeout`).
+* `OpenURL` is invoked with the authorize URL; nil or erroring `OpenURL`
+  does not fail the flow.
+
+**Red test (deterministic, no fight with Codex on 1455):**
+
+`TestListenFirstAvailable_UsesSecondPortWhenFirstBusy`: bind
+`127.0.0.1:0` twice to get two free ports `p1,p2`; occupy `p1`; call
+`listenFirstAvailable("127.0.0.1", []int{p1, p2})`; assert returned port
+`== p2`. Then `TestListenFirstAvailable_ErrorsWhenAllBusy` occupying both.
+
+Production wiring test: `TestOpenAILoopbackPortsAre1455Then1457` asserts
+`openaiLoopbackPorts == []int{1455, 1457}` (a named package var). That is
+the Hydra allow-list lock; it does not bind those ports.
 
 ### Grok loopback
 
@@ -491,7 +616,8 @@ Floor interval at 1s so `NaN` cannot busy-loop (OpenCode's lesson).
   func. If the implementation ignores `slow_down`, FAIL.
 * `TestGrokDevice_StopsAtExpiry` — endpoint always `authorization_pending`;
   `expires_in=1`; must return error, not hang. Use fake clock/sleep.
-* `TestOpenAILoopback_DoesNotUseRandomPort` — as above.
+* `TestListenFirstAvailable_UsesSecondPortWhenFirstBusy` — as above.
+* `TestOpenAILoopbackPortsAre1455Then1457`.
 
 No live OAuth in this phase.
 
@@ -538,20 +664,33 @@ fails if any request is made (`httptest` server that `t.Fatal`s on hit).
 
 ### Red tests (load-bearing)
 
-1. `TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost`: `OAuthSession` with
-   `Issuer: DefaultOpenAIIssuer`, `WithHTTPClient` capturing URL. Generate
-   against httptest. Assert `req.URL.Host != "api.openai.com"` and path
-   contains `/backend-api/codex/responses` when base URL is default.
-   **Write this test first against current `OpenAIProvider` (which always
-   uses `p.baseURL + "/responses"` with the Platform default). It MUST
-   FAIL.** Then implement the branch.
-2. `TestOpenAI_StaticKeyDoesNotHitChatGPTHost`: static key, default base,
-   assert host `api.openai.com` and path `/v1/responses`.
-3. `TestOpenAI_ChatGPTSetsAccountHeader`.
-4. `TestNewProviderWithSource_RejectsClaude`: `NewProviderWithSource("claude",
-   src, "x")` errors.
-5. `TestNewProvider_APIKeyStillPlatform`: regression
-   `NewProvider("openai", "sk-test", "gpt-4.1-mini")` hits Platform.
+1. `TestOpenAI_ChatGPTSessionDoesNotHitPlatformHost`: capturing
+   `http.RoundTripper` (no `WithBaseURL`). Construct via
+   `NewOpenAIWithSource` with `&OAuthSession{Issuer: DefaultOpenAIIssuer,
+   Access: "sess", Refresh: "r", Expiry: time.Now().Add(time.Hour)}` and
+   `WithHTTPClient`. `Generate` once. Assert `captured.URL.Host == "chatgpt.com"`
+   and path `== "/backend-api/codex/responses"`. RoundTripper returns this canned body (already used in
+   `thinking_test.go` / `provider_correctness_test.go`):
+
+   `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`
+
+   so Generate does not fail on decode.
+   **Red run:** first implement `NewOpenAIWithSource` as
+   `NewOpenAI(session.Access, …)` (Platform default). The test MUST FAIL
+   (`Host == "api.openai.com"`). Then add the ChatGPT branch.
+2. `TestOpenAI_StaticKeyDoesNotHitChatGPTHost`: `NewStaticToken("sk-test")`,
+   same RoundTripper, no `WithBaseURL`. Assert host `api.openai.com` and
+   path `/v1/responses`.
+3. `TestOpenAI_ChatGPTSetsAccountHeader`: session `AccountID: "acct_1"`;
+   assert header `ChatGPT-Account-Id` == `acct_1`.
+4. `TestOpenAI_OAuth401RetriesOnceAfterRefresh`: first generate response
+   401, refresh endpoint 200 with new access, second generate 200. Assert
+   two generate requests and one refresh POST.
+5. `TestNewProviderWithSource_RejectsClaude`:
+   `NewProviderWithSource("claude", NewStaticToken("x"), "x")` errors.
+6. `TestNewProvider_APIKeyStillPlatform`:
+   `NewProvider("openai", "sk-test", "gpt-4.1-mini")` + RoundTripper →
+   Platform host.
 
 Phase green. Commit.
 
@@ -566,19 +705,21 @@ and sets `Authorization: Bearer`. Assert the request header map has **no**
 `X-XAI-Token-Auth` (any case).
 
 Default host remains `https://api.x.ai/v1`. Session does not change it.
-A test that sets session + default host and spies the URL must equal
-`https://api.x.ai/v1/responses` (or the `WithBaseURL` test server).
+Host-lock tests use the same capturing RoundTripper as Phase 6 (no
+`WithBaseURL`). Path must be `/v1/responses`.
 
 `NewProviderWithSource("grok", src, model, opts...)` works for both
 `*StaticToken` and `*OAuthSession`.
 
 ### Red tests
 
-* `TestGrok_SessionUsesAPIXAIHost`: FAIL if URL contains `cli-chat-proxy`.
-  Write against a stub that "helpfully" uses the proxy — or write the
-  assertion first on a temporary wrong `baseURL` in the test only (do not
-  commit a wrong default). The committed implementation's default must
-  be `api.x.ai`; the test locks it.
+* `TestGrok_SessionUsesAPIXAIHost`: capturing RoundTripper, session source,
+  no `WithBaseURL`. Assert `Host == "api.x.ai"` and path `/v1/responses`,
+  and `!strings.Contains(url, "cli-chat-proxy")`. **Red run:** temporarily
+  construct with `baseURL: "https://cli-chat-proxy.grok.com/v1"` inside the
+  test file only (a local helper that the production constructor must not
+  use). Do not commit a production default of the proxy. The production
+  constructor's default is `https://api.x.ai/v1`; the test locks it.
 * `TestGrok_SessionOmitsCLITokenAuthHeader`: range `req.Header`; fail if
   any key equals `X-XAI-Token-Auth` ignoring case.
 * `TestGrok_EmptyStaticKeyStillRejected`.
@@ -589,25 +730,34 @@ Phase green. Commit.
 
 ### Flow (after provider select, before model select)
 
-1. If orchestrated → return `ErrOrchestrated`.
-2. `Select` among `d.AuthMethods` (if empty, today's `resolveAPIKey` only —
-   all non-openai/grok providers).
-3. Switch on `AuthMethodID`:
+1. If `orchestrated(o)` → return `ErrOrchestrated` (no Prompter calls).
+2. If `len(d.AuthMethods) == 0`: today's `resolveAPIKey` only; `Kind=CredAPIKey`
+   when a key is collected, else `CredNone` (Ollama). **Do not** add a Select.
+   Existing `configure_test.go` scripts stay valid.
+3. Else `Select` among `d.AuthMethods` (0-based index in tests). Default index
+   0 (`api_key`).
+4. Switch on `AuthMethodID`:
 
    * `api_key`: existing `resolveAPIKey`. `Kind=CredAPIKey`. Env vars
-     unchanged (`OPENAI_API_KEY`, `XAI_API_KEY`). Also honour
-     `CODEX_ACCESS_TOKEN` for openai `token_stdin` only, not here.
-   * `browser_oauth`: require `TokenStore`. Run Phase 5 loopback. `Save`.
-     Fill OAuth fields. `APIKey=""`. `Kind=CredOAuth`.
-   * `device_code`: require `TokenStore`. Run Phase 5 device. `Notify` the
-     verification URL and user code. `Save`. OAuth fields.
-   * `token_stdin`: `Secret`. If the value looks like `sk-` / `xai-`, treat
-     as API key. If openai and env `CODEX_ACCESS_TOKEN` / pasted JWT-like,
-     treat as OAuth access-only (no refresh; `Expiry` zero; ChatGPT mode
-     if openai). Grok paste is API key only (probe: session is JWT but we
-     do not offer "paste access token" as a separate Grok method beyond
-     import).
-   * `import_vendor_cli`: see below.
+     `OPENAI_API_KEY` / `XAI_API_KEY` only.
+   * `browser_oauth`: if `TokenStore == nil`, error
+     `wizard: TokenStore is required for OAuth`. If
+     `Existing.Kind == CredOAuth` and `Existing.Provider == d.ID` and
+     `Existing.AccessToken != ""`, `Confirm` keep existing
+     (`MaskSecret(Existing.AccessToken)`); on yes, reuse Existing OAuth
+     fields and skip loopback. Else run Phase 5 loopback, `Save`,
+     `APIKey=""`, `Kind=CredOAuth`.
+   * `device_code`: same TokenStore requirement. `Notify` verification URL
+     + user code. Poll. `Save`.
+   * `token_stdin`:
+     * openai + `AllowEnv` + `LookupEnv("CODEX_ACCESS_TOKEN")` non-empty:
+       Confirm to use it (masked). Yes → access-only OAuth (`Refresh=""`,
+       `Expiry` zero, `Issuer=DefaultOpenAIIssuer`).
+     * Else `Secret`. openai: if `strings.HasPrefix(value, "sk-")` then
+       `Kind=CredAPIKey`; else access-only OAuth as above. grok: always
+       `Kind=CredAPIKey`.
+   * `import_vendor_cli`: TokenStore required. See Import. Confirm with
+     `MaskSecret(access)` before Save.
 
 4. Discover models: `ListAvailableModelsWithSource` using a `StaticToken` or
    `OAuthSession` matching `Kind`. ChatGPT therefore sees
@@ -616,19 +766,53 @@ Phase green. Commit.
 
 ### Import
 
-**openai:** read `$CODEX_HOME/auth.json` default `~/.codex/auth.json`.
-Require `tokens.access_token` and `tokens.refresh_token`. Account id from
-`tokens.account_id` or id-token claims (`chatgpt_account_id`). Ignore
-`OPENAI_API_KEY` in that file (that is Platform, not ChatGPT). Confirm with
-`MaskSecret(access)`.
+Path helpers (use `o.LookupEnv`, fall back to `os.Getenv`):
 
-**grok:** read `$GROK_HOME/auth.json` default `~/.grok/auth.json`. The file
-is a map of scope → object. Pick the first entry with
-`auth_mode` in `{oidc,oauth2}` (JSON may say `"oidc"`) and
-`oidc_issuer` equal to `DefaultGrokOAuthIssuer` (or any issuer containing
-`auth.x.ai`). Use `key` as access, `refresh_token`, `expires_at`,
-`oidc_client_id`, `oidc_issuer`. Skip scope `xai::api_key`. Confirm with
-`MaskSecret`.
+* openai: `CODEX_HOME` if set, else `filepath.Join(home, ".codex", "auth.json")`
+  where `home` is `os.UserHomeDir()`.
+* grok: `GROK_HOME` if set, else `filepath.Join(home, ".grok", "auth.json")`.
+
+**openai fixture shape** (ignore every other field):
+
+```json
+{
+  "OPENAI_API_KEY": "sk-MUST-IGNORE",
+  "tokens": {
+    "access_token": "at-chatgpt",
+    "refresh_token": "rt-chatgpt",
+    "account_id": "acct_test"
+  }
+}
+```
+
+Require `tokens.access_token` and `tokens.refresh_token` as JSON strings.
+Use `tokens.account_id` when present. **Ignore `OPENAI_API_KEY`.** Issuer
+`DefaultOpenAIIssuer`, client id `DefaultOpenAIClientID`, token URL
+`{issuer}/oauth/token`.
+
+**grok fixture shape:**
+
+```json
+{
+  "xai::api_key": {
+    "key": "xai-MUST-SKIP",
+    "auth_mode": "api_key"
+  },
+  "https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": {
+    "key": "sess-grok",
+    "auth_mode": "oidc",
+    "refresh_token": "rt-grok",
+    "expires_at": "2099-01-01T00:00:00Z",
+    "oidc_issuer": "https://auth.x.ai",
+    "oidc_client_id": "b1a00492-073a-47ea-816f-4c329264a828"
+  }
+}
+```
+
+Walk the map in iteration order after skipping `auth_mode == "api_key"` and
+scope `xai::api_key`. Accept the first object whose `oidc_issuer` equals
+`DefaultGrokOAuthIssuer` (trim `/`). Access = `key`. Token URL
+`https://auth.x.ai/oauth2/token`. Parse `expires_at` as RFC3339.
 
 Never log the file contents.
 
@@ -643,8 +827,9 @@ Never log the file contents.
   `res.APIKey == ""` and `res.Kind == CredOAuth`. **If the implementation
   copies access into APIKey, this test fails** — that is the billing-bug
   guard.
-* `TestConfigureLLM_APIKeyKindUnchanged`: gemini/openai api_key path still
-  sets `Kind=CredAPIKey` and `APIKey`.
+* `TestConfigureLLM_APIKeyKindUnchanged`: gemini (no extra select) and
+  openai with selects `{providerIdx(openai), 0 /* api_key */, 0 /* model */}`
+  set `Kind=CredAPIKey` and `APIKey`.
 * `TestConfigureLLM_DoesNotOfferClaudeOAuth`: descriptors without methods
   skip the auth-method menu (one Select: provider).
 * `TestImportGrok_SkipsAPIKeyScope`.
@@ -705,11 +890,12 @@ commit, once the code compiles.
 `internal/config/config.go` `ProviderConfig` gains **one** new field:
 
 ```go
-AuthKind string `json:"auth_kind,omitempty"` // "" or "api_key" (legacy) | "oauth"
+AuthKind string `json:"auth_kind,omitempty"` // "" = API key (legacy); "oauth" = FileTokenStore session
 ```
 
-No access token, no refresh token, no issuer in this struct. Legacy files
-with only `api_key` keep working: empty `AuthKind` means API key.
+No access token, no refresh token, no issuer in this struct. **Write
+`AuthKind` only when it is `"oauth"`. Never write `"api_key"`.** Load:
+`strings.EqualFold(pc.AuthKind, "oauth")` is OAuth; anything else is API key.
 
 Add grok to `SupportedProviders` (today: gemini, openai, claude only —
 `config.go:24-28`). OpenAI is already there. Grok must be, or
@@ -736,22 +922,35 @@ That is:
 
 `NewOAuthStore()` is `llmprovider.NewFileTokenStore` on that directory.
 
-`ValidateActive`:
+Keep `ValidateActive(provider, pc, apiKey string)` for the API-key path
+(signature unchanged so existing tests compile).
 
-* If `pc.AuthKind == "oauth"`: do **not** require `apiKey`. Require
-  `OAuthStore.Load(ctx, provider)` returns a non-nil session, and `pc.Model`
-  non-empty. Error text: `no OAuth session for provider %q; run 'prepare-commit-msg configure'`.
-* Else: today's API-key check unchanged.
+Add:
 
-`ResolveAPIKey` unchanged (OAuth path does not call it for construction).
+```go
+func IsOAuth(pc ProviderConfig) bool {
+    return strings.EqualFold(pc.AuthKind, "oauth")
+}
+
+func ValidateOAuth(ctx context.Context, provider string, pc ProviderConfig, store llmprovider.TokenStore) error
+```
+
+`ValidateOAuth`: `store.Load` must return a non-nil session; `pc.Model`
+non-empty. Error: `no OAuth session for provider %q; run 'prepare-commit-msg configure'`.
+
+`runAnalyzer` calls `ValidateOAuth` when `IsOAuth(pc)`, else
+`ResolveAPIKey` + `ValidateActive`.
+
+`ResolveAPIKey` unchanged.
 
 **Red tests** (`internal/config/config_test.go`):
 
 * `TestSave_OAuthKindDoesNotWriteTokens`: `AuthKind=oauth`, `APIKey=""`;
-  read the saved `config.json` as text; fail if it contains `"access"` or
-  `"refresh_token"` as JSON keys. Write this against an implementation that
-  mistakenly stores tokens on `ProviderConfig` — it MUST fail — then keep
-  tokens out of the struct.
+  read saved `config.json`; fail if the bytes contain `"access_token"` or
+  `"refresh_token"` (exact keys, not the substring `access` which would
+  false-positive `active_provider`). Write this against an implementation
+  that mistakenly stores tokens on `ProviderConfig` — it MUST fail — then
+  keep tokens out of the struct.
 * `TestValidateActive_OAuthWithoutKeyOK` with a temp `FileTokenStore` that
   has a session.
 * `TestValidateActive_OAuthMissingSessionErrors`.
@@ -775,39 +974,43 @@ That is:
    * `OpenURL: openBrowser` (new helper; see 10.4)
    * `Orchestrated: boolPtr(false)` — this process is never a sub-server
 4. After `ConfigureLLM`:
-   * `Kind == CredAPIKey` or empty: `pc.AuthKind = "api_key"` (or `""` if we
-     want byte-identical legacy — **use `"api_key"` when Kind is API key so
-     the field is explicit**; empty still loads as API key). `pc.APIKey =
-     res.APIKey`. `store.Delete` any leftover oauth file for that provider
-     so a later generate cannot prefer a stale session.
-   * `Kind == CredOAuth`: `pc.AuthKind = "oauth"`. **`pc.APIKey` stays empty
-     (do not copy `res.AccessToken`).** Wizard already `Save`d the
-     TokenStore. Fail if `res.APIKey != ""` in tests.
+   * `Kind == CredAPIKey` or `CredNone`: `pc.AuthKind = ""`. `pc.APIKey =
+     res.APIKey`. `store.Delete(ctx, res.Provider)` so a later generate
+     cannot prefer a stale session.
+   * `Kind == CredOAuth`: `pc.AuthKind = "oauth"`. **`pc.APIKey = ""` (do not
+     copy `res.AccessToken`).** Wizard already `Save`d the TokenStore.
    * Model and fallbacks as today.
 5. Drop the check `d.RequiresAPIKey && pc.APIKey == ""` for oauth results
    (`setup.go:208-210`). Replace with: if Kind is API key and descriptor
    requires a key and APIKey empty → same error; if Kind is oauth and
    `store.Load` is nil → error.
 
-Existing interactive tests (`TestRunSetupInteractive_Success` gemini input
-`1\ny\n…`, claude `3\n…`) **must keep passing**: gemini and claude have no
-auth-method menu, so their scripted input is unchanged.
+Existing interactive tests:
 
-**New tests:**
+* Gemini `TestRunSetupInteractive_Success` input `1\ny\n…` — **unchanged**
+  (no auth-method menu).
+* Claude `TestRunSetupInteractive_FallbackMultiSelect` input `3\n…` —
+  **unchanged**.
+* **Must edit** `TestRunSetupInteractive_CoverageBranches` / `"OpenAI path"`
+  (`setup_test.go:107`): today `2\ntest-key\n1\n\n\n\n\n\n`. After Phase 8
+  that is wrong. Change to `2\n1\ntest-key\n1\n\n\n\n\n\n` (1-based:
+  provider openai, auth `api_key`, secret, model 1, empty fallbacks, empty
+  ops). Assert `AuthKind==""` and `APIKey=="test-key"` and
+  `oauth/openai.json` does not exist.
 
-* `TestRunSetupInteractive_OpenAIAPIKeyStillWorks`: select openai (menu
-  index **2**), then auth method `api_key` (index **1**), then key, model,
-  fallbacks, operational. Assert `AuthKind=="api_key"` and `APIKey` set and
-  `oauth/openai.json` absent.
-* `TestRunSetupInteractive_ImportGrokSession`: write a fixture
-  `GROK_HOME/auth.json` (OIDC map shape from the MADR probe, **fake**
-  tokens, `auth_mode: oidc`, issuer `https://auth.x.ai`). Select grok
-  (index **4**), `import_vendor_cli`. Assert `AuthKind=="oauth"`,
-  `APIKey==""`, `oauth/grok.json` exists mode `0600`, `config.json` has no
-  refresh token. No network.
-* `TestRunSetupInteractive_ChatGPTDoesNotCopyAccessIntoAPIKey`: fixture
-  `CODEX_HOME/auth.json` with `tokens.access_token` / `refresh_token`.
-  Select openai, import. Assert `APIKey==""`.
+**New tests** (1-based TextPrompter indices: openai=2, grok=4; auth
+`api_key`=1, `import_vendor_cli`=5):
+
+* `TestRunSetupInteractive_ImportGrokSession`: `t.Setenv("GROK_HOME", tmp)`;
+  write the grok fixture from Phase 8 into
+  `filepath.Join(tmp, "auth.json")`. Input `4\n5\ny\n1\n\n\n\n\n\n`
+  (grok, import, confirm, model 1, rest default). Assert
+  `AuthKind=="oauth"`, `APIKey==""`, `oauth/grok.json` exists, on Unix
+  mode `0600`, `config.json` has no `"refresh"` / `"access"` keys. No
+  network.
+* `TestRunSetupInteractive_ChatGPTDoesNotCopyAccessIntoAPIKey`:
+  `t.Setenv("CODEX_HOME", tmp)`; write the openai fixture. Input
+  `2\n5\ny\n1\n\n\n\n\n\n`. Assert `APIKey==""`, `AuthKind=="oauth"`.
 
 ### 10.3 — Generation (`main.go` `runAnalyzer`)
 
@@ -852,13 +1055,17 @@ fallbacks (`main.go:286-288`).
 New `internal/ui/open.go`:
 
 ```go
-func openBrowser(url string) error
+var openBrowser = openBrowserDefault // tests may replace
+
+func openBrowserDefault(url string) error
 ```
 
 `darwin`: `exec.Command("open", url)`, `linux`: `xdg-open`, `windows`:
 `cmd /c start`. Combined output discarded. Non-zero return is **not** fatal
-(wizard still prints the URL). Tests never need a real browser: they use
-import fixtures.
+(wizard still prints the URL). Import tests never invoke it. `open_test.go`
+sets `openBrowser` to a recorder if a browser-path test is added; otherwise
+the file can omit a test and `open.go` stays small enough that coverage
+still clears 80% via setup tests that don't call it.
 
 ### 10.5 — Non-interactive `--yes`
 
@@ -884,19 +1091,37 @@ LOG=/tmp/pcm-0008-phase10.log
 {
   gofmt -l internal/config internal/ui main.go
   go vet ./...
-  ./scripts/go-precheck.sh internal/config/config.go internal/config/config_test.go internal/ui/setup.go internal/ui/setup_test.go internal/ui/open.go main.go main_test.go
+  git add -- \
+    go.mod go.sum README.md \
+    internal/config/config.go internal/config/config_test.go \
+    internal/ui/setup.go internal/ui/setup_test.go \
+    internal/ui/open.go \
+    main.go main_oauth_test.go
+  ./scripts/go-precheck.sh
   go test -race ./...
 } >"$LOG" 2>&1
+GATE=$?
 ```
 
-`gofmt -l` empty. `go-precheck.sh` exit 0. Tests exit 0. Then
-`git commit --no-edit` **in prepare-commit-msg**. Do not commit mcplib in
-this step. Do not push.
+If `open_test.go` exists, add it to that `git add` list. Do not `git add -A`.
+Do not `git add -u` (that would stage unrelated dirty files).
+
+`gofmt -l` empty. Branch on `$GATE`, not on a pipeline. Then
+`git commit --no-edit` **in prepare-commit-msg**. Do not commit mcplib.
+Do not push.
+
+`go-precheck.sh` with no args checks the staged `*.go` snapshot — that is
+the repo's gate (`Makefile` `verify-staged`). Do not pass a guessed file
+list that can omit a new test file.
 
 Coverage floor is 80% (`Makefile` `COVERAGE_MIN`). If Phase 10 drops below,
 add tests rather than lowering the floor.
 
 ## 5. Verification commands (every mcplib phase)
+
+> **2026-09-13 correction:** The original command block below is retained as
+> historical evidence but must not be used: its exit status is only the final
+> `go test` status, so a preceding failure can be hidden.
 
 ```bash
 LOG=/tmp/mcplib-0008-phaseN.log
@@ -913,8 +1138,35 @@ LOG=/tmp/mcplib-0008-phaseN.log
 echo EXIT:$?
 ```
 
+Use this replacement, which records and checks each command independently:
+
+```bash
+LOG_BASE=/tmp/mcplib-0008-phaseN
+GATE=0
+
+gofmt -l llmprovider wizard >"${LOG_BASE}.gofmt" 2>&1
+GOFMT_STATUS=$?
+if [ "$GOFMT_STATUS" -ne 0 ] || [ -s "${LOG_BASE}.gofmt" ]; then GATE=1; fi
+
+go vet ./llmprovider ./wizard >"${LOG_BASE}.vet" 2>&1
+VET_STATUS=$?
+if [ "$VET_STATUS" -ne 0 ]; then GATE=1; fi
+
+make lint >"${LOG_BASE}.lint" 2>&1
+LINT_STATUS=$?
+if [ "$LINT_STATUS" -ne 0 ]; then GATE=1; fi
+
+go test ./llmprovider ./wizard >"${LOG_BASE}.test" 2>&1
+TEST_STATUS=$?
+if [ "$TEST_STATUS" -ne 0 ]; then GATE=1; fi
+
+printf 'gofmt=%s vet=%s lint=%s test=%s gate=%s\n' \
+  "$GOFMT_STATUS" "$VET_STATUS" "$LINT_STATUS" "$TEST_STATUS" "$GATE"
+test "$GATE" -eq 0
+```
+
 `gofmt -l` must print **no paths**. Do not pipe `make lint` into `tail`
-before inspecting `EXIT`.
+before inspecting its independently captured status.
 
 Full-module `go test ./...` once after Phase 9.
 
@@ -933,7 +1185,7 @@ All must be true, each with a named test that was seen to fail:
 | A7 | Token files are `0600` | `TestFileTokenStore_SaveMode0600` |
 | A8 | Refresh persists before adopting the new token | `TestOAuthSession_RefreshPersistsBeforeReturn` |
 | A9 | Device-code honours `slow_down` and expiry | `TestGrokDevice_SlowDownIncreasesInterval`, `TestGrokDevice_StopsAtExpiry` |
-| A10 | OpenAI loopback is 1455 then 1457 only | `TestOpenAILoopback_Binds1455Then1457` |
+| A10 | OpenAI loopback is 1455 then 1457 only | `TestOpenAILoopbackPortsAre1455Then1457`, `TestListenFirstAvailable_UsesSecondPortWhenFirstBusy` |
 | A11 | OAuth `Result.APIKey` is empty | `TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey` |
 | A12 | Orchestrated wizard returns `ErrOrchestrated` | `TestConfigureLLM_OrchestratedReturnsErr` |
 | A13 | `NewProviderWithSource` rejects non-openai/grok | `TestNewProviderWithSource_RejectsClaude` |
@@ -1001,7 +1253,6 @@ that already call `NewBackplaneClient` keep doing so.
 **Modified**
 
 * `llmprovider/descriptor.go`, `descriptor_test.go`
-* `llmprovider/constants.go`
 * `llmprovider/openai.go` (and existing openai tests)
 * `llmprovider/grok.go` (and existing grok tests)
 * `llmprovider/provider.go`
@@ -1029,7 +1280,102 @@ that already call `NewBackplaneClient` keep doing so.
 | Date | Phase | Finding | Decision | Files added to phase |
 |---|---|---|---|---|
 | 2026-09-12 | (plan) | Maintainer named prepare-commit-msg as first consumer | Add Phase 10; MagicDev/MagicTools stay out | Phase 10 in this plan |
+| 2026-09-13 | (plan sweep) | Orchestrated-nil was specified backwards; OpenAI setup script would break; host tests used WithBaseURL; loopback tests would fight port 1455; AuthKind "api_key" would churn configs; token_stdin heuristic was fuzzy | Corrections in §0.1, applied in place | none (plan only) |
+| 2026-09-13 | 1–2 audit | Phase 2 commit `9836e94` landed with a red format/lint log; the shared verification block masked intermediate failures; Unix mode test was platform-neutral; `..` validation lacked an isolated case; Phase 3-only scaffold made Phase 2 lint-red; Phase 1 and 2 exported APIs failed per-file `golint` | Stop before Phase 3. Run the approved Phase 2 corrective pass, replace the verification recipe, defer the unused scaffold to Phase 3, prove the adjusted gates in a scratch clone, and record exact results | `docs/0008-PLAN-subscription-auth-for-llm-providers.md`, `llmprovider/token.go`, `token_test.go`, `tokenstore.go`, `tokenstore_file.go`, `tokenstore_file_unix.go`, `tokenstore_file_windows.go`, `tokenstore_test.go`, new `tokenstore_file_unix_test.go`; Phase 3 adds `tokenstore.go` |
 
 ## 12. Execution record
 
-Empty until the maintainer approves this plan and a phase lands.
+### Phase 1 — landed before execution-record update
+
+Commit `11f1810` added `Token`, `TokenSource`, and `StaticToken`. Its captured
+green run was:
+
+```text
+== gofmt ==
+== vet ==
+== lint ==
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+== test ==
+ok  github.com/maccavelli/mcplib/llmprovider  0.989s
+```
+
+The required pre-implementation red output was not recorded. The 2026-09-13
+audit later proved `TestStaticToken_ReturnsBearer` and
+`TestStaticToken_EmptyValueStillReturnsToken` against deliberate breakage in a
+scratch clone; both failed on their intended assertions.
+
+### Phase 2 — corrective pass complete
+
+Commit `9836e94` added the file token store, but its captured run was not green:
+
+```text
+== gofmt ==
+llmprovider/tokenstore.go
+== vet ==
+== lint ==
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+llmprovider/tokenstore_file.go:85:17: Error return value of `os.Remove` is not checked (errcheck)
+llmprovider/tokenstore_file.go:87:12: Error return value of `tmp.Close` is not checked (errcheck)
+llmprovider/tokenstore_file.go:99:11: Error return value is not checked (errcheck)
+llmprovider/tokenstore.go:17:1: File is not properly formatted (gofmt)
+llmprovider/tokenstore.go:27:2: field mu is unused (unused)
+llmprovider/tokenstore.go:28:2: field inflight is unused (unused)
+llmprovider/tokenstore.go:32:6: type tokenFuture is unused (unused)
+7 issues:
+* errcheck: 3
+* gofmt: 1
+* unused: 3
+make: *** [lint] Error 1
+== test ==
+ok  github.com/maccavelli/mcplib/llmprovider  0.853s
+```
+
+The required pre-implementation red output was not recorded. The 2026-09-13
+audit subsequently observed all four Phase 2 test groups fail against deliberate
+breakage in a scratch clone. That historical omission cannot be recreated as
+contemporaneous evidence and the original commit was not rewritten.
+
+The approved corrective pass added exported API documentation, removed the
+Phase 3-only single-flight scaffold, made temporary-file cleanup and close
+errors explicit, checked the final-file `chmod`, moved the mode assertion to a
+Unix-tagged test file, and added `open..ai` as an isolated `..` traversal case.
+No MADR amendment was needed because these corrections do not change an
+architectural decision.
+
+Before relying on the two adjusted checks, a scratch clone was deliberately
+broken by changing the Unix permission helper to `0644` and removing only the
+`..` rejection. The mutations were inspected before the complete targeted test
+output was read:
+
+```text
+=== RUN   TestFileTokenStore_SaveMode0600
+    tokenstore_file_unix_test.go:35: mode = 644, want 0600
+--- FAIL: TestFileTokenStore_SaveMode0600 (0.00s)
+=== RUN   TestFileTokenStore_RejectsPathTraversal
+    tokenstore_test.go:72: Save("open..ai") returned nil error; want error
+--- FAIL: TestFileTokenStore_RejectsPathTraversal (0.00s)
+FAIL
+FAIL  github.com/maccavelli/mcplib/llmprovider  0.647s
+FAIL
+```
+
+The corrected targeted suite then passed all seven Phase 1–2 tests. Per-file
+`golint` produced no output for each staged Go file. The corrected independent
+gate results were:
+
+```text
+gofmt: exit 0, no output
+go vet: exit 0, no output
+make lint: exit 0
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+go test: exit 0
+ok  github.com/maccavelli/mcplib/llmprovider  0.377s
+ok  github.com/maccavelli/mcplib/wizard       1.134s
+```
+
+`GOOS=windows GOARCH=amd64 go test -c ./llmprovider` also exited zero, and
+`go list` confirmed `tokenstore_file_unix_test.go` was absent from the Windows
+test file set. The corrective commit containing this record restores Phase 2 to
+a green boundary before Phase 3; it is not a new implementation phase.

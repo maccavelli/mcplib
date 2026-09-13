@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -14,25 +13,16 @@ import (
 // can be tested in isolation. Phase 3 will extend this type with the full
 // refresh + persist-before-use behaviour and the locked method set.
 type OAuthSession struct {
-	Provider  string
-	Access    string
-	Refresh   string
-	Expiry    time.Time
-	Issuer    string
-	ClientID  string
-	AccountID string
-	TokenURL  string
-	Store     TokenStore
+	Provider   string
+	Access     string
+	Refresh    string
+	Expiry     time.Time
+	Issuer     string
+	ClientID   string
+	AccountID  string
+	TokenURL   string
+	Store      TokenStore
 	HTTPClient *http.Client
-	mu        sync.Mutex
-	inflight  *tokenFuture
-}
-
-// tokenFuture is a placeholder for Phase 3's single-flight.
-type tokenFuture struct {
-	done chan struct{}
-	tok  Token
-	err  error
 }
 
 // TokenStore interface (Phase 2 introduces this; Phase 3 adds methods that

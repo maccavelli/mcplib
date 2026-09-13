@@ -3,15 +3,19 @@ package llmprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 )
 
+// FileTokenStore persists one OAuth session per provider in a directory.
 type FileTokenStore struct {
 	Dir string
 }
 
+// NewFileTokenStore creates the token directory when needed.
 func NewFileTokenStore(dir string) (*FileTokenStore, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("FileTokenStore: empty dir")
@@ -26,6 +30,7 @@ func (fs *FileTokenStore) path(provider string) string {
 	return filepath.Join(fs.Dir, provider+".json")
 }
 
+// Load reads a provider session, returning nil when no token file exists.
 func (fs *FileTokenStore) Load(ctx context.Context, provider string) (*OAuthSession, error) {
 	if err := validateProviderID(provider); err != nil {
 		return nil, err
@@ -55,7 +60,8 @@ func (fs *FileTokenStore) Load(ctx context.Context, provider string) (*OAuthSess
 	return s, nil
 }
 
-func (fs *FileTokenStore) Save(ctx context.Context, provider string, s *OAuthSession) error {
+// Save atomically replaces a provider session file.
+func (fs *FileTokenStore) Save(ctx context.Context, provider string, s *OAuthSession) (err error) {
 	if err := validateProviderID(provider); err != nil {
 		return err
 	}
@@ -82,24 +88,35 @@ func (fs *FileTokenStore) Save(ctx context.Context, provider string, s *OAuthSes
 		return fmt.Errorf("FileTokenStore temp: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("FileTokenStore write: %w", err)
+	defer func() {
+		cleanupErr := os.Remove(tmpName)
+		if cleanupErr != nil && !errors.Is(cleanupErr, iofs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("FileTokenStore cleanup: %w", cleanupErr))
+		}
+	}()
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		closeErr := tmp.Close()
+		if closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("FileTokenStore write: %w", writeErr),
+				fmt.Errorf("FileTokenStore close after write: %w", closeErr),
+			)
+		}
+		return fmt.Errorf("FileTokenStore write: %w", writeErr)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("FileTokenStore close: %w", err)
 	}
-	if err := chmod0600(tmpName); err != nil {
-		return fmt.Errorf("FileTokenStore chmod: %w", err)
-	}
 	if err := os.Rename(tmpName, final); err != nil {
 		return fmt.Errorf("FileTokenStore rename: %w", err)
 	}
-	chmod0600(final)
+	if err := chmod0600(final); err != nil {
+		return fmt.Errorf("FileTokenStore chmod: %w", err)
+	}
 	return nil
 }
 
+// Delete removes a provider session and succeeds when it is already absent.
 func (fs *FileTokenStore) Delete(ctx context.Context, provider string) error {
 	if err := validateProviderID(provider); err != nil {
 		return err
