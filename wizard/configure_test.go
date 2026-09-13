@@ -112,6 +112,9 @@ func TestConfigureLLM_LocalProviderSkipsKey(t *testing.T) {
 	if res.APIKey != "" {
 		t.Errorf("APIKey = %q, want empty for a local provider", res.APIKey)
 	}
+	if res.Kind != CredNone {
+		t.Errorf("Kind = %q, want CredNone for a local provider", res.Kind)
+	}
 	if len(f.seenSecret) != 0 {
 		t.Error("Secret must never be prompted for a provider that needs no key")
 	}
@@ -234,7 +237,7 @@ func TestConfigureLLM_OffersEveryDescriptor(t *testing.T) {
 
 func TestConfigureLLM_ProviderFilter(t *testing.T) {
 	withEnv(t, nil)
-	f := &fakePrompter{t: t, selects: []int{0, 0}, secrets: []string{testKey}}
+	f := &fakePrompter{t: t, selects: []int{0, 0, 0}, secrets: []string{testKey}}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Providers: []string{llmprovider.ProviderGrok},
 	})

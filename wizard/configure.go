@@ -18,11 +18,18 @@ const defaultDiscoverLimit = 20 * time.Second
 // each consumer persists it in its own schema. Unifying configuration storage
 // across the three wizards is a separate decision (MADR 0004, Out of scope).
 type Result struct {
-	Provider  string
-	APIKey    string
-	Model     string
-	BaseURL   string
-	Fallbacks []string
+	Provider     string
+	Kind         CredentialKind
+	APIKey       string
+	AccessToken  string
+	RefreshToken string
+	TokenExpiry  time.Time
+	Issuer       string
+	ClientID     string
+	AccountID    string
+	Model        string
+	BaseURL      string
+	Fallbacks    []string
 }
 
 // Options controls the flow. The zero value runs a full interactive
@@ -48,6 +55,12 @@ type Options struct {
 	// LookupEnv reads an environment variable. Nil uses os.Getenv. Consumers
 	// inject this to drive the flow deterministically in their own tests.
 	LookupEnv func(string) string
+	// TokenStore persists sessions created by browser, device-code, and import flows.
+	TokenStore llmprovider.TokenStore
+	// OpenURL opens an OAuth authorization URL. Nil reports the URL through Prompter.
+	OpenURL func(string) error
+	// Orchestrated overrides process ownership detection when non-nil.
+	Orchestrated *bool
 }
 
 // getenv is indirected for this package's own tests.
@@ -74,6 +87,9 @@ func (o Options) lookupEnv() func(string) string {
 // only in the returned Result, and anything shown to the user is masked with
 // logging.MaskSecret.
 func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
+	if orchestrated(o) {
+		return Result{}, ErrOrchestrated
+	}
 	descriptors, err := selectableDescriptors(o.Providers)
 	if err != nil {
 		return Result{}, err
@@ -98,11 +114,22 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 	if res.BaseURL, err = resolveBaseURL(ctx, p, d, o); err != nil {
 		return Result{}, err
 	}
-	if res.APIKey, err = resolveAPIKey(p, d, o); err != nil {
+	credential, err := resolveCredential(ctx, p, d, o)
+	if err != nil {
 		return Result{}, err
 	}
+	res.Kind = credential.kind
+	res.APIKey = credential.apiKey
+	if credential.session != nil {
+		res.AccessToken = credential.session.Access
+		res.RefreshToken = credential.session.Refresh
+		res.TokenExpiry = credential.session.Expiry
+		res.Issuer = credential.session.Issuer
+		res.ClientID = credential.session.ClientID
+		res.AccountID = credential.session.AccountID
+	}
 
-	models := discoverModels(ctx, p, d, res, o)
+	models := discoverModels(ctx, p, d, res, credential.source, o)
 	if len(models) == 0 {
 		// Ollama with nothing installed, or a provider whose listing failed
 		// and which has no static catalog. Let the user type an id rather
@@ -227,9 +254,20 @@ func resolveAPIKey(p Prompter, d llmprovider.ProviderDescriptor, o Options) (str
 
 // discoverModels returns the models to offer: the live listing when requested
 // and available, otherwise the descriptor's static catalog.
-func discoverModels(ctx context.Context, p Prompter, d llmprovider.ProviderDescriptor, res Result, o Options) []string {
+func discoverModels(
+	ctx context.Context,
+	p Prompter,
+	d llmprovider.ProviderDescriptor,
+	res Result,
+	source llmprovider.TokenSource,
+	o Options,
+) []string {
+	fallback := d.StaticModels
+	if res.Kind == CredOAuth && d.ID == llmprovider.ProviderOpenAI {
+		fallback = append([]string(nil), llmprovider.StaticOpenAIChatGPT...)
+	}
 	if !o.Discover {
-		return d.StaticModels
+		return fallback
 	}
 	limit := o.DiscoverLimit
 	if limit <= 0 {
@@ -242,12 +280,12 @@ func discoverModels(ctx context.Context, p Prompter, d llmprovider.ProviderDescr
 	if res.BaseURL != "" {
 		opts = append(opts, llmprovider.WithBaseURL(res.BaseURL))
 	}
-	listed, err := llmprovider.ListAvailableModels(dCtx, d.ID, res.APIKey, opts...)
+	listed, err := llmprovider.ListAvailableModelsWithSource(dCtx, d.ID, source, opts...)
 	if err != nil || len(listed) == 0 {
 		if err != nil {
 			p.Notify(LevelWarn, "could not list models for %s (%v); using the built-in catalog", d.Label, err)
 		}
-		return d.StaticModels
+		return fallback
 	}
 	return listed
 }

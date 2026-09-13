@@ -332,6 +332,13 @@ type Options struct {
 }
 ```
 
+**Phase 8 deviation (2026-09-13):** the `TokenStore` comment above originally
+limited the requirement to browser/device/import. OpenAI `token_stdin` can also
+produce `CredOAuth`; when it does, `TokenStore` is required and the access-only
+session is saved before return. Static OpenAI and Grok token-stdin credentials
+still require no store. This keeps Phase 10's persist-before-clearing contract
+true without moving credential persistence into each consumer.
+
 `orchestrated(o)` is: if `o.Orchestrated != nil`, use `*o.Orchestrated`; else
 `mcplib.IsOrchestratorOwned()`. When that is true, `ConfigureLLM` returns
 `ErrOrchestrated` with **zero** Prompter calls. Existing wizard tests leave
@@ -833,6 +840,10 @@ Phase green. Commit.
      * Else `Secret`. openai: if `strings.HasPrefix(value, "sk-")` then
        `Kind=CredAPIKey`; else access-only OAuth as above. grok: always
        `Kind=CredAPIKey`.
+     * **Approved Phase 8 correction (2026-09-13):** if either OpenAI path
+       classifies the value as access-only OAuth, require `TokenStore` with the
+       same error as browser/device/import, attach it to the session, and
+       `Save` before returning. The original bullets omitted persistence.
    * `import_vendor_cli`: TokenStore required. See Import. Confirm with
      `MaskSecret(access)` before Save.
 
@@ -1364,6 +1375,7 @@ that already call `NewBackplaneClient` keep doing so.
 | 2026-09-13 | 3 | `make lint` classified the approved private name `defaultGrokOAuthTokenURL` as a G101 hardcoded-credential finding because it contains `Token`; repeated `Authorization` literals also tripped `goconst` | Rename the private endpoint to `defaultGrokOAuthRefreshURL` and deduplicate the header with a private Phase 3 constant; do not suppress either lint rule. No MADR amendment | no additional file |
 | 2026-09-13 | 4 | The expected-pass `TestDescriptors_NoOAuthOnOtherProviders` cannot compile at the Phase 3 boundary because the Phase 4 auth-method types and `AuthMethods` field do not yet exist | Add the empty compile scaffold first, observe the test pass, prove it with a non-OAuth-provider scratch mutation, then add the remaining red tests and implementation. No MADR amendment | no additional file |
 | 2026-09-13 | 5 | Browser and device flows had no callable API, but Phase 8's separate `wizard` package must invoke them without modifying Phase 5 files | Add `OAuthFlowOptions`, `LoginBrowserOAuth`, and `LoginDeviceOAuth` in Phase 5, with private time seams and provider defaults. No MADR amendment | no additional file |
+| 2026-09-13 | 8 | OpenAI `token_stdin` can return `CredOAuth`, but the plan required no `TokenStore` or save while Phase 10 clears `APIKey` and assumes every OAuth result was already persisted | Require `TokenStore` only when token-stdin classification produces OpenAI OAuth, then save the access-only session before return. Static OpenAI and Grok keys remain store-free. No MADR amendment: this enforces the accepted persistence boundary rather than changing it | no additional file |
 
 ## 12. Execution record
 
@@ -2096,3 +2108,216 @@ ok  github.com/maccavelli/mcplib/llmprovider  1.665s
 ```
 
 The final line is the race-enabled targeted Phase 7 run.
+
+### Phase 8 — complete
+
+The commit containing this entry extends the renderer-agnostic wizard with
+credential kinds, provider auth-method selection, the orchestrated-process
+guard, browser and device OAuth wiring, token-stdin classification, dynamic
+token-source discovery, and masked vendor-session import. OAuth results keep
+`APIKey` empty and expose the session fields needed by consumers. Browser,
+device, imported, and—following the approved deviation—OpenAI token-stdin
+OAuth sessions are saved through the supplied `TokenStore`. Providers without
+auth methods retain their existing prompt scripts, and Ollama returns
+`CredNone`. No dependency was added.
+
+The complete Phase 8 test set was added before the new result/options fields or
+auth helpers. Its initial targeted run was compile-red:
+
+```text
+# github.com/maccavelli/mcplib/wizard [github.com/maccavelli/mcplib/wizard.test]
+wizard/auth_test.go:16:58: unknown field Orchestrated in struct literal of type Options
+wizard/auth_test.go:17:21: undefined: ErrOrchestrated
+wizard/auth_test.go:35:4: unknown field Kind in struct literal of type Result
+wizard/auth_test.go:35:18: undefined: CredOAuth
+wizard/auth_test.go:36:4: unknown field AccessToken in struct literal of type Result
+wizard/auth_test.go:37:4: unknown field RefreshToken in struct literal of type Result
+wizard/auth_test.go:38:4: unknown field TokenExpiry in struct literal of type Result
+wizard/auth_test.go:39:4: unknown field Issuer in struct literal of type Result
+wizard/auth_test.go:40:4: unknown field ClientID in struct literal of type Result
+wizard/auth_test.go:41:4: unknown field AccountID in struct literal of type Result
+wizard/auth_test.go:41:4: too many errors
+FAIL github.com/maccavelli/mcplib/wizard [build failed]
+FAIL
+```
+
+After implementation, every new behavioral gate was proved against inspected
+mutations in a scratch copy. The combined mutations bypassed explicit
+orchestration, copied OAuth access into `APIKey`, mislabeled static credentials,
+added an auth menu to Claude, changed the missing-store contract, broke all
+token-stdin classifications, ignored `CODEX_ACCESS_TOKEN`, skipped OAuth saves,
+selected Grok's API-key scope, and copied OpenAI's platform key. The complete
+targeted result was:
+
+```text
+=== RUN   TestConfigureLLM_OrchestratedReturnsErr
+    auth_test.go:18: ConfigureLLM() error = select provider: fakePrompter: unexpected Select("Choose an LLM provider:"), want ErrOrchestrated
+--- FAIL: TestConfigureLLM_OrchestratedReturnsErr (0.00s)
+=== RUN   TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey
+    auth_test.go:50: APIKey/Kind = "existing-access-abcd"/"oauth", want empty/"oauth"
+--- FAIL: TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey (0.00s)
+=== RUN   TestConfigureLLM_APIKeyKindUnchanged
+=== RUN   TestConfigureLLM_APIKeyKindUnchanged/gemini
+    auth_test.go:78: Kind/APIKey = ""/"sk-super-secret-key-1234", want "api_key"/key
+=== RUN   TestConfigureLLM_APIKeyKindUnchanged/openai
+    auth_test.go:78: Kind/APIKey = ""/"sk-super-secret-key-1234", want "api_key"/key
+--- FAIL: TestConfigureLLM_APIKeyKindUnchanged (0.00s)
+    --- FAIL: TestConfigureLLM_APIKeyKindUnchanged/gemini (0.00s)
+    --- FAIL: TestConfigureLLM_APIKeyKindUnchanged/openai (0.00s)
+=== RUN   TestConfigureLLM_DoesNotOfferClaudeOAuth
+    auth_test.go:91: ConfigureLLM() error = select model: fakePrompter: unexpected Select("Choose a Claude (Anthropic) model:")
+--- FAIL: TestConfigureLLM_DoesNotOfferClaudeOAuth (0.00s)
+=== RUN   TestConfigureLLM_OAuthMethodsRequireTokenStore
+    auth_test.go:111: auth index 1 error = wizard: broken store error
+--- FAIL: TestConfigureLLM_OAuthMethodsRequireTokenStore (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinClassification
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_platform_key
+    auth_test.go:159: result credential = "oauth"/"sk-platform"/"sk-platform"
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_access_token
+    auth_test.go:159: result credential = "api_key"/"chatgpt-access"/""
+=== RUN   TestConfigureLLM_TokenStdinClassification/grok_always_api_key
+    auth_test.go:159: result credential = "oauth"/"xai-key"/"xai-key"
+--- FAIL: TestConfigureLLM_TokenStdinClassification (0.00s)
+    --- FAIL: TestConfigureLLM_TokenStdinClassification/openai_platform_key (0.00s)
+    --- FAIL: TestConfigureLLM_TokenStdinClassification/openai_access_token (0.00s)
+    --- FAIL: TestConfigureLLM_TokenStdinClassification/grok_always_api_key (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinUsesCodexEnvironment
+    auth_test.go:181: ConfigureLLM() error = enter credential: fakePrompter: unexpected Secret("Paste your OpenAI credential")
+--- FAIL: TestConfigureLLM_TokenStdinUsesCodexEnvironment (0.00s)
+=== RUN   TestConfigureLLM_BrowserAndDevicePersistSessions
+=== RUN   TestConfigureLLM_BrowserAndDevicePersistSessions/browser
+    auth_test.go:229: Kind/saves/session = "oauth"/0/<nil>
+=== RUN   TestConfigureLLM_BrowserAndDevicePersistSessions/device
+    auth_test.go:229: Kind/saves/session = "oauth"/0/<nil>
+--- FAIL: TestConfigureLLM_BrowserAndDevicePersistSessions (0.00s)
+    --- FAIL: TestConfigureLLM_BrowserAndDevicePersistSessions/browser (0.00s)
+    --- FAIL: TestConfigureLLM_BrowserAndDevicePersistSessions/device (0.00s)
+=== RUN   TestConfigureLLM_LocalProviderSkipsKey
+--- PASS: TestConfigureLLM_LocalProviderSkipsKey (0.01s)
+=== RUN   TestImportGrok_SkipsAPIKeyScope
+    import_test.go:42: imported access/refresh = "xai-MUST-SKIP"/""
+--- FAIL: TestImportGrok_SkipsAPIKeyScope (0.00s)
+=== RUN   TestImportOpenAI_IgnoresPlatformKeyInAuthJSON
+    import_test.go:75: imported access/refresh = "sk-MUST-IGNORE"/"rt-chatgpt"
+--- FAIL: TestImportOpenAI_IgnoresPlatformKeyInAuthJSON (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/wizard 0.554s
+FAIL
+```
+
+The combined mutation correctly left the local-provider kind intact. Changing
+only the no-credential result to `CredAPIKey` then proved that adjusted legacy
+gate independently:
+
+```text
+=== RUN   TestConfigureLLM_LocalProviderSkipsKey
+    configure_test.go:116: Kind = "api_key", want CredNone for a local provider
+--- FAIL: TestConfigureLLM_LocalProviderSkipsKey (0.01s)
+FAIL
+FAIL github.com/maccavelli/mcplib/wizard 0.636s
+FAIL
+```
+
+Execution then exposed the documented plan contradiction: OpenAI token-stdin
+could create `CredOAuth` without saving it, while Phase 10 clears `APIKey` and
+requires the wizard to have saved every OAuth result. The maintainer approved
+requiring a store and saving only when token-stdin classifies the value as
+OpenAI OAuth. Tests added before that correction produced:
+
+```text
+=== RUN   TestConfigureLLM_TokenStdinClassification
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_platform_key
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_access_token
+    auth_test.go:165: TokenStore saves = 0, want 1
+=== RUN   TestConfigureLLM_TokenStdinClassification/grok_always_api_key
+--- FAIL: TestConfigureLLM_TokenStdinClassification (0.00s)
+    --- PASS: TestConfigureLLM_TokenStdinClassification/openai_platform_key (0.00s)
+    --- FAIL: TestConfigureLLM_TokenStdinClassification/openai_access_token (0.00s)
+    --- PASS: TestConfigureLLM_TokenStdinClassification/grok_always_api_key (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinOAuthRequiresTokenStore
+    auth_test.go:179: ConfigureLLM() error = select model: fakePrompter: unexpected Select("Choose a OpenAI model:")
+--- FAIL: TestConfigureLLM_TokenStdinOAuthRequiresTokenStore (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinUsesCodexEnvironment
+    auth_test.go:204: result credential = "oauth"/"codex-access-abcd"; Secret calls = 0; TokenStore saves = 0
+--- FAIL: TestConfigureLLM_TokenStdinUsesCodexEnvironment (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/wizard 0.744s
+FAIL
+```
+
+After the correction passed, a fresh inspected scratch mutation returned the
+access-only session without checking or saving its store. The same complete
+targeted result failed again on the intended assertions:
+
+```text
+=== RUN   TestConfigureLLM_TokenStdinClassification
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_platform_key
+=== RUN   TestConfigureLLM_TokenStdinClassification/openai_access_token
+    auth_test.go:165: TokenStore saves = 0, want 1
+=== RUN   TestConfigureLLM_TokenStdinClassification/grok_always_api_key
+--- FAIL: TestConfigureLLM_TokenStdinClassification (0.00s)
+    --- PASS: TestConfigureLLM_TokenStdinClassification/openai_platform_key (0.00s)
+    --- FAIL: TestConfigureLLM_TokenStdinClassification/openai_access_token (0.00s)
+    --- PASS: TestConfigureLLM_TokenStdinClassification/grok_always_api_key (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinOAuthRequiresTokenStore
+    auth_test.go:179: ConfigureLLM() error = select model: fakePrompter: unexpected Select("Choose a OpenAI model:")
+--- FAIL: TestConfigureLLM_TokenStdinOAuthRequiresTokenStore (0.00s)
+=== RUN   TestConfigureLLM_TokenStdinUsesCodexEnvironment
+    auth_test.go:204: result credential = "oauth"/"codex-access-abcd"; Secret calls = 0; TokenStore saves = 0
+--- FAIL: TestConfigureLLM_TokenStdinUsesCodexEnvironment (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/wizard 0.609s
+FAIL
+```
+
+The masked-confirmation and persistence behavior of the wizard import branch
+was also proved in a fresh scratch copy by displaying the raw access token and
+skipping the save:
+
+```text
+=== RUN   TestConfigureLLM_ImportConfirmsAndPersistsSession
+    import_test.go:79: TokenStore saves/session = 0/<nil>
+    import_test.go:81: displayed text contains raw credential "sess-grok"
+--- FAIL: TestConfigureLLM_ImportConfirmsAndPersistsSession (0.00s)
+FAIL
+FAIL github.com/maccavelli/mcplib/wizard 0.644s
+FAIL
+```
+
+The first repository lint run rejected the original environment-derived full
+file read:
+
+```text
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+wizard/import.go:39:15: G304: Potential file inclusion via variable (gosec)
+    data, err := os.ReadFile(path)
+                ^
+1 issues:
+* gosec: 1
+make: *** [lint] Error 1
+```
+
+The import boundary now opens the selected vendor directory with `os.OpenRoot`
+and reads only its fixed `auth.json` child. This resolves the path-escape risk
+without suppressing lint. All scratch copies were moved to Trash after their
+proofs, and the working tree was not mutated by the negative tests.
+
+The final staged-file `gofmt -d`, per-file `golint`, `go vet ./...`, and
+`git diff --cached --check` gates exited zero with no output. Repository lint,
+the full suite, and the race-enabled wizard suite were green:
+
+```text
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+ok  github.com/maccavelli/mcplib              (cached)
+ok  github.com/maccavelli/mcplib/fastpath     (cached)
+ok  github.com/maccavelli/mcplib/hfsc         (cached)
+ok  github.com/maccavelli/mcplib/llmprovider  (cached)
+ok  github.com/maccavelli/mcplib/logging      (cached)
+ok  github.com/maccavelli/mcplib/schema       (cached)
+ok  github.com/maccavelli/mcplib/selfupdate   (cached)
+ok  github.com/maccavelli/mcplib/wizard       0.500s
+ok  github.com/maccavelli/mcplib/wizard       1.812s
+```
+
+The final line is the race-enabled Phase 8 wizard run.
