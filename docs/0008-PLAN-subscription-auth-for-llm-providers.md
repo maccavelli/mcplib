@@ -2321,3 +2321,40 @@ ok  github.com/maccavelli/mcplib/wizard       1.812s
 ```
 
 The final line is the race-enabled Phase 8 wizard run.
+
+### Phase 9 — complete
+
+The commit containing this entry updates the README's LLM-provider guidance
+for the APIs and behavior delivered by Phases 1–8. It keeps `NewProvider` as
+the API-key factory, documents `NewProviderWithSource` for OpenAI and Grok,
+locks the ChatGPT and Grok inference hosts, excludes the Grok CLI proxy,
+explains the wizard's OAuth result shape and token-store boundary, directs
+orchestrated processes to the backplane, and keeps Claude and Gemini
+API-key-only. The pre-existing retry paragraph now distinguishes the single
+OAuth refresh retry from static-key and other 4xx behavior. No dependency or
+Go source file changed, and Phase 10 was not started.
+
+Before the README edit, a fixed-string content audit covering every Phase 9
+requirement was observed red:
+
+```text
+missing: NewProviderWithSource
+missing: chatgpt.com/backend-api/codex
+missing: api.openai.com
+missing: api.x.ai/v1
+missing: cli-chat-proxy
+missing: Kind=oauth
+missing: empty APIKey
+missing: Claude and Gemini remain API-key-only
+exit status 1
+```
+
+The same audit was rerun without weakening its patterns after the edit. Its
+first post-edit result still reported `Claude and Gemini remain API-key-only`
+because a Markdown source line break split the literal phrase. The README
+formatting was corrected, and the unchanged audit then exited zero with no
+output. `git diff --check` also exited zero with no output, and
+`git diff --quiet -- go.mod go.sum` confirmed that no dependency file changed.
+Go formatting, lint, vet, and tests were not rerun because this phase stages
+only Markdown documentation and the approved phase explicitly marks `gofmt`
+as not applicable.

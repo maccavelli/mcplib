@@ -97,11 +97,18 @@ circuit breaker, reconnect). Shared LLM, when orchestrated, uses
 
 ## LLM providers
 
-`NewProvider(name, apiKey, model, opts...)` is the factory. Every provider
-implements `Generate`; optional interfaces add tools, extended thinking, and
-the sealed `Item` contract (`MessageItem`, `FunctionCallItem`,
-`FunctionCallOutputItem`, `ReasoningItem`) so callers switch on types instead
-of parsing vendor JSON.
+`NewProvider(name, apiKey, model, opts...)` remains the API-key factory.
+`NewProviderWithSource(name, source, model, opts...)` accepts a `TokenSource`
+for OpenAI and Grok sessions. Every provider implements `Generate`; optional
+interfaces add tools, extended thinking, and the sealed `Item` contract
+(`MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`)
+so callers switch on types instead of parsing vendor JSON.
+
+A ChatGPT OAuth session uses `chatgpt.com/backend-api/codex`, never the
+API-key endpoint at `api.openai.com`. A Grok OAuth session and a Grok API key
+both use `api.x.ai/v1`; mcplib never sends either credential to the
+`cli-chat-proxy` host or adds its private CLI header.
+Claude and Gemini remain API-key-only.
 
 Registered names: `gemini`, `openai`, `claude`, `grok`, `opencode-zen`,
 `opencode-go`, `huggingface`, `kilo`, `ollama`. Ollama is the only one that
@@ -113,12 +120,16 @@ wires.
 base URLs, static model lists. Adding a provider is one descriptor plus a
 constructor; wizards built on `wizard.ConfigureLLM` pick it up without a
 downstream edit. `ConfigureLLM` never writes config and never logs a key.
-Consumers persist the returned `Result` in their own schema.
+It may return `Kind=oauth` with an empty APIKey field; OAuth session material is
+saved through the caller's `TokenStore`, while consumers persist the returned
+mode and model selection in their own schema. Orchestrated processes use
+`NewBackplaneClient`, not this standalone credential wizard.
 
 Retries are opt-in (`GenerateWithRetry`). Typed sentinels
 (`ErrRateLimited`, `ErrAuthFailure`, `ErrInvalidRequest`,
-`ErrProviderUnavailable`) classify failures; 401/403 and other 4xx are not
-retried.
+`ErrProviderUnavailable`) classify failures. OAuth sessions make one
+forced-refresh retry after a 401; static-key 401/403 responses and other 4xx
+responses are not retried.
 
 ## Self-update
 
