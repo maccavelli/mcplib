@@ -1500,3 +1500,97 @@ ok  github.com/maccavelli/mcplib/wizard       1.963s
 go test -race ./llmprovider -run 'TestOAuthSession_' -count=1: exit 0
 ok  github.com/maccavelli/mcplib/llmprovider  1.977s
 ```
+
+### Phase 4 — complete
+
+The commit containing this entry adds the `AuthMethodID` constants,
+`AuthMethod`, and copied `ProviderDescriptor.AuthMethods` lists. Only OpenAI
+and Grok receive lists; `RequiresAPIKey` and every other descriptor remain
+unchanged. It does not begin Phase 5 or amend the MADR.
+
+Following the approved sequence, the empty compile scaffold was added first.
+The non-OAuth test then passed before any method lists existed:
+
+```text
+=== RUN   TestDescriptors_NoOAuthOnOtherProviders
+--- PASS: TestDescriptors_NoOAuthOnOtherProviders (0.00s)
+PASS
+ok  github.com/maccavelli/mcplib/llmprovider  0.645s
+```
+
+That expected-pass gate was proved in a scratch clone by assigning
+`browser_oauth` to Claude. The verified mutation produced the intended complete
+failure:
+
+```text
+=== RUN   TestDescriptors_NoOAuthOnOtherProviders
+    descriptor_test.go:15: provider "claude" unexpectedly offers OAuth method "browser_oauth"
+--- FAIL: TestDescriptors_NoOAuthOnOtherProviders (0.00s)
+FAIL
+FAIL  github.com/maccavelli/mcplib/llmprovider  0.599s
+FAIL
+```
+
+The remaining tests were then added before populating the method lists. The
+complete targeted run kept the non-OAuth gate green while the three new
+requirements failed on their intended assertions:
+
+```text
+=== RUN   TestDescriptors_NoOAuthOnOtherProviders
+--- PASS: TestDescriptors_NoOAuthOnOtherProviders (0.00s)
+=== RUN   TestDescriptors_OpenAIAndGrokOfferOAuth
+    descriptor_test.go:97: openai AuthMethods = []llmprovider.AuthMethod(nil), want []llmprovider.AuthMethod{llmprovider.AuthMethod{ID:"api_key", Label:"OpenAI API key", Detail:"Platform billing (`api.openai.com`)", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"browser_oauth", Label:"Sign in with ChatGPT", Detail:"Plus/Pro/Business/Edu/Enterprise plan", Interactive:true, HeadlessOK:false}, llmprovider.AuthMethod{ID:"device_code", Label:"Sign in with ChatGPT (device code)", Detail:"", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"token_stdin", Label:"Paste a ChatGPT access token or API key", Detail:"", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"import_vendor_cli", Label:"Import ~/.codex/auth.json", Detail:"", Interactive:true, HeadlessOK:true}}
+    descriptor_test.go:97: grok AuthMethods = []llmprovider.AuthMethod(nil), want []llmprovider.AuthMethod{llmprovider.AuthMethod{ID:"api_key", Label:"xAI API key", Detail:"console.x.ai billing (`api.x.ai`)", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"browser_oauth", Label:"Sign in with xAI", Detail:"", Interactive:true, HeadlessOK:false}, llmprovider.AuthMethod{ID:"device_code", Label:"Sign in with xAI (device code)", Detail:"", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"token_stdin", Label:"Paste an xAI API key", Detail:"", Interactive:true, HeadlessOK:true}, llmprovider.AuthMethod{ID:"import_vendor_cli", Label:"Import ~/.grok/auth.json", Detail:"", Interactive:true, HeadlessOK:true}}
+--- FAIL: TestDescriptors_OpenAIAndGrokOfferOAuth (0.00s)
+=== RUN   TestDescriptors_CoverEveryRegisteredProvider
+    descriptor_test.go:131: descriptor "openai" does not offer required auth method "api_key"
+    descriptor_test.go:131: descriptor "openai" does not offer required auth method "browser_oauth"
+    descriptor_test.go:131: descriptor "grok" does not offer required auth method "api_key"
+    descriptor_test.go:131: descriptor "grok" does not offer required auth method "browser_oauth"
+--- FAIL: TestDescriptors_CoverEveryRegisteredProvider (0.00s)
+=== RUN   TestDescriptors_DerivedFieldsMatchSource
+--- PASS: TestDescriptors_DerivedFieldsMatchSource (0.00s)
+=== RUN   TestDescriptors_StableOrderAndDefensiveCopy
+    descriptor_test.go:192: Descriptors() returned no authentication methods
+--- FAIL: TestDescriptors_StableOrderAndDefensiveCopy (0.00s)
+=== RUN   TestDescriptors_NoStaleModels
+--- PASS: TestDescriptors_NoStaleModels (0.00s)
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/gemini
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/openai
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/claude
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/grok
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/opencode-zen
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/opencode-go
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/huggingface
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/kilo
+=== RUN   TestDescriptors_EveryDescriptorIsConstructible/ollama
+--- PASS: TestDescriptors_EveryDescriptorIsConstructible (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/gemini (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/openai (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/claude (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/grok (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/opencode-zen (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/opencode-go (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/huggingface (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/kilo (0.00s)
+    --- PASS: TestDescriptors_EveryDescriptorIsConstructible/ollama (0.00s)
+FAIL
+FAIL  github.com/maccavelli/mcplib/llmprovider  0.589s
+FAIL
+```
+
+After populating and defensively copying the exact ordered lists, the targeted
+descriptor run passed. Per-file `golint` produced no output and the independent
+phase gates were green:
+
+```text
+gofmt: exit 0, no output
+go vet: exit 0, no output
+make lint: exit 0
+/Users/<user>/go/bin/golangci-lint run -c .golangci.yml ./...
+0 issues.
+go test: exit 0
+ok  github.com/maccavelli/mcplib/llmprovider  0.630s
+ok  github.com/maccavelli/mcplib/wizard       0.853s
+```

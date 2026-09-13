@@ -1,9 +1,103 @@
 package llmprovider
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDescriptors_NoOAuthOnOtherProviders(t *testing.T) {
+	for _, descriptor := range Descriptors() {
+		if descriptor.ID == ProviderOpenAI || descriptor.ID == ProviderGrok {
+			continue
+		}
+		for _, method := range descriptor.AuthMethods {
+			if method.ID == AuthBrowserOAuth || method.ID == AuthDeviceCode {
+				t.Errorf("provider %q unexpectedly offers OAuth method %q", descriptor.ID, method.ID)
+			}
+		}
+	}
+}
+
+func TestDescriptors_OpenAIAndGrokOfferOAuth(t *testing.T) {
+	want := map[string][]AuthMethod{
+		ProviderOpenAI: {
+			{
+				ID:          AuthAPIKey,
+				Label:       "OpenAI API key",
+				Detail:      "Platform billing (`api.openai.com`)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthBrowserOAuth,
+				Label:       "Sign in with ChatGPT",
+				Detail:      "Plus/Pro/Business/Edu/Enterprise plan",
+				Interactive: true,
+			},
+			{
+				ID:          AuthDeviceCode,
+				Label:       "Sign in with ChatGPT (device code)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthTokenStdin,
+				Label:       "Paste a ChatGPT access token or API key",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthImportVendorCLI,
+				Label:       "Import ~/.codex/auth.json",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+		},
+		ProviderGrok: {
+			{
+				ID:          AuthAPIKey,
+				Label:       "xAI API key",
+				Detail:      "console.x.ai billing (`api.x.ai`)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthBrowserOAuth,
+				Label:       "Sign in with xAI",
+				Interactive: true,
+			},
+			{
+				ID:          AuthDeviceCode,
+				Label:       "Sign in with xAI (device code)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthTokenStdin,
+				Label:       "Paste an xAI API key",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthImportVendorCLI,
+				Label:       "Import ~/.grok/auth.json",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+		},
+	}
+
+	for provider, methods := range want {
+		descriptor, ok := DescriptorFor(provider)
+		if !ok {
+			t.Fatalf("DescriptorFor(%q) not found", provider)
+		}
+		if !reflect.DeepEqual(descriptor.AuthMethods, methods) {
+			t.Errorf("%s AuthMethods = %#v, want %#v", provider, descriptor.AuthMethods, methods)
+		}
+	}
+}
 
 // TestDescriptors_CoverEveryRegisteredProvider is the load-bearing test of this
 // whole design. If a provider can be constructed but has no descriptor, no
@@ -30,6 +124,23 @@ func TestDescriptors_CoverEveryRegisteredProvider(t *testing.T) {
 			t.Errorf("descriptor %q requires an API key but has no ProviderEnvVars entry", id)
 		}
 	}
+	for _, id := range []string{ProviderOpenAI, ProviderGrok} {
+		descriptor := described[id]
+		for _, method := range []AuthMethodID{AuthAPIKey, AuthBrowserOAuth} {
+			if !descriptorHasAuthMethod(descriptor, method) {
+				t.Errorf("descriptor %q does not offer required auth method %q", id, method)
+			}
+		}
+	}
+}
+
+func descriptorHasAuthMethod(descriptor ProviderDescriptor, id AuthMethodID) bool {
+	for _, method := range descriptor.AuthMethods {
+		if method.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDescriptors_DerivedFieldsMatchSource(t *testing.T) {
@@ -69,12 +180,26 @@ func TestDescriptors_StableOrderAndDefensiveCopy(t *testing.T) {
 	if len(a[0].StaticModels) > 0 {
 		a[0].StaticModels[0] = "MUTATED"
 	}
+	authIndex := -1
+	for i := range a {
+		if len(a[i].AuthMethods) > 0 {
+			authIndex = i
+			a[i].AuthMethods[0].Label = "MUTATED"
+			break
+		}
+	}
+	if authIndex == -1 {
+		t.Error("Descriptors() returned no authentication methods")
+	}
 	c := Descriptors()
 	if c[0].Label == "MUTATED" {
 		t.Error("Descriptors() must return a defensive copy: Label was mutated")
 	}
 	if len(c[0].StaticModels) > 0 && c[0].StaticModels[0] == "MUTATED" {
 		t.Error("Descriptors() must return a defensive copy: StaticModels was mutated")
+	}
+	if authIndex >= 0 && c[authIndex].AuthMethods[0].Label == "MUTATED" {
+		t.Error("Descriptors() must return a defensive copy: AuthMethods was mutated")
 	}
 }
 

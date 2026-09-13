@@ -1,5 +1,30 @@
 package llmprovider
 
+// AuthMethodID identifies a provider authentication method.
+type AuthMethodID string
+
+const (
+	// AuthAPIKey selects provider API-key authentication.
+	AuthAPIKey AuthMethodID = "api_key"
+	// AuthBrowserOAuth selects interactive browser OAuth.
+	AuthBrowserOAuth AuthMethodID = "browser_oauth"
+	// AuthDeviceCode selects a headless device-code flow.
+	AuthDeviceCode AuthMethodID = "device_code"
+	// AuthTokenStdin selects a credential pasted through standard input.
+	AuthTokenStdin AuthMethodID = "token_stdin"
+	// AuthImportVendorCLI imports a session from the provider's CLI.
+	AuthImportVendorCLI AuthMethodID = "import_vendor_cli"
+)
+
+// AuthMethod describes one authentication path a provider offers.
+type AuthMethod struct {
+	ID          AuthMethodID
+	Label       string
+	Detail      string
+	Interactive bool
+	HeadlessOK  bool
+}
+
 // ProviderDescriptor is the single source of truth for everything a
 // configuration UI needs to know about a provider: what to call it, which
 // environment variable holds its credential, whether it needs one at all, and
@@ -27,6 +52,8 @@ type ProviderDescriptor struct {
 	IsLocal bool
 	// RequiresAPIKey reports whether a credential must be collected.
 	RequiresAPIKey bool
+	// AuthMethods lists supported authentication paths in menu order.
+	AuthMethods []AuthMethod
 	// StaticModels is the curated fallback catalog, used before or instead of
 	// a live listing. May be empty for providers whose models are entirely
 	// machine-specific.
@@ -40,11 +67,81 @@ type ProviderDescriptor struct {
 var descriptorSpecs = []struct {
 	id, label, defaultBaseURL, notes         string
 	supportsBaseURL, isLocal, requiresAPIKey bool
+	authMethods                              []AuthMethod
 }{
 	{id: ProviderGemini, label: "Gemini (Google)", requiresAPIKey: true},
-	{id: ProviderOpenAI, label: "OpenAI", requiresAPIKey: true},
+	{
+		id: ProviderOpenAI, label: "OpenAI", requiresAPIKey: true,
+		authMethods: []AuthMethod{
+			{
+				ID:          AuthAPIKey,
+				Label:       "OpenAI API key",
+				Detail:      "Platform billing (`api.openai.com`)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthBrowserOAuth,
+				Label:       "Sign in with ChatGPT",
+				Detail:      "Plus/Pro/Business/Edu/Enterprise plan",
+				Interactive: true,
+			},
+			{
+				ID:          AuthDeviceCode,
+				Label:       "Sign in with ChatGPT (device code)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthTokenStdin,
+				Label:       "Paste a ChatGPT access token or API key",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthImportVendorCLI,
+				Label:       "Import ~/.codex/auth.json",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+		},
+	},
 	{id: ProviderClaude, label: "Claude (Anthropic)", requiresAPIKey: true},
-	{id: ProviderGrok, label: "Grok (xAI)", requiresAPIKey: true},
+	{
+		id: ProviderGrok, label: "Grok (xAI)", requiresAPIKey: true,
+		authMethods: []AuthMethod{
+			{
+				ID:          AuthAPIKey,
+				Label:       "xAI API key",
+				Detail:      "console.x.ai billing (`api.x.ai`)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthBrowserOAuth,
+				Label:       "Sign in with xAI",
+				Interactive: true,
+			},
+			{
+				ID:          AuthDeviceCode,
+				Label:       "Sign in with xAI (device code)",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthTokenStdin,
+				Label:       "Paste an xAI API key",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+			{
+				ID:          AuthImportVendorCLI,
+				Label:       "Import ~/.grok/auth.json",
+				Interactive: true,
+				HeadlessOK:  true,
+			},
+		},
+	},
 	{
 		id: ProviderOpencodeZen, label: "OpenCode Zen",
 		defaultBaseURL: opencodeZenBaseURL, supportsBaseURL: true, requiresAPIKey: true,
@@ -93,6 +190,7 @@ func Descriptors() []ProviderDescriptor {
 			RequiresAPIKey:  s.requiresAPIKey,
 			Notes:           s.notes,
 			StaticModels:    StaticModels(s.id), // already returns a copy
+			AuthMethods:     append([]AuthMethod(nil), s.authMethods...),
 		}
 		if s.requiresAPIKey {
 			d.EnvVar = ProviderEnvVars[s.id]
