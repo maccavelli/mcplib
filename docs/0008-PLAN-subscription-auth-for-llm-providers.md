@@ -2479,3 +2479,48 @@ exited zero. The commit was created only in `prepare-commit-msg`, as required;
 neither repository was pushed. This execution-record update remains an
 uncommitted `mcplib` documentation change because Phase 10 explicitly says not
 to commit `mcplib`.
+
+#### Post-rollout tag, pin, and live-config test correction
+
+After the Phase 10 closeout commit was published, annotated tag `v1.5.0` was
+created at `d13f89c` and pushed. `prepare-commit-msg` then removed the temporary
+local replacement, pinned `github.com/maccavelli/mcplib v1.5.0`, verified the
+downloaded module, and committed and pushed that dependency-only change as
+`f98b68e`. The old committed `go.mod` was observed failing the exact pin gate
+with both `unexpected local replace` and `mcplib is not pinned to v1.5.0`; the
+updated file passed with no output, and `go mod verify` reported that all
+modules were verified.
+
+The consumer push gate then exposed the pre-existing live-config defect logged
+above. `TestMain_RunConfigure` reported the real platform config location, and
+a controlled rerun changed that file's mtime while setting the active provider
+and model to `gemini` / `test`. The test file was unchanged by Phase 10 and was
+last modified in `9f887d3`. Credentials were not printed, the config remained
+mode `0600`, and read-only inspection found no backup file. The live config was
+not guessed back to an unknown prior provider/model.
+
+Consumer commit `1d1f73e` isolates all platform config environment variables
+under `t.TempDir()`, supplies an explicit fake API key, asserts the resolved
+path stays below that root, verifies the isolated file was written with the
+expected fake configuration, and makes any unexpected `osExit` fail instead of
+being swallowed by the old blanket recovery.
+
+The path-containment assertion was proved in a scratch copy with its entire Go
+test process pointed at a disposable outer home. Removing the test's own
+environment isolation wrote only to that disposable location and failed as
+intended:
+
+```text
+config path "<scratch>/process-home/Library/Application Support/prepare-commit-msg/config.json" is outside isolated root
+--- FAIL: TestMain_RunConfigure
+FAIL github.com/maccavelli/prepare-commit-msg
+```
+
+The scratch copy was moved to Trash. On the corrected tree, both the targeted
+test and the complete staged gate preserved the live config's SHA-256 and
+mtime. Final results were:
+
+```text
+test=0 live_config_unchanged=1
+gofmt=0 vet=0 add=0 precheck=0 race=0 coverage=0 live_unchanged=1 gate=0
+```
