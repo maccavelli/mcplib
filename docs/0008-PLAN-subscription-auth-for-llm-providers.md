@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-13
 associated-madr: "0008-MADR-subscription-auth-for-llm-providers.md"
 decision-makers: mcplib maintainers
@@ -1149,11 +1149,21 @@ func openBrowserDefault(url string) error
 ```
 
 `darwin`: `exec.Command("open", url)`, `linux`: `xdg-open`, `windows`:
-`cmd /c start`. Combined output discarded. Non-zero return is **not** fatal
+~~`cmd /c start`~~ `rundll32.exe url.dll,FileProtocolHandler` (replaced by
+the approved 2026-09-14 execution amendment below). Combined output discarded. Non-zero return is **not** fatal
 (wizard still prints the URL). Import tests never invoke it. `open_test.go`
 sets `openBrowser` to a recorder if a browser-path test is added; otherwise
 the file can omit a test and `open.go` stays small enough that coverage
 still clears 80% via setup tests that don't call it.
+
+> **2026-09-14 execution amendment.** The first staged lint run after fixing
+> the snapshot topology rejected all three variable-URL subprocess calls as
+> G204. Validate an absolute HTTP(S) authorization URL and reject control
+> characters before launching. macOS and Linux retain their direct non-shell
+> commands. Windows uses `rundll32.exe url.dll,FileProtocolHandler` instead of
+> the originally specified `cmd /c start`, removing the shell parsing boundary.
+> Add an invalid-URL regression test and use narrowly justified G204 annotations
+> only on the validated direct argument launches.
 
 ### 10.5 — Non-interactive `--yes`
 
@@ -1201,6 +1211,15 @@ Do not push.
 `go-precheck.sh` with no args checks the staged `*.go` snapshot — that is
 the repo's gate (`Makefile` `verify-staged`). Do not pass a guessed file
 list that can omit a new test file.
+
+> **2026-09-13 execution amendment.** The original invocation above is still
+> required, but its first Phase 10 run proved that the script's flat temporary
+> snapshot made the staged `replace ... => ../mcplib` resolve to a missing
+> directory. Before rerunning the gate, update `scripts/go-precheck.sh` to put
+> the staged consumer under a same-named child of its temporary root and link
+> the real sibling `mcplib` at the corresponding `../mcplib` location. This
+> preserves the approved local-replace topology while the consumer files remain
+> an isolated staged snapshot.
 
 Coverage floor is 80% (`Makefile` `COVERAGE_MIN`). If Phase 10 drops below,
 add tests rather than lowering the floor.
@@ -1353,7 +1372,8 @@ that already call `NewBackplaneClient` keep doing so.
 
 * Modified: `go.mod`, `go.sum`, `internal/config/config.go`, `config_test.go`,
   `internal/ui/setup.go`, `setup_test.go`, `main.go`, `main_test.go` (or
-  `main_oauth_test.go`), `README.md`
+  `main_oauth_test.go`), `README.md`, and, by the approved 2026-09-13 Phase 10
+  deviation, `scripts/go-precheck.sh`
 * New: `internal/ui/open.go` (and `open_test.go` if the helper needs a
   GOOS-stub test)
 
@@ -1376,6 +1396,8 @@ that already call `NewBackplaneClient` keep doing so.
 | 2026-09-13 | 4 | The expected-pass `TestDescriptors_NoOAuthOnOtherProviders` cannot compile at the Phase 3 boundary because the Phase 4 auth-method types and `AuthMethods` field do not yet exist | Add the empty compile scaffold first, observe the test pass, prove it with a non-OAuth-provider scratch mutation, then add the remaining red tests and implementation. No MADR amendment | no additional file |
 | 2026-09-13 | 5 | Browser and device flows had no callable API, but Phase 8's separate `wizard` package must invoke them without modifying Phase 5 files | Add `OAuthFlowOptions`, `LoginBrowserOAuth`, and `LoginDeviceOAuth` in Phase 5, with private time seams and provider defaults. No MADR amendment | no additional file |
 | 2026-09-13 | 8 | OpenAI `token_stdin` can return `CredOAuth`, but the plan required no `TokenStore` or save while Phase 10 clears `APIKey` and assumes every OAuth result was already persisted | Require `TokenStore` only when token-stdin classification produces OpenAI OAuth, then save the access-only session before return. Static OpenAI and Grok keys remain store-free. No MADR amendment: this enforces the accepted persistence boundary rather than changing it | no additional file |
+| 2026-09-13 | 10 | The required staged `go-precheck.sh` run failed because its flat temporary snapshot could not resolve the approved sibling `../mcplib` replacement; the script itself was untouched when the failure was reproduced | Preserve the sibling topology inside the script's isolated temporary root and link the real local `mcplib` at the staged module's `../mcplib` path. No MADR amendment: authentication, persistence, and rollout decisions are unchanged | `scripts/go-precheck.sh` |
+| 2026-09-14 | 10 | After the snapshot fix let the staged gate reach lint, G204 rejected every plan-prescribed browser subprocess that received a variable URL; the Windows `cmd /c start` route also exposed that URL to shell parsing | Validate absolute HTTP(S) URLs before launch; keep direct non-shell macOS/Linux launchers; replace Windows `cmd` with `rundll32.exe url.dll,FileProtocolHandler`; add invalid-URL coverage and narrow G204 annotations after validation. No MADR amendment: the browser handoff behavior and auth decisions are unchanged | no additional file (`internal/ui/open.go` and `open_test.go` were already in Phase 10) |
 
 ## 12. Execution record
 
@@ -2358,3 +2380,101 @@ output. `git diff --check` also exited zero with no output, and
 Go formatting, lint, vet, and tests were not rerun because this phase stages
 only Markdown documentation and the approved phase explicitly marks `gofmt`
 as not applicable.
+
+### Phase 10 — complete
+
+Consumer commit `3dafb46` implements subscription authentication in
+`prepare-commit-msg`. The config schema persists only `auth_kind: "oauth"`;
+API-key and unknown values normalize to the legacy empty representation, and
+OAuth access and refresh tokens remain exclusively in the sibling `oauth/`
+`FileTokenStore`. Interactive configure imports or creates OpenAI/Grok
+sessions, deletes stale sessions when API-key auth is selected, and explicitly
+marks this standalone hook as non-orchestrated. Non-interactive `--yes` remains
+API-key-only. Generation constructs OAuth providers with a refreshable
+`OAuthSession` through `NewProviderWithSource`, never by passing an access token
+to `NewProvider`.
+
+The initial test-first run was compile-red before the consumer interfaces
+existed. Representative failures were:
+
+```text
+internal/config/config_test.go: unknown field AuthKind in ProviderConfig
+internal/config/config_test.go: undefined: ValidateOAuth
+internal/ui/setup_test.go: undefined: config.OAuthDir
+main_oauth_test.go: undefined: config.NewOAuthStore
+main_oauth_test.go: undefined: newProviderWithSource
+FAIL github.com/maccavelli/prepare-commit-msg [build failed]
+```
+
+Every new or materially extended Phase 10 gate was then proved against an
+inspected mutation in isolated copies; no negative test dirtied either real
+working tree. The mutations produced the intended failures:
+
+* adding `access_token` / `refresh_token` fields made
+  `TestSave_OAuthKindDoesNotWriteTokens` print the leaked keys;
+* removing Grok from `SupportedProviders` made
+  `TestApplyDefaults_IncludesGrok` report the missing slot;
+* making `IsOAuth` case-sensitive rejected `AuthKind="OAUTH"`; forcing
+  `ValidateOAuth` to always fail or always pass separately broke the existing-
+  session and missing-session gates;
+* preserving `auth_kind: "api_key"` made
+  `TestSave_NonOAuthAuthKindIsOmitted` print the incorrectly serialized value;
+* skipping stale-session deletion left `oauth/openai.json` present after the
+  API-key setup script;
+* copying imported access tokens into `APIKey` broke both Grok and ChatGPT
+  import tests, while explicit `access` / `refresh` config fields were caught
+  independently by the serialized-config assertion;
+* deleting the imported session made the Grok token-file existence check fail,
+  and changing the copied token store to mode `0644` made its Unix permission
+  assertion fail with `want 0600`;
+* adding an authentication menu to Gemini and Claude broke both locked legacy
+  interactive scripts;
+* leaving OAuth on the non-interactive path made its new assertion report
+  `auth kind: "oauth"`;
+* routing OAuth generation through `NewProvider` with `session.Access` invoked
+  the test's fatal static-provider seam;
+* swallowing the browser command's non-zero exit broke the browser error-path
+  test; and
+* before URL validation existed, the unsafe-URL test reached the browser
+  command and failed because it received an `open browser` error instead of the
+  required `invalid browser URL` rejection.
+
+The first coverage run was `79.5%` against the repository's `80.0%` floor.
+The plan-authorized `open_test.go` command-result coverage raised the final
+total to `80.7%`; the browser error assertion was also mutation-proved.
+
+The first exact staged `go-precheck.sh` invocation exposed the approved
+2026-09-13 deviation: its flat staged snapshot could not resolve the local
+module replacement.
+
+```text
+github.com/maccavelli/mcplib@v1.4.1:
+replacement directory ../mcplib does not exist
+```
+
+After the documented topology correction, the gate reached lint and exposed
+the approved 2026-09-14 browser-launch deviation:
+
+```text
+internal/ui/open.go: G204: Subprocess launched with variable
+3 issues:
+* gosec: 3
+```
+
+The corrected launcher validates absolute HTTP(S) URLs, uses direct non-shell
+commands on macOS/Linux, and uses
+`rundll32.exe url.dll,FileProtocolHandler` on Windows. Narrow G204 annotations
+apply only after that validation.
+
+The final independently checked staged gate was fully green:
+
+```text
+bash=0 gofmt=0 vet=0 add=0 precheck=0 race=0 coverage=0 gate=0
+total coverage: 80.7% (minimum 80.0%)
+```
+
+`git diff --cached --check` and the staged internal-identifier scan also
+exited zero. The commit was created only in `prepare-commit-msg`, as required;
+neither repository was pushed. This execution-record update remains an
+uncommitted `mcplib` documentation change because Phase 10 explicitly says not
+to commit `mcplib`.
