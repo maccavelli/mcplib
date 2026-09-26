@@ -1253,6 +1253,40 @@ p2-control: expect=pass exit=0 OK []
 `fetchClaudePage`, so the `defer` that closes each response is not inside the
 page loop.
 
+Commit: `dcc1dcc`.
+
+### Phase 3 — complete (2026-09-26)
+
+**Red run:** `go test -count=1 -run TestSearchModels ./llmprovider` failed to
+compile, exit 1:
+
+```
+llmprovider/model_matcher_test.go:21:20: undefined: ModelMatch
+```
+
+**Green:** all 14 `TestSearchModels_*` pass on the first implementation run,
+including the reference-derived exact scores (`flash` → 4000, 4000, 1020;
+`sonet` → 1035). The Go matcher therefore agrees with the Appendix C
+reference. `go test -count=1 ./llmprovider ./wizard`: both `ok`.
+
+**Mutation proofs:** `mut=0`.
+
+```
+p3-glob-to-fuzzy: expect=fail exit=1 OK [GlobCrossesSlash, GlobMatchesAcrossOrg, GlobIsAnchored, GlobKeepsInputOrder]
+p3-unanchored: expect=fail exit=1 OK ['--- FAIL: TestSearchModels_GlobIsAnchored (0.00s)']
+p3-label-subsequence: expect=fail exit=1 OK ['--- FAIL: TestSearchModels_NoSubsequenceOverLabels (0.00s)']
+p3-no-length-tiebreak: expect=fail exit=1 OK ['--- FAIL: TestSearchModels_TieBreak (0.00s)']
+p3-no-dedupe: expect=fail exit=1 OK ['--- FAIL: TestSearchModels_Dedupe (0.00s)']
+p3-control: expect=pass exit=0 OK []
+6/6 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (6/6 checks)`.
+
+**Implementation note:** the unlocked helper names are `uniqueModelMatches`,
+`globMatches`, `fuzzyModelScore`, `modelTokens` and `tokenPrefixMatch`. The
+locked anchors of §1.4 are verbatim.
+
 ## Appendix A — `phase_gate.py`
 
 Write to `$SCRATCH/phase_gate.py`. It was proven on 2026-09-25: it passed the
