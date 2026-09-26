@@ -7,10 +7,20 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+)
+
+// Listing pagination (MADR 0009 §2): Gemini and Anthropic page their model
+// lists, so each fetch requests the maximum page size and follows at most
+// maxListingPages pages.
+const (
+	maxListingPages     = 10
+	geminiListPageSize  = "1000"
+	claudeListPageLimit = "1000"
 )
 
 // ModelCatalog is the result of one model listing, viewed two ways.
@@ -134,48 +144,71 @@ func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 	return recommendedOf(modelCatalogFor(ctx, ProviderGemini, apiKey, cfg))
 }
 
-// fetchGeminiUsable returns the usable Gemini text models in listing order.
+// geminiModelsPage is one page of Gemini's GET {base}/models.
+type geminiModelsPage struct {
+	Models []struct {
+		Name                       string   `json:"name"`
+		SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+	} `json:"models"`
+	NextPageToken string `json:"nextPageToken"`
+}
+
+// fetchGeminiUsable returns the usable Gemini text models in listing order,
+// following nextPageToken for at most maxListingPages pages (MADR 0009 §2).
+// Any page failure, or running out of pages, fails the whole listing.
 func fetchGeminiUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://generativelanguage.googleapis.com/v1beta"
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
 	}
 
-	url := fmt.Sprintf("%s/models", baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	var available []string
+	pageToken := ""
+	for page := 1; page <= maxListingPages; page++ {
+		query := url.Values{"pageSize": {geminiListPageSize}}
+		if pageToken != "" {
+			query.Set("pageToken", pageToken)
+		}
+		endpoint := baseURL + "/models?" + query.Encode()
+		result, err := fetchGeminiPage(ctx, endpoint, apiKey, cfg)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range result.Models {
+			id := strings.TrimPrefix(m.Name, "models/")
+			if isUsableGeminiTextModel(id, m.SupportedGenerationMethods) {
+				available = append(available, id)
+			}
+		}
+		if result.NextPageToken == "" {
+			return available, nil
+		}
+		pageToken = result.NextPageToken
+	}
+	return nil, fmt.Errorf("model listing: more than %d pages", maxListingPages)
+}
+
+// fetchGeminiPage performs one listing request. The key travels in the
+// x-goog-api-key header, never the query string.
+func fetchGeminiPage(ctx context.Context, endpoint, apiKey string, cfg ProviderConfig) (geminiModelsPage, error) {
+	var result geminiModelsPage
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini: models endpoint returned HTTP %d", resp.StatusCode)
+		return result, fmt.Errorf("gemini: models endpoint returned HTTP %d", resp.StatusCode)
 	}
-
-	var result struct {
-		Models []struct {
-			Name                       string   `json:"name"`
-			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
-		} `json:"models"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	var available []string
-	for _, m := range result.Models {
-		id := strings.TrimPrefix(m.Name, "models/")
-		if isUsableGeminiTextModel(id, m.SupportedGenerationMethods) {
-			available = append(available, id)
-		}
-	}
-	return available, nil
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	return result, err
 }
 
 func curateGemini(usable []string) []string {
@@ -207,47 +240,73 @@ func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 	return recommendedOf(modelCatalogFor(ctx, ProviderClaude, apiKey, cfg))
 }
 
-// fetchClaudeUsable returns the usable Claude text models in listing order.
+// claudeModelsPage is one page of Anthropic's GET /v1/models.
+type claudeModelsPage struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+	HasMore bool   `json:"has_more"`
+	LastID  string `json:"last_id"`
+}
+
+// fetchClaudeUsable returns the usable Claude text models in listing order,
+// following has_more/last_id for at most maxListingPages pages (MADR 0009 §2).
+// Any page failure, or running out of pages, fails the whole listing.
 func fetchClaudeUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://api.anthropic.com"
 	if cfg.BaseURL != "" {
 		baseURL = strings.TrimRight(cfg.BaseURL, "/")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/v1/models", http.NoBody)
+	var available []string
+	afterID := ""
+	for page := 1; page <= maxListingPages; page++ {
+		query := url.Values{"limit": {claudeListPageLimit}}
+		if afterID != "" {
+			query.Set("after_id", afterID)
+		}
+		result, err := fetchClaudePage(ctx, baseURL+"/v1/models?"+query.Encode(), apiKey, cfg)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range result.Data {
+			if isUsableClaudeTextModel(m.ID) {
+				available = append(available, m.ID)
+			}
+		}
+		if !result.HasMore {
+			return available, nil
+		}
+		if result.LastID == "" {
+			return nil, errors.New("model listing: has_more without last_id")
+		}
+		afterID = result.LastID
+	}
+	return nil, fmt.Errorf("model listing: more than %d pages", maxListingPages)
+}
+
+// fetchClaudePage performs one listing request.
+func fetchClaudePage(ctx context.Context, endpoint, apiKey string, cfg ProviderConfig) (claudeModelsPage, error) {
+	var result claudeModelsPage
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		// Older keys / regional proxies may not support Models API.
-		return nil, fmt.Errorf("claude: models endpoint returned HTTP %d", resp.StatusCode)
+		return result, fmt.Errorf("claude: models endpoint returned HTTP %d", resp.StatusCode)
 	}
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		if isUsableClaudeTextModel(m.ID) {
-			available = append(available, m.ID)
-		}
-	}
-	return available, nil
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	return result, err
 }
 
 func curateClaude(usable []string) []string {

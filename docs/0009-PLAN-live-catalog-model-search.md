@@ -755,7 +755,7 @@ Every handler counts its requests and records `r.URL.Query()`.
 | `TestListModelCatalog_ClaudeFollowsHasMore` | page 1: `claude-sonnet-5`, `has_more: true`, `last_id: "claude-sonnet-5"`; page 2 (`after_id=claude-sonnet-5`): `claude-haiku-4-5`, `has_more: false` | `Usable == [claude-sonnet-5 claude-haiku-4-5]`, `Live`, 2 requests, `limit=1000` on both |
 | `TestListModelCatalog_GeminiSecondPageFailureDegrades` | page 1 good with token; page 2 returns 500 | nil error, `!Live`, `Usable == StaticGemini` |
 | `TestListModelCatalog_ClaudeSecondPageFailureDegrades` | page 1 good with `has_more`; page 2 returns 500 | nil error, `!Live`, `Usable == StaticClaude` |
-| `TestListModelCatalog_PaginationIsBounded` | subtests `gemini` (always `nextPageToken: "again"`) and `claude` (always `has_more: true, last_id: "x"`) | exactly `maxListingPages` (10) requests, `!Live`, static |
+| `TestListModelCatalog_PaginationIsBounded` | subtests `gemini` (always `nextPageToken: "again"`) and `claude` (always `has_more: true, last_id: "x"`) | exactly ~~`maxListingPages`~~ a literal 10 (2026-09-26 deviation, §10) requests, `!Live`, static |
 | `TestListModelCatalog_ClaudeHasMoreWithoutLastIDDegrades` | `has_more: true`, `last_id` absent | 1 request, `!Live`, static |
 | `TestListModelCatalog_SinglePageRequestsMaxPageSize` | one page each, no continuation | exactly 1 request each; Gemini `pageSize=1000`, no `pageToken`; Claude `limit=1000`, no `after_id` |
 
@@ -1057,6 +1057,7 @@ its pin.
 | 2026-09-26 | 0 | The 0009 MADR and PLAN link to records that are not committed: `0010-MADR-use-case-aware-default-model-ranking.md`, `0011-REPORT-provider-source-compatibility-audit.md` and `0012-MADR-conform-providers-to-reference-clients.md`. MADR 0003 already carries the 0011 audit note. Committing only the three planned files would leave broken links and pull the 0003 audit note into the commit anyway. | Maintainer chose "Commit all docs". Phase 0 commits every pending docs change. Only 0009 changes status (accepted); 0010 and 0012 stay `proposed` and nothing of them is implemented. No MADR amendment: no decision or asserted fact changes. | `docs/0001-MADR-add-grok-xai-llm-provider.md`, `docs/0008-MADR-subscription-auth-for-llm-providers.md` (audit notes only), `docs/0010-MADR-use-case-aware-default-model-ranking.md`, `docs/0011-REPORT-provider-source-compatibility-audit.md`, `docs/0012-MADR-conform-providers-to-reference-clients.md` |
 | 2026-09-26 | 0b | `llmprovider/opencode_route.go:8-10` says both gateways use "one auth scheme (Authorization: Bearer)". §1c makes that false, and the file is not in Phase 0b's list. | Maintainer chose "Add file to phase": a comment-only edit pointing to `opencodeKeyHeader` and §1c, gated with the phase. No behaviour change and no MADR amendment. | `llmprovider/opencode_route.go` |
 | 2026-09-26 | 1 | `make lint` failed: `func listOpenAIModels is unused` and `func listGrokModels is unused` (`discovery.go`). The plan said every `list*Models` wrapper stays, but its own caller list names no OpenAI or Grok caller. Those two were reached only through the old dispatch switch, which `modelCatalogFor` replaces. `openai.go:204` and `grok.go:239` call `ListAvailableModelsWithSource`. | Maintainer chose "Delete the two wrappers". Their logic lives in `fetchOpenAIUsable`/`curateOpenAI` and `fetchGrokUsable`/`curateGrok`, reached through `modelCatalogFor`. No behaviour change and no MADR amendment. | none (same file) |
+| 2026-09-26 | 2 | Mutation `p2-unbounded` (`maxListingPages` 10 → 1000) reported NOT OK. `TestListModelCatalog_PaginationIsBounded` compared the request count against the production constant, so moving the bound moved the expectation (1000 == 1000). | Maintainer chose "Assert the literal bound": the test compares against `const wantPages = 10`, per MADR 0009 §2, independent of the production constant, and `p2-unbounded` is re-run. No MADR amendment. | none (same file) |
 
 ## 11. Execution record
 
@@ -1203,6 +1204,54 @@ p1b-control: expect=pass exit=0 OK []
 ```
 
 **Phase gate:** `gate=0`, `gate=PASS (7/7 checks)`.
+
+Commit: `a5c617d`.
+
+### Phase 2 — complete (2026-09-26)
+
+**Red run:**
+`go test -count=1 -run 'TestListModelCatalog_(Gemini|Claude|Pagination|SinglePage)' ./llmprovider`,
+exit 1.
+* The first attempt failed to compile, because the bound test references
+  `maxListingPages`. The locked §1.2 constant block was added first, with no
+  pagination logic, so the red run could fail on assertions as the plan
+  requires.
+* The assertion failures (abridged; the full log is in the scratchpad):
+
+```
+--- FAIL: TestListModelCatalog_GeminiFollowsNextPageToken: requests = 1, want 2
+--- FAIL: TestListModelCatalog_ClaudeFollowsHasMore: requests = 1, want 2
+--- FAIL: TestListModelCatalog_GeminiSecondPageFailureDegrades: … Live:true}, want static (Live false)
+--- FAIL: TestListModelCatalog_ClaudeSecondPageFailureDegrades: … Live:true}, want static (Live false)
+--- FAIL: TestListModelCatalog_PaginationIsBounded/gemini: requests = 1, want maxListingPages (10)
+--- FAIL: TestListModelCatalog_PaginationIsBounded/claude: requests = 1, want maxListingPages (10)
+--- FAIL: TestListModelCatalog_ClaudeHasMoreWithoutLastIDDegrades: … Live:true}, want static (Live false)
+--- FAIL: TestListModelCatalog_SinglePageRequestsMaxPageSize: gemini queries = [map[]] …; claude queries = [map[]] …
+```
+
+**Green:** the same command, and `go test -count=1 ./llmprovider ./wizard`,
+both `ok`.
+
+**Deviation:** the first mutation run reported
+`p2-unbounded: expect=fail exit=0 NOT OK`. The bound test compared against the
+production constant. By maintainer decision it now asserts the literal 10
+(§10).
+
+**Mutation proofs, after the fix:** `mut=0`.
+
+```
+p2-gemini-one-page: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_GeminiFollowsNextPageToken (0.00s)']
+p2-claude-one-page: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_ClaudeFollowsHasMore (0.00s)']
+p2-unbounded: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_PaginationIsBounded (0.16s)']
+p2-control: expect=pass exit=0 OK []
+4/4 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (6/6 checks)`.
+
+**Implementation note:** each page is fetched by `fetchGeminiPage` or
+`fetchClaudePage`, so the `defer` that closes each response is not inside the
+page loop.
 
 ## Appendix A — `phase_gate.py`
 
