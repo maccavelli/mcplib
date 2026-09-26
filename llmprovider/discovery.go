@@ -131,7 +131,7 @@ func modelCatalogFor(ctx context.Context, providerName, apiKey string, cfg Provi
 		entries, err := fetchKiloCatalog(ctx, apiKey, cfg)
 		// Deliberate: a failed Kilo fetch degrades to the static catalog rather
 		// than failing, like every other lister here. See catalogFrom.
-		return catalogFrom(kiloUsable(entries), err, StaticModels(ProviderKilo), curateKilo), nil
+		return catalogFrom(kiloUsable(entries), err, StaticModels(ProviderKilo), kiloCurate(entries, cfg.ModelProfile)), nil
 	case ProviderOllama:
 		return ollamaCatalog(ctx, cfg)
 	default:
@@ -626,18 +626,31 @@ func curateHuggingFace(usable []string) []string {
 }
 
 // kiloCatalogEntry is the subset of Kilo's OpenRouter-shaped catalog entry this
-// package reads. Shared by listKiloModels and KiloModelCapabilities.
+// package reads. Shared by listKiloModels, KiloModelCapabilities and the
+// ranker (MADR 0010 §2).
 type kiloCatalogEntry struct {
 	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Created      int64  `json:"created"`
 	Architecture struct {
 		InputModalities  []string `json:"input_modalities"`
 		OutputModalities []string `json:"output_modalities"`
 	} `json:"architecture"`
 	Pricing struct {
+		Prompt     string `json:"prompt"`
 		Completion string `json:"completion"`
 	} `json:"pricing"`
-	SupportedParameters   []string `json:"supported_parameters"`
-	MayTrainOnYourPrompts bool     `json:"mayTrainOnYourPrompts"`
+	ContextLength         int                `json:"context_length"`
+	ExpirationDate        string             `json:"expiration_date"`
+	PreferredIndex        *int               `json:"preferredIndex"`
+	TerminalBench         *kiloTerminalBench `json:"terminalBench"`
+	SupportedParameters   []string           `json:"supported_parameters"`
+	MayTrainOnYourPrompts bool               `json:"mayTrainOnYourPrompts"`
+}
+
+// kiloTerminalBench is the benchmark block Kilo publishes for some models.
+type kiloTerminalBench struct {
+	OverallScore *float64 `json:"overallScore"`
 }
 
 // kiloPriceRank parses Kilo's string pricing into a sortable value. A negative
@@ -744,6 +757,28 @@ func kiloUsable(entries []kiloCatalogEntry) []string {
 // curateKilo passes a nil rankFn, which preserves the price ordering.
 func curateKilo(usable []string) []string {
 	return curateFromCatalog(StaticKilo, usable, isUsableKiloModel, nil)
+}
+
+// kiloCurate ranks Kilo's usable models from the listing's own metadata
+// (MADR 0010 §2). When fewer than MaxListedModels are eligible, the rest come
+// from curateKilo's order, then the usable list.
+func kiloCurate(entries []kiloCatalogEntry, profile ModelProfile) func([]string) []string {
+	return func(usable []string) []string {
+		byID := make(map[string]kiloCatalogEntry, len(entries))
+		for _, e := range entries {
+			byID[e.ID] = e
+		}
+		now := rankingNow()
+		cands := make([]rankCandidate, 0, len(usable))
+		for _, id := range usable {
+			e, ok := byID[id]
+			if !ok {
+				e.ID = id
+			}
+			cands = append(cands, kiloCandidate(e, now))
+		}
+		return rankRecommended(profile, ProviderKilo, cands, append(curateKilo(usable), usable...))
+	}
 }
 
 // KiloModelCapabilities returns the supported_parameters published for one Kilo

@@ -558,6 +558,22 @@ func kiloPrice(s string) (float64, bool) {
 }
 ```
 
+**Amended by the 2026-09-26 goconst deviation (§10).** `opencodeGoRegionGated`
+lists `opencodeDeepSeekV4Flash`, declared as:
+
+```go
+// opencodeDeepSeekV4Flash is named because the id recurs across the Go gate,
+// the static catalogs and the tests (goconst).
+const opencodeDeepSeekV4Flash = "deepseek-v4-flash"
+```
+
+It replaces the literal `"deepseek-v4-flash"` in the list above. Tests use the
+constant wherever they need that id as a Go string. ~~One constant~~
+**Extended by the second goconst deviation (§10):** all four gated ids are
+named constants (`opencodeDeepSeekV41Flash`, `opencodeDeepSeekFlash`,
+`opencodeDeepSeekV4Flash`, `opencodeDeepSeekV4Pro`), and the list is built only
+from them.
+
 **Fidelity to the reference simulation.** The simulation that produced MADR
 §7 applies the same units and floors, in the same order of operations:
 * cost in USD per million tokens, with a floor of 0.01;
@@ -1274,12 +1290,18 @@ The tests:
 2. Implement §1.3 and §1.4.
 3. Re-run step 1's command, which must pass. Then
    `go test -count=1 ./llmprovider > "$SCRATCH/p2-pkg.log" 2>&1` must pass
-   **with every pre-existing test unmodified**. The existing Kilo fixture has
+   ~~**with every pre-existing test unmodified**. The existing Kilo fixture has
    no `reasoning` parameter, so nothing in it is eligible, and the fill
-   reproduces today's order (Appendix 1, E9).
+   reproduces today's order (Appendix 1, E9).~~ **Amended by the 2026-09-26
+   deviation (§10):** with every pre-existing test unmodified except
+   `TestListKiloModels_MetadataCuration`. It now asserts `Usable`
+   (`org/cheap, org/vlm, org/dear, kilo-auto/variable`, cheapest first, `"-1"`
+   last) and `Recommended` (`org/cheap, org/vlm, org/dear`: the fill skips
+   `kilo-auto/*` under the utility profile, per MADR §3 item 9).
 4. Mutation proofs, then the phase gate on
-   `llmprovider/model_ranking.go llmprovider/model_ranking_test.go llmprovider/discovery_ranking_test.go llmprovider/discovery.go`.
-5. Stage those four files, then `git commit --no-edit`.
+   `llmprovider/model_ranking.go llmprovider/model_ranking_test.go llmprovider/discovery_ranking_test.go llmprovider/discovery.go`
+   **plus `llmprovider/discovery_test.go`** (2026-09-26 deviation, §10).
+5. Stage ~~those four files~~ those five files, then `git commit --no-edit`.
 
 ### Tests (`llmprovider/model_ranking_test.go`)
 
@@ -1683,7 +1705,9 @@ metadata against the default URL, and skips on a transport error. Then:
   `(?i)(^|[^a-z0-9])(\d+(?:\.\d+)?)b([^a-z0-9]|$)` with a size ≤ 14, unless it
   also matches the MoE form `(?i)-a\d+(?:\.\d+)?b\b`.
 * **Gates:** no entry contains `-contributor`, and `StaticOpencodeGo` has none
-  of the four region-gated ids, written as literals in the test.
+  of the four region-gated ids, written as literals in the test. **Amended by
+  the 2026-09-26 goconst deviation (§10):** `deepseek-v4-flash` is written as
+  `opencodeDeepSeekV4Flash`; the other three stay literals.
 
 The dense-size rule is the reference simulation's `dense_small`.
 
@@ -1958,7 +1982,7 @@ echo "mut=$MUT gate=$GATE"
 
 | # | Criterion | Evidence |
 |---|---|---|
-| A1 | Behaviour the MADR keeps is unchanged | every pre-existing test passes, except the edits named in Phase 4 (wizard Zen fixture) and Phase 5 (Kilo gating table); `TestListModelCatalog_RecommendedMatchesListAvailable` |
+| A1 | Behaviour the MADR keeps is unchanged | every pre-existing test passes, except the edits named in Phase 2 (`TestListKiloModels_MetadataCuration`, 2026-09-26 deviation), Phase 4 (wizard Zen fixture) and Phase 5 (Kilo gating table); `TestListModelCatalog_RecommendedMatchesListAvailable` |
 | A2 | §3 eligibility, including unknowns, boundaries and the epoch rule | `TestRankRecommended_Eligibility`, `TestKiloCandidate_Fields`; `p2-drop-reasoning`, `p2-epoch-as-date` |
 | A3 | §4 ordering: signal, small, blend weights, capable order, diversity with `~`, fill | Phase 2 order tests; `p2-cost-only`, `p2-unknown-cost-zero`, `p2-small-ignored`, `p2-capable-as-utility`, `p2-no-cap`, `p2-tilde` |
 | A4 | Kilo ranks from its own listing; the 8B and non-reasoning models leave the six but stay in `Usable` | `TestListModelCatalog_KiloRanksByProfile`; `p2-kilo-today-order` |
@@ -2058,6 +2082,8 @@ changes.
   lists only);
 * `llmprovider/kilo.go`, `llmprovider/chatcompletions.go`,
   `llmprovider/constants.go` (one comment), `llmprovider/opencode.go`;
+* `llmprovider/discovery_test.go` (`TestListKiloModels_MetadataCuration`
+  only; 2026-09-26 deviation),
 * `llmprovider/kilo_test.go` (the gating table and one new test),
   `llmprovider/opencode_test.go` (one new test),
   `llmprovider/live_gateways_test.go` (three new tests);
@@ -2073,6 +2099,9 @@ changes.
 
 | Date | Phase | Finding | Decision | Files added to phase |
 |---|---|---|---|---|
+| 2026-09-26 | 2 | `TestListKiloModels_MetadataCuration` (`discovery_test.go:474-509`, file untouched, passing at the baseline) failed: `got [org/cheap org/vlm org/dear], want [org/cheap org/vlm org/dear kilo-auto/variable]`. Nothing in its fixture is eligible, so the fill supplies the list, and MADR §3 item 9 (the maintainer's `kilo-auto` decision, added after E9 was verified) now drops `kilo-auto/variable` from the fill under the utility profile. Phase 2 step 3's "every pre-existing test unmodified" and E9 were not re-checked after that decision. | Maintainer chose "Assert both views". The test calls `ListModelCatalog`. `Usable` keeps the cheapest-first order with `"-1"` last: `org/cheap, org/vlm, org/dear, kilo-auto/variable`, preserving the price-trap coverage. `Recommended` is `org/cheap, org/vlm, org/dear`, with no `kilo-auto/*` id. No MADR amendment: MADR §4 already says the fill skips §3 item 9. | `llmprovider/discovery_test.go` |
+| 2026-09-26 | 2 | The phase gate's `make lint` failed: `model_ranking.go:40:76: string deepseek-v4-flash has 4 occurrences, make it a constant (goconst)`. Not pre-existing: the baseline and Phase 1 gates reported `0 issues.` goconst counts test files but reports outside them. The four occurrences were §1.3's gate list, `StaticOpencodeGo` (`models_catalog.go:82`), and the two Go-gate eligibility rows. The route table's map keys are not counted. | Maintainer chose "Name the id". `model_ranking.go` declares `opencodeDeepSeekV4Flash = "deepseek-v4-flash"`. `opencodeGoRegionGated`, the eligibility rows, and later phases' tests use it wherever that id is needed as a Go string: Phase 3's Go-gate assertions and Phase 4's static-criteria gate list. No MADR amendment (implementation detail). | none (same files) |
+| 2026-09-26 | 2 | Re-running the gate after that fix: `string deepseek-v4-pro has 3 occurrences, make it a constant (goconst)`, again at the gate list. The id's other occurrences are pre-existing test literals (`opencode_test.go`, `chatcompletions_test.go`, `opencode_route_test.go`) and route-table map keys. goconst counts test literals but reports only outside test files, so the gate list is the first reportable occurrence. | Maintainer chose "Name all four gated ids". `model_ranking.go` declares `opencodeDeepSeekV41Flash`, `opencodeDeepSeekFlash`, `opencodeDeepSeekV4Flash` and `opencodeDeepSeekV4Pro`, and builds `opencodeGoRegionGated` only from them. New tests that need a gated id use the constant; pre-existing tests keep their literals. No MADR amendment. | none (same files) |
 
 ## 11. Execution record
 
@@ -2125,7 +2154,10 @@ repository.
   computed by the reference simulation, from fixtures mirroring the Go tests.
 * **E9 — Existing Kilo fixture:** it has no `reasoning` parameter, so nothing
   in it is eligible, and the fill reproduces today's
-  `org/cheap, org/vlm, org/dear, kilo-auto/variable`.
+  `org/cheap, org/vlm, org/dear, kilo-auto/variable`. **Superseded by the
+  2026-09-26 deviation (§10):** that held before the maintainer's `kilo-auto`
+  decision. Under MADR §3 item 9 the fill yields
+  `org/cheap, org/vlm, org/dear`.
 * **E10 — Wizard search:** the matcher results quoted in Phase 4, measured
   with `SearchModels` on the new fixture ids.
 * **E11 — Consumers:** a search of prepare-commit-msg, mcp-server-magictools

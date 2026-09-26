@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -473,19 +474,29 @@ const kiloListingFixture = `{"data":[
 
 // TestListKiloModels_MetadataCuration asserts both documented traps and the
 // policy exclusion: training-on-prompts and non-tool models are dropped, input
-// must contain text and output must be exactly text (MADR 0009 §1b),
-// survivors are cheapest-first, and "-1" variable pricing sorts LAST.
+// must contain text and output must be exactly text (MADR 0009 §1b), usable
+// models are cheapest-first, and "-1" variable pricing sorts LAST. Nothing in
+// the fixture advertises reasoning, so the recommended list is the fill, which
+// skips kilo-auto/* under the utility profile (MADR 0010 §3 item 9).
 func TestListKiloModels_MetadataCuration(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(kiloListingFixture))
 	}))
 	defer srv.Close()
 
-	models, err := ListAvailableModels(context.Background(), ProviderKilo, "k", WithBaseURL(srv.URL))
+	cat, err := ListModelCatalog(context.Background(), ProviderKilo, "k", WithBaseURL(srv.URL))
 	if err != nil {
-		t.Fatalf("ListAvailableModels: %v", err)
+		t.Fatalf("ListModelCatalog: %v", err)
 	}
+	wantUsable := []string{"org/cheap", "org/vlm", "org/dear", "kilo-auto/variable"}
+	if !slices.Equal(cat.Usable, wantUsable) {
+		t.Fatalf("Usable = %v, want %v (cheapest first, \"-1\" last)", cat.Usable, wantUsable)
+	}
+	models := cat.Recommended
 	for _, m := range models {
+		if strings.HasPrefix(m, "kilo-auto/") {
+			t.Errorf("utility Recommended must not contain %q (MADR 0010 §3 item 9)", m)
+		}
 		switch m {
 		case "org/painter":
 			t.Error("model whose output is not exactly text must be dropped")
@@ -497,14 +508,9 @@ func TestListKiloModels_MetadataCuration(t *testing.T) {
 			t.Error("model without tools in supported_parameters must be dropped")
 		}
 	}
-	want := []string{"org/cheap", "org/vlm", "org/dear", "kilo-auto/variable"}
-	if len(models) != len(want) {
-		t.Fatalf("got %v, want %v", models, want)
-	}
-	for i := range want {
-		if models[i] != want[i] {
-			t.Fatalf("order = %v, want %v (cheapest first, \"-1\" last)", models, want)
-		}
+	want := []string{"org/cheap", "org/vlm", "org/dear"}
+	if !slices.Equal(models, want) {
+		t.Fatalf("Recommended = %v, want %v", models, want)
 	}
 }
 
