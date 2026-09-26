@@ -447,6 +447,10 @@ func fetchOpencodeUsable(ctx context.Context, gateway, apiKey string, cfg Provid
 // onlyText reports whether a modality list is exactly ["text"].
 func onlyText(mods []string) bool { return len(mods) == 1 && mods[0] == jsonKeyText }
 
+// hasText reports whether a modality list includes "text". A model that also
+// accepts images or files still serves a text prompt (MADR 0009 §1b).
+func hasText(mods []string) bool { return slices.Contains(mods, jsonKeyText) }
+
 // listHuggingFaceModels fetches the router catalog and curates it using the
 // metadata Hugging Face publishes. The endpoint is PUBLIC (200 with no
 // credential, verified 2026-08-29), so the Authorization header is optional.
@@ -459,7 +463,9 @@ func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfi
 	return recommendedOf(modelCatalogFor(ctx, ProviderHuggingFace, apiKey, cfg))
 }
 
-// fetchHuggingFaceUsable returns the usable router models, fastest first.
+// fetchHuggingFaceUsable returns the usable router models, fastest first: input
+// must include text and output must be exactly text (MADR 0009 §1b), and at
+// least one provider offering must be live.
 func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := huggingFaceBaseURL
 	if cfg.BaseURL != "" {
@@ -510,7 +516,7 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 	}
 	var ranked []scored
 	for _, m := range result.Data {
-		if !onlyText(m.Architecture.InputModalities) || !onlyText(m.Architecture.OutputModalities) {
+		if !hasText(m.Architecture.InputModalities) || !onlyText(m.Architecture.OutputModalities) {
 			continue
 		}
 		if !isUsableHuggingFaceModel(m.ID) {
@@ -635,7 +641,9 @@ func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]s
 	return recommendedOf(modelCatalogFor(ctx, ProviderKilo, apiKey, cfg))
 }
 
-// kiloUsable returns the usable Kilo models, cheapest first.
+// kiloUsable returns the usable Kilo models, cheapest first: input must include
+// text and output must be exactly text (MADR 0009 §1b), tools must be supported,
+// and the training policy applies.
 func kiloUsable(entries []kiloCatalogEntry) []string {
 	type priced struct {
 		id    string
@@ -643,7 +651,7 @@ func kiloUsable(entries []kiloCatalogEntry) []string {
 	}
 	var ranked []priced
 	for _, m := range entries {
-		if !onlyText(m.Architecture.InputModalities) || !onlyText(m.Architecture.OutputModalities) {
+		if !hasText(m.Architecture.InputModalities) || !onlyText(m.Architecture.OutputModalities) {
 			continue
 		}
 		if m.MayTrainOnYourPrompts { // POLICY — see isUsableKiloModel

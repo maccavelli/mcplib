@@ -303,3 +303,29 @@ func TestListModelCatalog_Errors(t *testing.T) {
 		t.Error("nil TokenSource: want an error")
 	}
 }
+
+// TestListModelCatalog_InputModalityContainsText pins MADR 0009 §1b for both
+// metadata-driven gateways: input containing text is admitted, output must be
+// exactly text, and input without text is rejected.
+func TestListModelCatalog_InputModalityContainsText(t *testing.T) {
+	for _, tc := range []catalogCase{
+		{ProviderHuggingFace, "k", hfListingFixture},
+		{ProviderKilo, "k", kiloListingFixture},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			srv := serveBody(t, tc.body)
+			cat, err := ListModelCatalog(context.Background(), tc.provider, tc.key, WithBaseURL(srv.URL))
+			if err != nil {
+				t.Fatalf("ListModelCatalog: %v", err)
+			}
+			if !slices.Contains(cat.Usable, "org/vlm") {
+				t.Errorf("org/vlm (text+image in, text out) missing from Usable %v", cat.Usable)
+			}
+			for _, id := range []string{"org/painter", "org/listener"} {
+				if slices.Contains(cat.Usable, id) {
+					t.Errorf("%s must be rejected, Usable = %v", id, cat.Usable)
+				}
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -353,8 +354,10 @@ func TestListAvailableModels_OpencodeFallback(t *testing.T) {
 }
 
 // hfListingFixture mirrors the real /v1/models shape. It deliberately contains
-// a vision-language model, a model whose only provider is not live, and three
-// text models with differing throughput so ordering can be asserted.
+// a vision-language model (text+image in, text out: admitted since MADR 0009
+// §1b), a model whose only provider is not live, an image-generating model and
+// an audio-only-input model (both rejected), and three text models with
+// differing throughput so ordering can be asserted.
 const hfListingFixture = `{"object":"list","data":[
  {"id":"org/vlm","architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
   "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":999,"first_token_latency_ms":10}]},
@@ -365,12 +368,17 @@ const hfListingFixture = `{"object":"list","data":[
  {"id":"org/fast","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
   "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":300,"first_token_latency_ms":100}]},
  {"id":"org/mid","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
-  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":150,"first_token_latency_ms":400}]}]}`
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":150,"first_token_latency_ms":400}]},
+ {"id":"org/painter","architecture":{"input_modalities":["text"],"output_modalities":["text","image"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":500,"first_token_latency_ms":10}]},
+ {"id":"org/listener","architecture":{"input_modalities":["audio"],"output_modalities":["text"]},
+  "providers":[{"provider":"a","status":"live","supports_tools":true,"throughput":400,"first_token_latency_ms":10}]}]}`
 
 // TestListHuggingFaceModels_MetadataCuration proves the curation is driven by
-// published metadata rather than name heuristics: vision-language and non-live
-// models are dropped, and survivors come back fastest-first. The ordering
-// assertion also proves the nil rankFn preserves the caller's order.
+// published metadata rather than name heuristics: input must contain text and
+// output must be exactly text (MADR 0009 §1b), non-live models are dropped, and
+// survivors come back fastest-first. The ordering assertion also proves the
+// nil rankFn preserves the caller's order.
 func TestListHuggingFaceModels_MetadataCuration(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(hfListingFixture))
@@ -381,15 +389,20 @@ func TestListHuggingFaceModels_MetadataCuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAvailableModels: %v", err)
 	}
+	if !slices.Contains(models, "org/vlm") {
+		t.Error("text+image-input, text-output model must be admitted (MADR 0009 §1b)")
+	}
 	for _, m := range models {
-		if m == "org/vlm" {
-			t.Error("vision-language model must be dropped via architecture.input_modalities")
-		}
-		if m == "org/not-live" {
+		switch m {
+		case "org/not-live":
 			t.Error("model with no live provider must be dropped")
+		case "org/painter":
+			t.Error("model whose output is not exactly text must be dropped")
+		case "org/listener":
+			t.Error("model whose input lacks text must be dropped")
 		}
 	}
-	want := []string{"org/fast", "org/mid", "org/slow"}
+	want := []string{"org/vlm", "org/fast", "org/mid", "org/slow"}
 	if len(models) != len(want) {
 		t.Fatalf("got %v, want %v", models, want)
 	}
@@ -436,8 +449,10 @@ func TestListAvailableModels_HuggingFaceFallback(t *testing.T) {
 }
 
 // kiloListingFixture mirrors the real Kilo catalog: OpenRouter shape plus Kilo's
-// extensions. It contains a vision model, a training-on-prompts model, a
-// non-tool model, and three priced text models including the "-1" variable price.
+// extensions. It contains a vision model (text+image in, text out: admitted
+// since MADR 0009 §1b), a training-on-prompts model, a non-tool model, an
+// image-generating model and an audio-only-input model (both rejected), and
+// three priced text models including the "-1" variable price.
 const kiloListingFixture = `{"data":[
  {"id":"org/vlm","architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
   "pricing":{"completion":"0.000001"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false},
@@ -450,10 +465,15 @@ const kiloListingFixture = `{"data":[
  {"id":"org/cheap","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
   "pricing":{"completion":"0.0000005"},"supported_parameters":["tools","tool_choice"],"mayTrainOnYourPrompts":false},
  {"id":"kilo-auto/variable","architecture":{"input_modalities":["text"],"output_modalities":["text"]},
-  "pricing":{"completion":"-1"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false}]}`
+  "pricing":{"completion":"-1"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false},
+ {"id":"org/painter","architecture":{"input_modalities":["text"],"output_modalities":["text","image"]},
+  "pricing":{"completion":"0.0000001"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false},
+ {"id":"org/listener","architecture":{"input_modalities":["audio"],"output_modalities":["text"]},
+  "pricing":{"completion":"0.0000001"},"supported_parameters":["tools"],"mayTrainOnYourPrompts":false}]}`
 
 // TestListKiloModels_MetadataCuration asserts both documented traps and the
-// policy exclusion: vision, training-on-prompts and non-tool models are dropped,
+// policy exclusion: training-on-prompts and non-tool models are dropped, input
+// must contain text and output must be exactly text (MADR 0009 §1b),
 // survivors are cheapest-first, and "-1" variable pricing sorts LAST.
 func TestListKiloModels_MetadataCuration(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -467,15 +487,17 @@ func TestListKiloModels_MetadataCuration(t *testing.T) {
 	}
 	for _, m := range models {
 		switch m {
-		case "org/vlm":
-			t.Error("vision-language model must be dropped")
+		case "org/painter":
+			t.Error("model whose output is not exactly text must be dropped")
+		case "org/listener":
+			t.Error("model whose input lacks text must be dropped")
 		case "org/trains":
 			t.Error("mayTrainOnYourPrompts model must be dropped (policy)")
 		case "org/no-tools":
 			t.Error("model without tools in supported_parameters must be dropped")
 		}
 	}
-	want := []string{"org/cheap", "org/dear", "kilo-auto/variable"}
+	want := []string{"org/cheap", "org/vlm", "org/dear", "kilo-auto/variable"}
 	if len(models) != len(want) {
 		t.Fatalf("got %v, want %v", models, want)
 	}

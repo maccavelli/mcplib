@@ -1158,6 +1158,52 @@ p1-control: expect=pass exit=0 OK []
   `curateOpenAI`, `curateClaude`, `curateGrok`, `curateHuggingFace` and
   `curateKilo`. The OpenCode curation is a closure over the gateway.
 
+Commit: `6aa41db`.
+
+### Phase 1b — complete (2026-09-26)
+
+**Red run:**
+`go test -count=1 -run 'MetadataCuration|InputModalityContainsText' ./llmprovider`
+exited 1. The first attempt failed to compile (`undefined: slices`) until
+`discovery_test.go` imported `slices`, which the rewritten test needs. The
+assertion failures:
+
+```
+--- FAIL: TestListModelCatalog_InputModalityContainsText/huggingface
+    discovery_catalog_test.go:322: org/vlm (text+image in, text out) missing from Usable [org/fast org/mid org/slow]
+--- FAIL: TestListModelCatalog_InputModalityContainsText/kilo
+    discovery_catalog_test.go:322: org/vlm (text+image in, text out) missing from Usable [org/cheap org/dear kilo-auto/variable]
+--- FAIL: TestListHuggingFaceModels_MetadataCuration
+    discovery_test.go:407: got [org/fast org/mid org/slow], want [org/vlm org/fast org/mid org/slow]
+--- FAIL: TestListKiloModels_MetadataCuration
+    discovery_test.go:502: got [org/cheap org/dear kilo-auto/variable], want [org/cheap org/vlm org/dear kilo-auto/variable]
+```
+
+**Green:** the same command, and `go test -count=1 ./llmprovider ./wizard`,
+both `ok`.
+
+**Live evidence (recorded, not gated):** the scratch program called
+`ListModelCatalog` anonymously.
+* Kilo: `live=true usable=284 recommended=[kilo-auto/small kilo-auto/efficient
+  kilo-auto/balanced meta-llama/llama-3.1-8b-instruct openai/gpt-oss-20b
+  rekaai/reka-edge]`. `kilo-auto/small`, `/efficient` and `/balanced` are all
+  in `Usable`.
+* Hugging Face: `live=true usable=131`. `zai-org/GLM-5.3-Flash` is in `Usable`
+  and in `Recommended`.
+
+This matches MADR 0009 Context §5 exactly, so there is no deviation.
+
+**Mutation proofs:** `mut=0`.
+
+```
+p1b-exact-text-input: expect=fail exit=1 OK [InputModalityContainsText, HuggingFace MetadataCuration, Kilo MetadataCuration]
+p1b-output-relaxed: expect=fail exit=1 OK [InputModalityContainsText, HuggingFace MetadataCuration, Kilo MetadataCuration]
+p1b-control: expect=pass exit=0 OK []
+3/3 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (7/7 checks)`.
+
 ## Appendix A — `phase_gate.py`
 
 Write to `$SCRATCH/phase_gate.py`. It was proven on 2026-09-25: it passed the
