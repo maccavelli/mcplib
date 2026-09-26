@@ -61,55 +61,51 @@ var (
 		"claude-sonnet-4-20250514",
 	}
 
-	// StaticOpencodeZen: fast/cheap first across all four gateway routes.
-	// Verified present in GET https://opencode.ai/zen/v1/models on 2026-08-28.
-	// Deliberately excludes qwen3.7-max/qwen3.7-plus: they appear in the docs
-	// endpoint table but NOT in the live listing.
+	// StaticOpencodeZen: MADR 0010 §7's utility six, ranked from the
+	// 2026-09-26 Zen listing and models.opencode.ai metadata. Routes verified
+	// against api.json's npm packages on 2026-09-26.
 	StaticOpencodeZen = []string{
-		"gpt-5.4-nano",          // responses
+		"deepseek-v4.1-flash",   // chat_completions
+		"qwen3.8-flash",         // messages
+		"glm-5.3-flash",         // chat_completions
+		"deepseek-v4-flash",     // chat_completions
 		"gemini-3.5-flash-lite", // google
-		"gpt-5.4-mini",          // responses
-		"claude-haiku-4-5",      // messages
-		"gemini-3.7-flash",      // google
-		"kimi-k2.6",             // chat_completions
+		"gemini-3.8-flash",      // google
 	}
 
-	// StaticOpencodeGo: Go carries no Claude or Gemini models.
-	// Verified present in GET https://opencode.ai/zen/go/v1/models on 2026-08-28.
+	// StaticOpencodeGo: MADR 0010 §7's utility six (2026-09-26). It excludes
+	// the region-gated DeepSeek models and the -contributor models.
 	StaticOpencodeGo = []string{
-		"glm-5.3-flash",     // chat_completions
-		"qwen3.8-flash",     // messages
-		"deepseek-v4-flash", // chat_completions
-		"kimi-k2.6",         // chat_completions
-		"gpt-5.6-luna",      // responses
-		"grok-4.6",          // responses
+		"mimo-v2.6-flash", // chat_completions
+		"qwen3.8-flash",   // messages
+		"glm-5.3-flash",   // chat_completions
+		"gpt-6-luna",      // responses
+		"mimo-v2.6-pro",   // chat_completions
+		"hy3",             // chat_completions
 	}
 
-	// StaticHuggingFace: fallback only — discovery is metadata-driven. Every ID
-	// confirmed present in GET https://router.huggingface.co/v1/models on
-	// 2026-08-29, text->text, tool-capable, and served by >= 4 partner providers
-	// (redundancy is the best available proxy for durability in an open catalog).
+	// StaticHuggingFace: fallback only — discovery is metadata-driven. MADR
+	// 0010 §7's utility six, from the 2026-09-26 router listing and
+	// models.opencode.ai metadata: reasoning-capable, paid, recent.
 	StaticHuggingFace = []string{
-		"openai/gpt-oss-20b",                 // 7 providers, 763 tok/s, $0.50/M out
-		"openai/gpt-oss-120b",                // 11 providers, 1106 tok/s, $0.75/M out
-		"meta-llama/Llama-3.1-8B-Instruct",   // 4 providers, cheapest at $0.06/M out
-		"zai-org/GLM-5.3-Flash",              // 5 providers, 144 tok/s
-		"deepseek-ai/DeepSeek-V4-Flash-0731", // 5 providers, all tool-capable
-		"zai-org/GLM-5.2",                    // 8 providers
+		"deepseek-ai/DeepSeek-V4-Flash-0731",
+		"zai-org/GLM-5.3-Flash",
+		"deepseek-ai/DeepSeek-V4.1-Flash",
+		"thinkingmachines/Inkling-Small",
+		"stepfun-ai/Step-3.7-Flash",
+		"stepfun-ai/Step-3.5-Flash",
 	}
 
-	// StaticKilo: fallback only — discovery is metadata-driven. Every ID
-	// confirmed present in GET https://api.kilo.ai/api/gateway/models on
-	// 2026-08-29, all tool-capable. Five are kilo-auto/* managed tiers, chosen
-	// because Kilo maintains what they point at — the strongest churn resistance
-	// available in a 366-model open catalog.
+	// StaticKilo: fallback only — discovery is metadata-driven. MADR 0010 §7's
+	// utility six, from the 2026-09-26 listing: reasoning-capable, paid,
+	// recent, at most two per vendor, none training on prompts.
 	StaticKilo = []string{
-		"kilo-auto/free",                     // free; also the live-test target
-		"kilo-auto/small",                    // cheapest managed tier
-		"kilo-auto/efficient",                // cost-optimised
-		"kilo-auto/balanced",                 // default quality tier
-		"meta-llama/llama-3.1-8b-instruct",   // cheapest concrete model, $0.04/M out
-		"nvidia/nemotron-3.5-lightning:free", // free fallback, supports reasoning_effort
+		"deepseek/deepseek-v4.1-flash",
+		"z-ai/glm-5.3-flash",
+		"google/gemini-3.8-flash",
+		"google/gemini-3.6-flash",
+		"meta/muse-spark-1.2",
+		"thinkingmachines/inkling",
 	}
 
 	// StaticGrok: fast/flagship models first.

@@ -3,7 +3,10 @@ package llmprovider
 import (
 	"encoding/json"
 	"math"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,6 +223,41 @@ func TestRankGroup(t *testing.T) {
 	for _, tc := range tests {
 		if got := rankGroup(tc.id, tc.family); got != tc.want {
 			t.Errorf("rankGroup(%q, %q) = %q, want %q", tc.id, tc.family, got, tc.want)
+		}
+	}
+}
+
+// TestStaticOpenCatalogs_UtilityCriteria pins MADR 0010 §5: the static
+// fallbacks of the open catalogs meet the utility criteria of §3 — six ids,
+// none free, no dense model of 14B or less, no -contributor, and no
+// region-gated id on Go.
+func TestStaticOpenCatalogs_UtilityCriteria(t *testing.T) {
+	dense := regexp.MustCompile(`(?i)(^|[^a-z0-9])(\d+(?:\.\d+)?)b([^a-z0-9]|$)`)
+	moe := regexp.MustCompile(`(?i)-a\d+(?:\.\d+)?b\b`)
+	gated := []string{opencodeDeepSeekV41Flash, opencodeDeepSeekFlash, opencodeDeepSeekV4Flash, opencodeDeepSeekV4Pro}
+	for name, list := range map[string][]string{
+		"StaticKilo": StaticKilo, "StaticOpencodeZen": StaticOpencodeZen,
+		"StaticOpencodeGo": StaticOpencodeGo, "StaticHuggingFace": StaticHuggingFace,
+	} {
+		if len(list) != 6 {
+			t.Errorf("%s has %d entries, want 6", name, len(list))
+		}
+		for _, id := range list {
+			if strings.Contains(id, ":free") || strings.Contains(id, "-free") || id == "kilo-auto/free" {
+				t.Errorf("%s: %q is a free model", name, id)
+			}
+			if strings.Contains(id, "-contributor") {
+				t.Errorf("%s: %q requires training consent", name, id)
+			}
+			for _, m := range dense.FindAllStringSubmatch(id, -1) {
+				size, err := strconv.ParseFloat(m[2], 64)
+				if err == nil && size <= 14 && !moe.MatchString(id) {
+					t.Errorf("%s: %q is a dense model of %gB", name, id, size)
+				}
+			}
+			if name == "StaticOpencodeGo" && slices.Contains(gated, id) {
+				t.Errorf("%s: %q is region-gated on OpenCode Go", name, id)
+			}
 		}
 	}
 }

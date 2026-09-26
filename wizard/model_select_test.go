@@ -16,8 +16,8 @@ import (
 // zenSearchIDs is an OpenCode Zen listing: the six StaticOpencodeZen ids (so
 // Recommended is exactly that catalog) plus two ids that only search reaches.
 var zenSearchIDs = []string{
-	"gpt-5.4-nano", "gemini-3.5-flash-lite", "gpt-5.4-mini", "claude-haiku-4-5",
-	"gemini-3.7-flash", "kimi-k2.6", "claude-sonnet-5", "claude-opus-5",
+	"deepseek-v4.1-flash", "qwen3.8-flash", "glm-5.3-flash", "deepseek-v4-flash",
+	"gemini-3.5-flash-lite", "gemini-3.8-flash", "claude-sonnet-5", "claude-opus-5",
 }
 
 func zenListing(ids []string) string {
@@ -297,7 +297,7 @@ func TestConfigureLLM_FallbackSearch(t *testing.T) {
 	srv := zenServer(t, http.StatusOK, zenListing(zenSearchIDs))
 	f := &fakePrompter{
 		t: t, selects: []int{providerIdx(t, llmprovider.ProviderOpencodeZen), 0},
-		inputs: []string{srv.URL, "haiku", "claude"}, secrets: []string{testKey},
+		inputs: []string{srv.URL, "qwen", "claude"}, secrets: []string{testKey},
 		multiSelects: [][]int{{0, 1}}, confirms: []bool{false},
 	}
 	opts := zenOptions()
@@ -306,8 +306,8 @@ func TestConfigureLLM_FallbackSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
-	if res.Model != "claude-haiku-4-5" {
-		t.Errorf("Model = %q, want claude-haiku-4-5", res.Model)
+	if res.Model != "qwen3.8-flash" {
+		t.Errorf("Model = %q, want qwen3.8-flash", res.Model)
 	}
 	wantMenu := []string{
 		llmprovider.ModelLabel(llmprovider.ProviderOpencodeZen, "claude-opus-5"),
@@ -329,7 +329,7 @@ func TestConfigureLLM_FallbackSearchLoops(t *testing.T) {
 	srv := zenServer(t, http.StatusOK, zenListing(zenSearchIDs))
 	f := &fakePrompter{
 		t: t, selects: []int{providerIdx(t, llmprovider.ProviderOpencodeZen), 0},
-		inputs: []string{srv.URL, "haiku", "claude", ""}, secrets: []string{testKey},
+		inputs: []string{srv.URL, "qwen", "claude", ""}, secrets: []string{testKey},
 		multiSelects: [][]int{{0}, {0}}, confirms: []bool{true},
 	}
 	opts := zenOptions()
@@ -338,7 +338,7 @@ func TestConfigureLLM_FallbackSearchLoops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
-	if want := []string{"claude-opus-5", "gpt-5.4-nano"}; !slices.Equal(res.Fallbacks, want) {
+	if want := []string{"claude-opus-5", "deepseek-v4.1-flash"}; !slices.Equal(res.Fallbacks, want) {
 		t.Errorf("Fallbacks = %v, want %v", res.Fallbacks, want)
 	}
 	second := labels(f.seenMultiSelectItems[1])
@@ -346,7 +346,7 @@ func TestConfigureLLM_FallbackSearchLoops(t *testing.T) {
 		t.Errorf("second menu = %v, want 5 rows", second)
 	}
 	for _, excluded := range []string{
-		llmprovider.ModelLabel(llmprovider.ProviderOpencodeZen, "claude-haiku-4-5"),
+		llmprovider.ModelLabel(llmprovider.ProviderOpencodeZen, "qwen3.8-flash"),
 		llmprovider.ModelLabel(llmprovider.ProviderOpencodeZen, "claude-opus-5"),
 	} {
 		if slices.Contains(second, excluded) {
@@ -377,5 +377,49 @@ func TestSelectFallbacks_ReturnShape(t *testing.T) {
 	}
 	if got == nil || len(got) != 0 {
 		t.Errorf("empty MultiSelect: got %#v, want a non-nil empty slice", got)
+	}
+}
+
+// kiloProfileEntry is one text-only, tool- and reasoning-capable Kilo listing
+// entry, created ageDays ago on the real clock.
+func kiloProfileEntry(id, prompt, completion string, bench float64, ageDays int) string {
+	created := time.Now().AddDate(0, 0, -ageDays).Unix()
+	return fmt.Sprintf(`{"id":%q,"name":%q,"created":%d,"context_length":262144,`+
+		`"architecture":{"input_modalities":["text"],"output_modalities":["text"]},`+
+		`"pricing":{"prompt":%q,"completion":%q},"terminalBench":{"overallScore":%g},`+
+		`"supported_parameters":["tools","reasoning"],"mayTrainOnYourPrompts":false}`,
+		id, id, created, prompt, completion, bench)
+}
+
+// TestConfigureLLM_ProfileReachesListing pins MADR 0010 §1: Options.Profile
+// reaches the listing, so a blank search offers each profile's first choice.
+func TestConfigureLLM_ProfileReachesListing(t *testing.T) {
+	listing := `{"data":[` + kiloProfileEntry("a/flash", "0.0000001", "0.0000004", 0.5, 10) + "," +
+		kiloProfileEntry("b/pro", "0.000005", "0.000025", 0.9, 20) + `]}`
+	for _, tc := range []struct {
+		name    string
+		profile llmprovider.ModelProfile
+		want    string
+	}{
+		{"utility (zero value)", llmprovider.ProfileUtility, "a/flash"},
+		{"capable", llmprovider.ProfileCapable, "b/pro"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withEnv(t, nil)
+			srv := zenServer(t, http.StatusOK, listing)
+			f := &fakePrompter{
+				t: t, selects: []int{providerIdx(t, llmprovider.ProviderKilo), 0},
+				inputs: []string{srv.URL, ""}, secrets: []string{testKey},
+			}
+			opts := zenOptions()
+			opts.Profile = tc.profile
+			res, err := ConfigureLLM(context.Background(), f, opts)
+			if err != nil {
+				t.Fatalf("ConfigureLLM: %v", err)
+			}
+			if res.Model != tc.want {
+				t.Errorf("Model = %q, want %q", res.Model, tc.want)
+			}
+		})
 	}
 }

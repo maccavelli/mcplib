@@ -53,6 +53,11 @@ type Options struct {
 	DiscoverLimit time.Duration
 	// NeedFallbacks collects additional models after the primary.
 	NeedFallbacks bool
+	// Profile selects how the open catalogs (Kilo, OpenCode Zen and Go,
+	// Hugging Face) rank the recommended models. The zero value,
+	// llmprovider.ProfileUtility, suits short frequent tasks such as commit
+	// messages; llmprovider.ProfileCapable suits reasoning-heavy tiers.
+	Profile llmprovider.ModelProfile
 	// LookupEnv reads an environment variable. Nil uses os.Getenv. Consumers
 	// inject this to drive the flow deterministically in their own tests.
 	LookupEnv func(string) string
@@ -280,7 +285,7 @@ func discoverModels(
 	dCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
-	var opts []llmprovider.ProviderOption
+	opts := []llmprovider.ProviderOption{llmprovider.WithModelProfile(o.Profile)}
 	if res.BaseURL != "" {
 		opts = append(opts, llmprovider.WithBaseURL(res.BaseURL))
 	}
