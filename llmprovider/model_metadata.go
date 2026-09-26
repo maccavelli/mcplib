@@ -45,8 +45,15 @@ type modelMetadata struct {
 	Limit     struct {
 		Context int `json:"context"`
 	} `json:"limit"`
-	ReleaseDate string `json:"release_date"`
-	Status      string `json:"status"`
+	ReleaseDate      string                 `json:"release_date"`
+	Status           string                 `json:"status"`
+	ReasoningOptions []modelReasoningOption `json:"reasoning_options"`
+}
+
+// modelReasoningOption is one models.dev reasoning_options entry.
+type modelReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values"`
 }
 
 // modelMetadataSection is one provider's entry in the document.
@@ -56,6 +63,17 @@ type modelMetadataSection struct {
 
 // modelMetadataDoc maps a document key to its models by id.
 type modelMetadataDoc map[string]map[string]modelMetadata
+
+// reasoningEfforts returns the effort values the document lists for one
+// model's reasoning_options, or nil.
+func (d modelMetadataDoc) reasoningEfforts(provider, model string) []string {
+	for _, o := range d[modelMetadataKey(provider)][model].ReasoningOptions {
+		if o.Type == jsonKeyEffort {
+			return o.Values
+		}
+	}
+	return nil
+}
 
 // modelMetadataKey returns the document key for a provider, or "".
 func modelMetadataKey(provider string) string {

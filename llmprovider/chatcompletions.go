@@ -16,7 +16,8 @@ type chatCompletionsOpts struct {
 	// model's supported_parameters, so it is separable from offering the tool.
 	ForceTool bool
 	// ReasoningEffort, when non-empty, is sent as reasoning_effort. OpenCode's
-	// chat route has no portable reasoning parameter and always leaves this "".
+	// chat route sets it only when the model's published reasoning_options
+	// list the configured effort (MADR 0010 §6).
 	ReasoningEffort string
 	// Reasoning, when non-nil, is sent as the OpenRouter-style reasoning
 	// object Kilo reads: {"effort": …} or {"enabled": true}.

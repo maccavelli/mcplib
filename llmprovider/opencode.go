@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -32,6 +33,7 @@ type OpencodeProvider struct {
 	thinkingBudget  int
 	reasoningEffort string
 	route           OpencodeRoute
+	metadataURL     string
 }
 
 // NewOpencode creates an OpenCode gateway provider. gateway must be
@@ -64,6 +66,7 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 		thinkingBudget:  cfg.ThinkingBudget,
 		reasoningEffort: cfg.ReasoningEffort,
 		route:           route,
+		metadataURL:     cfg.ModelMetadataURL,
 	}, nil
 }
 
@@ -219,14 +222,31 @@ func (p *OpencodeProvider) googleBody(input []Item, tool *Tool, thinking bool) m
 	return body
 }
 
-// chatBody delegates to the shared primitive. OpenCode's chat route has no
-// portable reasoning parameter across the DeepSeek/GLM/Kimi/MiniMax families
-// routed there, so ReasoningEffort is deliberately left empty and the thinking
-// path returns a plain generation. Asserted by TestOpencode_Thinking_PerRoute.
-func (p *OpencodeProvider) chatBody(input []Item, tool *Tool) map[string]any {
+// chatReasoningEffort returns the reasoning_effort for the chat route: the
+// configured effort, when this is a thinking call and the model's published
+// reasoning_options list it (MADR 0010 §6); otherwise "". Metadata that is
+// unavailable, disabled or silent on the model sends nothing.
+func (p *OpencodeProvider) chatReasoningEffort(ctx context.Context, thinking bool) string {
+	if !thinking || p.reasoningEffort == "" {
+		return ""
+	}
+	doc, err := loadModelMetadata(ctx, ProviderConfig{HTTPClient: p.client, ModelMetadataURL: p.metadataURL})
+	if err != nil || !slices.Contains(doc.reasoningEfforts(p.gateway, p.model), p.reasoningEffort) {
+		return ""
+	}
+	return p.reasoningEffort
+}
+
+// chatBody delegates to the shared primitive. The chat route carries
+// reasoning_effort only when chatReasoningEffort resolves one (MADR 0010 §6);
+// the DeepSeek/GLM/Kimi/MiniMax families routed there share no other
+// portable reasoning parameter. Asserted by TestOpencode_Thinking_PerRoute
+// and TestOpencode_ChatReasoningEffort.
+func (p *OpencodeProvider) chatBody(input []Item, tool *Tool, effort string) map[string]any {
 	return chatCompletionsBody(p.model, p.maxTokens, input, chatCompletionsOpts{
-		Tool:      tool,
-		ForceTool: tool != nil,
+		Tool:            tool,
+		ForceTool:       tool != nil,
+		ReasoningEffort: effort,
 	})
 }
 
@@ -240,7 +260,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	case OpencodeRouteGoogle:
 		body = p.googleBody(input, tool, thinking)
 	case OpencodeRouteChatCompletions:
-		body = p.chatBody(input, tool)
+		body = p.chatBody(input, tool, p.chatReasoningEffort(ctx, thinking))
 	default:
 		return nil, fmt.Errorf("%w: unresolved opencode route for model %q", ErrInvalidRequest, p.model)
 	}

@@ -237,6 +237,64 @@ func TestOpencode_Thinking_PerRoute(t *testing.T) {
 	})
 }
 
+// TestOpencode_ChatReasoningEffort pins MADR 0010 §6 for the chat route:
+// reasoning_effort is sent only on a thinking call with an effort configured
+// that the model's published reasoning_options list.
+func TestOpencode_ChatReasoningEffort(t *testing.T) {
+	enableModelMetadata(t)
+	meta, _ := metadataServer(t, http.StatusOK, `{"opencode":{"models":{"`+opencodeDeepSeekV4Pro+`":{`+
+		`"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","max"]}]}}}}`)
+	tests := []struct {
+		name, model, effort string
+		plain, disabled     bool
+		want                string // "" means reasoning_effort is absent
+	}{
+		{"listed", opencodeDeepSeekV4Pro, "low", false, false, "low"},
+		{"unlisted value", opencodeDeepSeekV4Pro, "medium", false, false, ""},
+		{"uncovered model", "kimi-k2.6", "low", false, false, ""},
+		{"no effort", opencodeDeepSeekV4Pro, "", false, false, ""},
+		{"plain call", opencodeDeepSeekV4Pro, "low", true, false, ""},
+		{"disabled", opencodeDeepSeekV4Pro, "low", false, true, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.disabled {
+				t.Setenv(envDisableModelMetadata, "1")
+			}
+			var body map[string]any
+			srv := captureServer(t, &body, fxOpencodeChat)
+			p, err := NewOpencode(ProviderOpencodeZen, "k", tc.model,
+				WithBaseURL(srv.URL), WithModelMetadataURL(meta.URL), WithReasoningEffort(tc.effort))
+			if err != nil {
+				t.Fatalf("NewOpencode: %v", err)
+			}
+			if p.Route() != OpencodeRouteChatCompletions {
+				t.Fatalf("route = %s, want chat_completions", p.Route())
+			}
+			if tc.plain {
+				_, err = p.Generate(context.Background(), "hi")
+			} else {
+				_, err = p.GenerateThinking(context.Background(), "hi")
+			}
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			got, present := body[jsonKeyReasoningEffort]
+			switch {
+			case tc.want == "" && present:
+				t.Errorf("reasoning_effort = %v, want absent", got)
+			case tc.want != "" && got != tc.want:
+				t.Errorf("reasoning_effort = %v, want %q", got, tc.want)
+			}
+			for _, k := range []string{jsonKeyReasoning, "thinking"} {
+				if _, ok := body[k]; ok {
+					t.Errorf("chat route must not send %q: %v", k, body[k])
+				}
+			}
+		})
+	}
+}
+
 func TestOpencode_ErrorClassification(t *testing.T) {
 	tests := []struct {
 		status  int

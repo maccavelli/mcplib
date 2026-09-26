@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -470,6 +471,44 @@ func TestLive_ModelMetadataDocument(t *testing.T) {
 	m, ok := doc[metadataKeyZen]["glm-5.3-flash"]
 	if !ok || m.Reasoning == nil || !*m.Reasoning {
 		t.Errorf("DRIFT: %s/glm-5.3-flash reasoning = %v (present %v), want true", metadataKeyZen, m.Reasoning, ok)
+	}
+}
+
+// TestLive_OpencodeChatReasoningEffort is MADR 0010 §6's OpenCode gate: for
+// one chat-routed model per utility family, the published reasoning_options
+// list "low" and the gateway accepts reasoning_effort "low".
+func TestLive_OpencodeChatReasoningEffort(t *testing.T) {
+	key := opencodeKey(t)
+	enableModelMetadata(t)
+	for _, model := range []string{opencodeDeepSeekV41Flash, "glm-5.3-flash"} {
+		t.Run(model, func(t *testing.T) {
+			ctx, cancel := liveCtx(t)
+			defer cancel()
+			doc, err := loadModelMetadata(ctx, ApplyOptions(nil))
+			if err != nil {
+				t.Skipf("metadata unreachable: %v", err)
+			}
+			if !slices.Contains(doc.reasoningEfforts(ProviderOpencodeZen, model), effortLow) {
+				t.Fatalf("DRIFT: %s reasoning_options no longer list %q", model, effortLow)
+			}
+			p, err := NewOpencode(ProviderOpencodeZen, key, model, WithReasoningEffort(effortLow), WithMaxTokens(400))
+			if err != nil {
+				t.Fatalf("NewOpencode: %v", err)
+			}
+			if p.Route() != OpencodeRouteChatCompletions {
+				t.Fatalf("DRIFT: %s no longer routes to chat_completions (%s)", model, p.Route())
+			}
+			out, err := p.GenerateThinking(ctx, "Reply with only the word ALPHA")
+			if errors.Is(err, ErrRateLimited) {
+				t.Skipf("gateway transient: %v", err)
+			}
+			if err != nil {
+				t.Fatalf("DRIFT (probed %s): gateway rejected reasoning_effort on %s: %v", wireShapesProbedOnOpencode, model, err)
+			}
+			if strings.TrimSpace(out) == "" {
+				t.Errorf("empty output from %s", model)
+			}
+		})
 	}
 }
 
