@@ -1287,6 +1287,59 @@ p3-control: expect=pass exit=0 OK []
 `globMatches`, `fuzzyModelScore`, `modelTokens` and `tokenPrefixMatch`. The
 locked anchors of §1.4 are verbatim.
 
+Commit: `22a0fbb`.
+
+### Phase 4 — complete (2026-09-26)
+
+**Step 1:** `fakePrompter` gained `seenSelectDefault` and
+`seenMultiSelectItems`. `gofmt -w` realigned the struct, with no behaviour
+change.
+
+**Step 2, observed red:** with only the script change in place,
+`go test -run '^TestConfigureLLM_OtherModelEscapeHatch$' ./wizard` exited 1:
+
+```
+--- FAIL: TestConfigureLLM_OtherModelEscapeHatch (0.00s)
+    configure_test.go:275: ConfigureLLM: wizard: no model entered
+```
+
+This is today's flow reading the blank search line as the manual id, as
+predicted.
+
+**Step 3, red:** `go test -count=1 ./wizard` failed to compile on the new
+constants, exit 1:
+
+```
+wizard/model_select_test.go:82:35: undefined: searchModelsPrompt
+```
+
+**Green:** `go test -count=1 ./wizard`: `ok`, with all new and pre-existing
+tests passing. The only pre-existing test edits are the two step-2 script
+changes, confirmed by `git diff -U0 wizard/configure_test.go`.
+`go test -count=1 ./llmprovider ./wizard`: both `ok`.
+
+**Mutation proofs:** `mut=0`.
+
+```
+p4-search-recommended: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_SearchUsesLiveCorpus (0.00s)']
+p4-primary-not-excluded: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_FallbackSearch (0.00s)']
+p4-no-confirm: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_FallbackSearch (0.00s)']
+p4-confirm-on-blank: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_Fallbacks (0.00s)']
+p4-current-any-provider: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_CurrentModelOnlyForSameProvider (0.00s)']
+p4-cap: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_SearchResultsCapped (0.00s)']
+p4-no-static-notice: expect=fail exit=1 OK ['--- FAIL: TestConfigureLLM_StaticCatalogNotice (0.00s)']
+p4-control: expect=pass exit=0 OK []
+8/8 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (9/9 checks)`.
+
+**Implementation notes:**
+* The unlocked helpers in `model_select.go` are `appendPicks`, which carries
+  the nil-versus-empty return shape, and `matchIDs`.
+* `otherModelLabel` and its comment moved from `configure.go` to
+  `model_select.go`, as §1.5 specifies.
+
 ## Appendix A — `phase_gate.py`
 
 Write to `$SCRATCH/phase_gate.py`. It was proven on 2026-09-25: it passed the

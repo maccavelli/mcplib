@@ -220,7 +220,6 @@ func TestConfigureLLM_OffersEveryDescriptor(t *testing.T) {
 		t:       t,
 		selects: []int{0, 0},
 		secrets: []string{testKey},
-		inputs:  []string{"http://localhost:11434"},
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{}); err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
@@ -268,7 +267,8 @@ func TestConfigureLLM_OtherModelEscapeHatch(t *testing.T) {
 		// provider, then the trailing "Other" entry
 		selects: []int{providerIdx(t, llmprovider.ProviderClaude), len(static)},
 		secrets: []string{testKey},
-		inputs:  []string{"my-custom-model"},
+		// a blank search (MADR 0009 §4), then the manual model id
+		inputs: []string{"", "my-custom-model"},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{})
 	if err != nil {

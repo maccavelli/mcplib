@@ -21,12 +21,14 @@ type fakePrompter struct {
 	secrets      []string
 
 	// Recorded for assertions.
-	seenSelect      []string   // titles
-	seenSelectItems [][]Choice // choices per Select call
-	seenConfirm     []string
-	seenInput       []string
-	seenSecret      []string
-	seenNotify      []string
+	seenSelect           []string   // titles
+	seenSelectItems      [][]Choice // choices per Select call
+	seenSelectDefault    []int      // defaultIdx per Select call
+	seenMultiSelectItems [][]Choice // choices per MultiSelect call
+	seenConfirm          []string
+	seenInput            []string
+	seenSecret           []string
+	seenNotify           []string
 
 	// allText accumulates every string the user could have seen, for the
 	// "a credential must never be displayed" assertion.
@@ -39,6 +41,7 @@ func (f *fakePrompter) Select(title string, choices []Choice, defaultIdx int) (i
 	f.t.Helper()
 	f.seenSelect = append(f.seenSelect, title)
 	f.seenSelectItems = append(f.seenSelectItems, choices)
+	f.seenSelectDefault = append(f.seenSelectDefault, defaultIdx)
 	f.record(title)
 	for _, c := range choices {
 		f.record(c.Label)
@@ -57,6 +60,7 @@ func (f *fakePrompter) Select(title string, choices []Choice, defaultIdx int) (i
 
 func (f *fakePrompter) MultiSelect(title string, choices []Choice, preselected []int) ([]int, error) {
 	f.t.Helper()
+	f.seenMultiSelectItems = append(f.seenMultiSelectItems, choices)
 	f.record(title)
 	for _, c := range choices {
 		f.record(c.Label)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/maccavelli/mcplib/llmprovider"
@@ -129,8 +130,8 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 		res.AccountID = credential.session.AccountID
 	}
 
-	models := discoverModels(ctx, p, d, res, credential.source, o)
-	if len(models) == 0 {
+	cat := discoverModels(ctx, p, d, res, credential.source, o)
+	if len(cat.Recommended) == 0 {
 		// Ollama with nothing installed, or a provider whose listing failed
 		// and which has no static catalog. Let the user type an id rather
 		// than dead-ending the wizard.
@@ -147,11 +148,11 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 		return res, nil
 	}
 
-	if res.Model, err = selectModel(p, d, models, o); err != nil {
+	if res.Model, err = selectModel(p, d, cat, o); err != nil {
 		return Result{}, err
 	}
 	if o.NeedFallbacks {
-		if res.Fallbacks, err = selectFallbacks(p, d, models, res.Model); err != nil {
+		if res.Fallbacks, err = selectFallbacks(p, d, cat, res.Model); err != nil {
 			return Result{}, err
 		}
 	}
@@ -252,8 +253,9 @@ func resolveAPIKey(p Prompter, d llmprovider.ProviderDescriptor, o Options) (str
 	return key, nil
 }
 
-// discoverModels returns the models to offer: the live listing when requested
-// and available, otherwise the descriptor's static catalog.
+// discoverModels returns the catalog to offer: the live listing when requested
+// and available, otherwise the descriptor's static catalog in both views
+// (MADR 0009 §4).
 func discoverModels(
 	ctx context.Context,
 	p Prompter,
@@ -261,11 +263,13 @@ func discoverModels(
 	res Result,
 	source llmprovider.TokenSource,
 	o Options,
-) []string {
-	fallback := d.StaticModels
-	if res.Kind == CredOAuth && d.ID == llmprovider.ProviderOpenAI {
-		fallback = append([]string(nil), llmprovider.StaticOpenAIChatGPT...)
+) llmprovider.ModelCatalog {
+	chatGPT := res.Kind == CredOAuth && d.ID == llmprovider.ProviderOpenAI
+	static := d.StaticModels
+	if chatGPT {
+		static = slices.Clone(llmprovider.StaticOpenAIChatGPT)
 	}
+	fallback := llmprovider.ModelCatalog{Recommended: static, Usable: static}
 	if !o.Discover {
 		return fallback
 	}
@@ -280,14 +284,18 @@ func discoverModels(
 	if res.BaseURL != "" {
 		opts = append(opts, llmprovider.WithBaseURL(res.BaseURL))
 	}
-	listed, err := llmprovider.ListAvailableModelsWithSource(dCtx, d.ID, source, opts...)
-	if err != nil || len(listed) == 0 {
-		if err != nil {
-			p.Notify(LevelWarn, "could not list models for %s (%v); using the built-in catalog", d.Label, err)
-		}
+	cat, err := llmprovider.ListModelCatalogWithSource(dCtx, d.ID, source, opts...)
+	if err != nil {
+		p.Notify(LevelWarn, "could not list models for %s (%v); using the built-in catalog", d.Label, err)
 		return fallback
 	}
-	return listed
+	if len(cat.Recommended) == 0 {
+		return fallback
+	}
+	if !cat.Live && !chatGPT {
+		p.Notify(LevelInfo, "live model listing for %s is unavailable; search covers the built-in catalog only", d.Label)
+	}
+	return cat
 }
 
 func modelChoices(provider string, models []string) []Choice {
@@ -301,58 +309,4 @@ func modelChoices(provider string, models []string) []Choice {
 		out = append(out, Choice{Label: label})
 	}
 	return out
-}
-
-// otherModelLabel is the trailing escape hatch on the model menu. A live
-// listing can lag a newly released model, and the catalog is curated rather
-// than exhaustive, so the user must always be able to name a model directly.
-const otherModelLabel = "Other (enter a model id)"
-
-func selectModel(p Prompter, d llmprovider.ProviderDescriptor, models []string, o Options) (string, error) {
-	defaultIdx := 0
-	for i, m := range models {
-		if m == o.Existing.Model {
-			defaultIdx = i
-		}
-	}
-	choices := append(modelChoices(d.ID, models), Choice{Label: otherModelLabel})
-	idx, err := p.Select(fmt.Sprintf("Choose a %s model:", d.Label), choices, defaultIdx)
-	if err != nil {
-		return "", fmt.Errorf("select model: %w", err)
-	}
-	if idx == len(models) {
-		manual, inputErr := p.Input("Model id", o.Existing.Model)
-		if inputErr != nil {
-			return "", fmt.Errorf("enter model: %w", inputErr)
-		}
-		if manual == "" {
-			return "", fmt.Errorf("wizard: no model entered")
-		}
-		return manual, nil
-	}
-	return models[idx], nil
-}
-
-// selectFallbacks offers the remaining models, excluding the primary.
-func selectFallbacks(p Prompter, d llmprovider.ProviderDescriptor, models []string, primary string) ([]string, error) {
-	var remaining []string
-	for _, m := range models {
-		if m != primary {
-			remaining = append(remaining, m)
-		}
-	}
-	if len(remaining) == 0 {
-		return nil, nil
-	}
-	idxs, err := p.MultiSelect("Choose fallback models (optional):", modelChoices(d.ID, remaining), nil)
-	if err != nil {
-		return nil, fmt.Errorf("select fallbacks: %w", err)
-	}
-	out := make([]string, 0, len(idxs))
-	for _, i := range idxs {
-		if i >= 0 && i < len(remaining) {
-			out = append(out, remaining[i])
-		}
-	}
-	return out, nil
 }
