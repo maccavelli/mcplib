@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// Default gateway base URLs. Both gateways share one credential and one auth
-// scheme (Authorization: Bearer); they differ only in base URL, catalog, and
-// per-model routing.
+// Default gateway base URLs. Both gateways share one credential, sent in the
+// header each route reads (see opencodeKeyHeader, MADR 0009 §1c); they differ
+// only in base URL, catalog, and per-model routing.
 const (
 	opencodeZenBaseURL = "https://opencode.ai/zen/v1"
 	opencodeGoBaseURL  = "https://opencode.ai/zen/go/v1"

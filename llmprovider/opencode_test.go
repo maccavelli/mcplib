@@ -104,26 +104,27 @@ func TestOpencode_Generate_PerRoute(t *testing.T) {
 	}
 }
 
-// TestOpencode_KeyInHeader is the regression guard for MADR correction #5: the
-// gateway takes Bearer on every route and ignores the vendor-native key headers.
+// TestOpencode_KeyInHeader pins MADR 0009 §1c: each Zen/Go route reads the key
+// from its vendor's header, and no route reads the others.
 func TestOpencode_KeyInHeader(t *testing.T) {
-	tests := []struct{ model, fixture string }{
-		{"gpt-5.5", fxOpencodeResponses},
-		{"claude-sonnet-5", fxOpencodeMessages},
-		{"gemini-3.7-flash", fxOpencodeGoogle},
-		{"deepseek-v4-pro", fxOpencodeChat},
+	keyHeaders := []string{"Authorization", "x-api-key", "x-goog-api-key"}
+	tests := []struct{ model, fixture, header, value string }{
+		{"gpt-5.5", fxOpencodeResponses, "Authorization", "Bearer test-key"},
+		{"claude-sonnet-5", fxOpencodeMessages, "x-api-key", "test-key"},
+		{"gemini-3.7-flash", fxOpencodeGoogle, "x-goog-api-key", "test-key"},
+		{"deepseek-v4-pro", fxOpencodeChat, "Authorization", "Bearer test-key"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.model, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-					t.Errorf("Authorization = %q, want %q", got, "Bearer test-key")
-				}
-				if r.Header.Get("x-api-key") != "" {
-					t.Error("x-api-key must not be sent: the gateway ignores it")
-				}
-				if r.Header.Get("x-goog-api-key") != "" {
-					t.Error("x-goog-api-key must not be sent: the gateway ignores it")
+				for _, h := range keyHeaders {
+					got := r.Header.Get(h)
+					switch {
+					case h == tc.header && got != tc.value:
+						t.Errorf("%s = %q, want %q", h, got, tc.value)
+					case h != tc.header && got != "":
+						t.Errorf("%s must not be sent on this route, got %q", h, got)
+					}
 				}
 				if r.URL.RawQuery != "" {
 					t.Errorf("key must never reach the URL; RawQuery = %q", r.URL.RawQuery)

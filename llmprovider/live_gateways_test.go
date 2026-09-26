@@ -385,3 +385,55 @@ func TestLive_ListingsNeedNoCredential(t *testing.T) {
 		})
 	}
 }
+
+// TestLive_OpencodeKeyHeaderPerRoute pins MADR 0009 §1c against the live Zen
+// server with a bogus key, which spends nothing: a route that does not read the
+// header answers "Missing API key.", and the route's own header reaches key
+// validation ("Invalid API key."). Measured 2026-09-26.
+func TestLive_OpencodeKeyHeaderPerRoute(t *testing.T) {
+	const bogus = "sk-bogus-000"
+	routes := []struct{ name, path, body, right string }{
+		{"messages", "/messages", `{"model":"claude-haiku-4-5","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, "x-api-key"},
+		{"google", "/models/gemini-3.7-flash:generateContent", `{"contents":[{"parts":[{"text":"hi"}]}]}`, "x-goog-api-key"},
+	}
+	for _, rt := range routes {
+		t.Run(rt.name, func(t *testing.T) {
+			for _, tc := range []struct{ header, value, want string }{
+				{"Authorization", "Bearer " + bogus, "Missing API key."},
+				{rt.right, bogus, "Invalid API key."},
+			} {
+				status, body := postLive(t, opencodeZenBaseURL+rt.path, rt.body, tc.header, tc.value)
+				if status != http.StatusUnauthorized {
+					t.Skipf("%s via %s returned HTTP %d, not 401", rt.name, tc.header, status)
+				}
+				if !strings.Contains(body, tc.want) {
+					t.Errorf("DRIFT: %s with the key in %s: want %q, got %s", rt.name, tc.header, tc.want, body)
+				}
+			}
+		})
+	}
+}
+
+// postLive sends a JSON POST with one key header and returns the status and a
+// bounded body. A transport failure skips, like the suite's other requests.
+func postLive(t *testing.T, url, body, header, value string) (int, string) {
+	t.Helper()
+	ctx, cancel := liveCtx(t)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(header, value)
+	resp, err := defaultHTTPClient().Do(req)
+	if err != nil {
+		t.Skipf("gateway unreachable: %v", err)
+	}
+	defer closeResponseBody(resp)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp.StatusCode, string(raw)
+}

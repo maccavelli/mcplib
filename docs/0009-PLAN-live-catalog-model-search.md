@@ -583,8 +583,9 @@ that Phases 1–5 change.
    * **SKIP:** record why; proceed.
    * **FAIL:** a deviation (§10); stop.
 6. Mutation proofs (below), then the phase gate on
-   `llmprovider/opencode.go llmprovider/opencode_test.go llmprovider/live_gateways_test.go`.
-7. Stage those three files. `git commit --no-edit`.
+   `llmprovider/opencode.go llmprovider/opencode_test.go llmprovider/live_gateways_test.go`
+   **plus `llmprovider/opencode_route.go`** (2026-09-26 deviation, §10).
+7. Stage ~~those three files~~ those four files. `git commit --no-edit`.
 
 ### Mutation proofs (`$SCRATCH/p0b-mutations.json`)
 
@@ -1052,6 +1053,7 @@ its pin.
 | Date | Phase | Finding | Decision | Files added to phase |
 |---|---|---|---|---|
 | 2026-09-26 | 0 | The 0009 MADR and PLAN link to records that are not committed: `0010-MADR-use-case-aware-default-model-ranking.md`, `0011-REPORT-provider-source-compatibility-audit.md` and `0012-MADR-conform-providers-to-reference-clients.md`. MADR 0003 already carries the 0011 audit note. Committing only the three planned files would leave broken links and pull the 0003 audit note into the commit anyway. | Maintainer chose "Commit all docs". Phase 0 commits every pending docs change. Only 0009 changes status (accepted); 0010 and 0012 stay `proposed` and nothing of them is implemented. No MADR amendment: no decision or asserted fact changes. | `docs/0001-MADR-add-grok-xai-llm-provider.md`, `docs/0008-MADR-subscription-auth-for-llm-providers.md` (audit notes only), `docs/0010-MADR-use-case-aware-default-model-ranking.md`, `docs/0011-REPORT-provider-source-compatibility-audit.md`, `docs/0012-MADR-conform-providers-to-reference-clients.md` |
+| 2026-09-26 | 0b | `llmprovider/opencode_route.go:8-10` says both gateways use "one auth scheme (Authorization: Bearer)". §1c makes that false, and the file is not in Phase 0b's list. | Maintainer chose "Add file to phase": a comment-only edit pointing to `opencodeKeyHeader` and §1c, gated with the phase. No behaviour change and no MADR amendment. | `llmprovider/opencode_route.go` |
 
 ## 11. Execution record
 
@@ -1064,6 +1066,53 @@ the gate summary line, and the commit SHA.
 * MADR 0003 annotated with the §1b/§1c pointer, directly under its title.
 * The commit scope was widened by the deviation above.
 * Markdown only, so no phase gate applies.
+* Commit: `754f1e4`.
+* The plan's `docs/` changes are committed with each phase, so the deviation
+  log and this record travel with the work they describe.
+
+### Phase 0b — complete (2026-09-26)
+
+**Red run:** `go test -count=1 -run '^TestOpencode_KeyInHeader$' ./llmprovider`, exit 1.
+
+```
+--- FAIL: TestOpencode_KeyInHeader/claude-sonnet-5 (0.00s)
+    opencode_test.go:126: Authorization must not be sent on this route, got "Bearer test-key"
+    opencode_test.go:124: x-api-key = "", want "test-key"
+--- FAIL: TestOpencode_KeyInHeader/gemini-3.7-flash (0.00s)
+    opencode_test.go:126: Authorization must not be sent on this route, got "Bearer test-key"
+    opencode_test.go:124: x-goog-api-key = "", want "test-key"
+```
+
+**Green:**
+* the same test passes;
+* `go test -count=1 ./llmprovider` passes;
+* `go vet -tags live_gateways ./llmprovider` exits 0.
+
+**Live run:**
+`go test -count=1 -tags live_gateways -run '^TestLive_OpencodeKeyHeaderPerRoute$' -v ./llmprovider`
+passed, so no deviation.
+
+```
+--- PASS: TestLive_OpencodeKeyHeaderPerRoute (0.64s)
+    --- PASS: TestLive_OpencodeKeyHeaderPerRoute/messages (0.40s)
+    --- PASS: TestLive_OpencodeKeyHeaderPerRoute/google (0.24s)
+```
+
+**Mutation proofs:** `mut=0`.
+
+```
+p0b-bearer-messages: expect=fail exit=1 OK ['--- FAIL: TestOpencode_KeyInHeader (0.00s)']
+p0b-bearer-google: expect=fail exit=1 OK ['--- FAIL: TestOpencode_KeyInHeader (0.00s)']
+p0b-live-wrong-right: expect=fail exit=1 OK ['--- FAIL: TestLive_OpencodeKeyHeaderPerRoute (0.41s)']
+p0b-control: expect=pass exit=0 OK []
+4/4 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (8/8 checks)`. That covers gofmt, per-file
+golint on all four files, vet, `make lint` and tests.
+
+**Deviation:** `llmprovider/opencode_route.go` was added to the phase for a
+comment-only fix (§10).
 
 ## Appendix A — `phase_gate.py`
 

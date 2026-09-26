@@ -256,10 +256,10 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// The gateway accepts only Authorization: Bearer on every route — it ignores
-	// x-api-key and x-goog-api-key even for the Anthropic- and Google-shaped
-	// routes (verified 2026-08-28). Key stays in a header, never the URL.
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	// Each route reads the key from its vendor's header (MADR 0009 §1c); the
+	// key stays in a header, never the URL.
+	name, value := opencodeKeyHeader(p.route, p.apiKey)
+	req.Header.Set(name, value)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -286,6 +286,19 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 		return decodeGeminiResponse(limitedBody)
 	default:
 		return decodeChatCompletionsResponse(limitedBody)
+	}
+}
+
+// opencodeKeyHeader returns the header the Zen/Go server reads the key from
+// on route r. Each route parses only its vendor's header (MADR 0009 §1c).
+func opencodeKeyHeader(r OpencodeRoute, key string) (name, value string) {
+	switch r {
+	case OpencodeRouteMessages:
+		return "x-api-key", key
+	case OpencodeRouteGoogle:
+		return "x-goog-api-key", key
+	default:
+		return oauthAuthorizationHeader, "Bearer " + key
 	}
 }
 
