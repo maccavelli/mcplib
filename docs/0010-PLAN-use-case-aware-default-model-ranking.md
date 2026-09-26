@@ -1776,7 +1776,10 @@ formatted line with its route comment, and record that.
    `go vet -tags live_gateways ./llmprovider`.
 4. **Live gate (MADR §6).**
    `go test -count=1 -tags live_gateways -run '^TestLive_KiloReasoningShapes$' -v ./llmprovider > "$SCRATCH/p5-live.log" 2>&1`.
-   It uses `kilo-auto/free` and needs no key.
+   ~~It uses `kilo-auto/free` and needs no key.~~ **Amended by the 2026-09-26
+   deviation (§10):** it uses `deepseek/deepseek-v4.1-flash` with
+   `KILO_API_KEY`, making two short paid calls, and skips only when the key is
+   unset.
    * **PASS** on both subtests: proceed.
    * **SKIP** (rate-limited or unavailable): retry once after 60 s. A second
      SKIP is a stop, because the gate has not been met.
@@ -1833,6 +1836,17 @@ only the word ALPHA". Then:
 **Limit, recorded honestly.** `kilo-auto/free` reasons by default. This gate
 proves the gateway **accepts** both shapes and still returns reasoning. It
 cannot prove that `{effort:"low"}` changes the effort.
+
+**Amended by the 2026-09-26 deviations (§10):**
+* The gate builds its provider with `NewKilo(kiloKey(t),
+  "deepseek/deepseek-v4.1-flash", WithMaxTokens(400), …)`.
+* `kiloKey(t)` reads `KILO_API_KEY` and skips when it is unset.
+* `TestLive_KiloChatCompletions` and `TestLive_KiloToolCall` use `kiloKey(t)`
+  in place of `"unused-free-model"`, and the file header drops the claim that
+  Kilo ignores a bogus bearer.
+* The gateway accepts even an invalid effort with HTTP 200, so the
+  `p5-live-shape` mutation is expected to be unprovable. Its result is
+  recorded either way.
 
 ### Mutation proofs (`$SCRATCH/p5-mutations.json`, `pkg` `./llmprovider`)
 
@@ -2104,6 +2118,8 @@ changes.
 | 2026-09-26 | 2 | Re-running the gate after that fix: `string deepseek-v4-pro has 3 occurrences, make it a constant (goconst)`, again at the gate list. The id's other occurrences are pre-existing test literals (`opencode_test.go`, `chatcompletions_test.go`, `opencode_route_test.go`) and route-table map keys. goconst counts test literals but reports only outside test files, so the gate list is the first reportable occurrence. | Maintainer chose "Name all four gated ids". `model_ranking.go` declares `opencodeDeepSeekV41Flash`, `opencodeDeepSeekFlash`, `opencodeDeepSeekV4Flash` and `opencodeDeepSeekV4Pro`, and builds `opencodeGoRegionGated` only from them. New tests that need a gated id use the constant; pre-existing tests keep their literals. No MADR amendment. | none (same files) |
 | 2026-09-26 | 3 | Four Phase 3 mutations reported NOT OK because the planted copy does not compile. Each leaves a variable unused: `p3-ignore-disable` (`declared and not used: v`), `p3-no-cache` and `p3-missing-key-ranks` (`… ok`), and `p3-hf-today-order` (`… meta`). The runner correctly refuses a build failure as proof, so those behaviours were unproven. The plan's mutation rows were wrong as written. | Maintainer chose "Compiling equivalents". The four rows plant the same defect while keeping the variable used; see the annotated table. No code, test or MADR change. | none |
 | 2026-09-26 | 6 (found in 3) | Checking the remaining rows found one more by inspection: `p6-unlisted-sent` (`if err != nil \|\| !slices.Contains(…) {` → `if err != nil {`) leaves `doc` and the `slices` import unused, so it cannot compile. | Maintainer chose "Compiling equivalent now". The row becomes `if err != nil \|\| (!slices.Contains(doc.reasoningEfforts(p.gateway, p.model), p.reasoningEffort) && false) {`, the same defect (an unlisted effort is sent). No code or MADR change. | none |
+| 2026-09-26 | 5 | The live gate failed: `TestLive_KiloReasoningShapes` got `kilo HTTP 401` on both shapes. Probes without a credential (`kilo_shape_probe*.py`, 3 rounds) showed three things. `kilo-auto/free` now routes to `poolside/laguna-s-2.1:free`, which returns no reasoning for any request, even with no reasoning field (`reasoning_tokens=0` on every baseline round). The gateway answers both shapes, and an invalid effort, with HTTP 200 whenever the upstream is not rate-limiting (429). MADR §6's premise, "a reasoning-only model reachable without a key", no longer holds. | Maintainer chose "Real key, utility default". The gate runs against `deepseek/deepseek-v4.1-flash` with `KILO_API_KEY` and skips only when it is unset. Both shapes must return 200 and a `ReasoningItem`. **MADR §6 and *Confirmation* amended.** | none (same files) |
+| 2026-09-26 | 5 | Pre-existing, reproduced on an unmodified `git archive 60dae10` export: `TestLive_KiloChatCompletions` and `TestLive_KiloToolCall` fail with `authentication failed: kilo HTTP 401`. Kilo now rejects the placeholder bearer (`"unused-free-model"`), contradicting the live file's header ("Kilo ignores a bogus bearer for free models (measured 200)"). `TestLive_KiloReasoningSpelling`, which sends no Authorization header, passes. | Maintainer chose "Fix now". A `kiloKey(t)` helper (`KILO_API_KEY`, skip if unset, like `opencodeKey`) serves those two tests and the new gate, and the file header is corrected. No MADR change beyond the §6 amendment above. | none (`live_gateways_test.go` is already in Phase 5) |
 
 ## 11. Execution record
 

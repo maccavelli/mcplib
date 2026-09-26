@@ -107,7 +107,7 @@ func WithOpencodeRoute(route OpencodeRoute) ProviderOption {
 // WithKiloCapabilities declares the request parameters the configured Kilo model
 // accepts, as published in that model's supported_parameters (GET {base}/models).
 // It gates optional fields the model may reject: "tool_choice" for forced tool
-// calls and "reasoning_effort" for the thinking path.
+// calls and "reasoning" and "reasoning_effort" for the thinking path.
 //
 // Omit it and every parameter is sent — the gateway is the authority, and
 // withholding a parameter we merely cannot confirm would silently degrade

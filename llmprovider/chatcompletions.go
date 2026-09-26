@@ -18,6 +18,9 @@ type chatCompletionsOpts struct {
 	// ReasoningEffort, when non-empty, is sent as reasoning_effort. OpenCode's
 	// chat route has no portable reasoning parameter and always leaves this "".
 	ReasoningEffort string
+	// Reasoning, when non-nil, is sent as the OpenRouter-style reasoning
+	// object Kilo reads: {"effort": …} or {"enabled": true}.
+	Reasoning map[string]any
 }
 
 // itemsToChatMessages converts canonical items to OpenAI Chat Completions
@@ -74,6 +77,9 @@ func chatCompletionsBody(model string, maxTokens int, input []Item, o chatComple
 	}
 	if o.ReasoningEffort != "" {
 		body[jsonKeyReasoningEffort] = o.ReasoningEffort
+	}
+	if o.Reasoning != nil {
+		body[jsonKeyReasoning] = o.Reasoning
 	}
 	return body
 }

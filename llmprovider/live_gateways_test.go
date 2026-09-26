@@ -4,10 +4,12 @@
 //
 //	go test -tags live_gateways ./llmprovider/ -run Live -v
 //
-// Kilo tests use FREE models and send NO real API key: Kilo ignores a bogus
-// bearer for free models (measured 200). They are rate-limited upstream, so 429
-// and 400 SKIP rather than fail — these assert wire-format correctness, not
-// gateway availability.
+// Kilo tests REQUIRE KILO_API_KEY: since 2026-09-26 Kilo answers a placeholder
+// bearer with 401, even on free models (0010 PLAN deviation). The free-model
+// tests are rate-limited upstream, so 429 and 400 SKIP rather than fail —
+// these assert wire-format correctness, not gateway availability. The 0010
+// reasoning gate (TestLive_KiloReasoningShapes) uses a paid model and treats a
+// 400 as DRIFT.
 //
 // OpenCode tests REQUIRE OPENCODE_API_KEY (plan deviation D3). Its free models
 // answer 200 with NO Authorization header but 401 with a bogus one, and
@@ -46,6 +48,17 @@ func skipIfTransient(t *testing.T, err error) {
 	if errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidRequest) {
 		t.Skipf("gateway transient (free tier limits / model unavailable): %v", err)
 	}
+}
+
+// kiloKey returns a real Kilo credential or skips: Kilo rejects a placeholder
+// bearer with 401 (0010 PLAN deviation, 2026-09-26).
+func kiloKey(t *testing.T) string {
+	t.Helper()
+	key := os.Getenv("KILO_API_KEY")
+	if key == "" {
+		t.Skip("KILO_API_KEY unset: Kilo returns 401 for a placeholder key, even on free models")
+	}
+	return key
 }
 
 // opencodeKey returns a real OpenCode credential or skips. See deviation D3:
@@ -167,7 +180,7 @@ func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
 func TestLive_KiloChatCompletions(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo("unused-free-model", "kilo-auto/free")
+	p, err := NewKilo(kiloKey(t), "kilo-auto/free")
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
@@ -187,7 +200,7 @@ func TestLive_KiloChatCompletions(t *testing.T) {
 func TestLive_KiloToolCall(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo("unused-free-model", "kilo-auto/free", WithMaxTokens(400))
+	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithMaxTokens(400))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
@@ -457,5 +470,41 @@ func TestLive_ModelMetadataDocument(t *testing.T) {
 	m, ok := doc[metadataKeyZen]["glm-5.3-flash"]
 	if !ok || m.Reasoning == nil || !*m.Reasoning {
 		t.Errorf("DRIFT: %s/glm-5.3-flash reasoning = %v (present %v), want true", metadataKeyZen, m.Reasoning, ok)
+	}
+}
+
+// TestLive_KiloReasoningShapes is MADR 0010 §6's gate (as amended 2026-09-26):
+// on deepseek/deepseek-v4.1-flash, Kilo's first utility default, the gateway
+// must accept both reasoning shapes and return reasoning. A 400 is a DRIFT
+// failure here, not a skip, so skipIfTransient is deliberately not used. The
+// gateway does not validate effort values, so this proves acceptance and that
+// reasoning is on, not that {"effort":"low"} changes the effort.
+func TestLive_KiloReasoningShapes(t *testing.T) {
+	key := kiloKey(t)
+	for _, tc := range []struct{ name, effort string }{{"enabled", ""}, {"effort low", effortLow}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := liveCtx(t)
+			defer cancel()
+			p, err := NewKilo(key, "deepseek/deepseek-v4.1-flash", WithMaxTokens(400), WithReasoningEffort(tc.effort))
+			if err != nil {
+				t.Fatalf("NewKilo: %v", err)
+			}
+			resp, err := p.GenerateItemsThinking(ctx, MessageItem{Role: jsonRoleUser, Text: "Reply with only the word ALPHA"})
+			if errors.Is(err, ErrRateLimited) || errors.Is(err, ErrProviderUnavailable) {
+				t.Skipf("gateway transient: %v", err)
+			}
+			if err != nil {
+				t.Fatalf("DRIFT (probed %s): gateway rejected reasoning shape %q: %v", wireShapesProbedOnKilo, tc.name, err)
+			}
+			sawReasoning := false
+			for _, item := range resp.Output {
+				if _, ok := item.(ReasoningItem); ok {
+					sawReasoning = true
+				}
+			}
+			if !sawReasoning {
+				t.Errorf("DRIFT (probed %s): no reasoning returned for shape %q", wireShapesProbedOnKilo, tc.name)
+			}
+		})
 	}
 }

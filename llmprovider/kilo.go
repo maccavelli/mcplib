@@ -101,7 +101,7 @@ func (p *KiloProvider) Generate(ctx context.Context, prompt string) (string, err
 	return resp.OutputText(), nil
 }
 
-// GenerateThinking runs Generate with reasoning_effort, when the model accepts it.
+// GenerateThinking runs Generate with reasoning enabled, when the model accepts it.
 func (p *KiloProvider) GenerateThinking(ctx context.Context, prompt string) (string, error) {
 	resp, err := p.GenerateItemsThinking(ctx, MessageItem{Role: jsonRoleUser, Text: prompt})
 	if err != nil {
@@ -119,7 +119,7 @@ func (p *KiloProvider) GenerateWithTool(ctx context.Context, prompt string, tool
 	return firstFunctionCallArgs(resp, ProviderKilo)
 }
 
-// GenerateWithToolThinking runs GenerateWithTool with reasoning_effort.
+// GenerateWithToolThinking runs GenerateWithTool with reasoning enabled.
 func (p *KiloProvider) GenerateWithToolThinking(ctx context.Context, prompt string, tool Tool) (string, error) {
 	resp, err := p.GenerateItemsWithToolThinking(ctx, tool, MessageItem{Role: jsonRoleUser, Text: prompt})
 	if err != nil {
@@ -138,7 +138,7 @@ func (p *KiloProvider) GenerateItemsWithTool(ctx context.Context, tool Tool, inp
 	return p.doGenerateItems(ctx, input, &tool, false)
 }
 
-// GenerateItemsThinking sends items with reasoning_effort, when accepted.
+// GenerateItemsThinking sends items with reasoning enabled, when accepted.
 func (p *KiloProvider) GenerateItemsThinking(ctx context.Context, input ...Item) (*Response, error) {
 	return p.doGenerateItems(ctx, input, nil, true)
 }
@@ -148,20 +148,38 @@ func (p *KiloProvider) GenerateItemsWithToolThinking(ctx context.Context, tool T
 	return p.doGenerateItems(ctx, input, &tool, true)
 }
 
-func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool) (*Response, error) {
-	effort := ""
-	if thinking && p.supports(jsonKeyReasoningEffort) {
-		effort = p.reasoningEffort
-		if effort == "" {
-			effort = effortMedium
+// thinkingFields returns the reasoning fields for one call (MADR 0010 §6).
+// When the model accepts "reasoning" (or its capabilities are unknown), Kilo's
+// reasoning object is sent: {effort} when an effort is configured, else
+// {enabled: true} for the model's default effort. reasoning_effort is sent
+// only when the model lists it and not "reasoning".
+func (p *KiloProvider) thinkingFields(thinking bool) (effort string, reasoning map[string]any) {
+	switch {
+	case !thinking:
+		return "", nil
+	case p.supports(jsonKeyReasoning):
+		if p.reasoningEffort != "" {
+			return "", map[string]any{jsonKeyEffort: p.reasoningEffort}
 		}
+		return "", map[string]any{jsonKeyEnabled: true}
+	case p.supports(jsonKeyReasoningEffort):
+		if p.reasoningEffort != "" {
+			return p.reasoningEffort, nil
+		}
+		return effortMedium, nil
 	}
+	return "", nil
+}
+
+func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool) (*Response, error) {
+	effort, reasoning := p.thinkingFields(thinking)
 	body := chatCompletionsBody(p.model, p.maxTokens, input, chatCompletionsOpts{
 		Tool: tool,
 		// 301 of 366 models accept "tools" but only 279 accept "tool_choice";
 		// offering the tool unforced is strictly better than a 400.
 		ForceTool:       tool != nil && p.supports(jsonKeyToolChoice),
 		ReasoningEffort: effort,
+		Reasoning:       reasoning,
 	})
 
 	reqBody, err := json.Marshal(body)

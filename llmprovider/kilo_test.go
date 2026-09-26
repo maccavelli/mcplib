@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -48,18 +49,29 @@ func TestKilo_RequestShape(t *testing.T) {
 }
 
 // TestKilo_SupportedParameterGating covers the capability gating that makes
-// Kilo's per-model supported_parameters actionable.
+// Kilo's per-model supported_parameters actionable. With no effort
+// configured, the thinking path sends Kilo's reasoning object
+// {"enabled": true} when "reasoning" is accepted (or capabilities are
+// unknown), and reasoning_effort only when the model lists it and not
+// "reasoning" (MADR 0010 §6).
 func TestKilo_SupportedParameterGating(t *testing.T) {
 	tool := Tool{Name: "get_weather", Schema: map[string]any{"type": "object"}}
+	enabled := map[string]any{"enabled": true}
 	tests := []struct {
-		name                              string
-		caps                              []string
-		wantTools, wantChoice, wantEffort bool
+		name                  string
+		caps                  []string
+		wantTools, wantChoice bool
+		wantEffort            string
+		wantReasoning         map[string]any
 	}{
-		{"nil caps sends everything", nil, true, true, true},
-		{"tools only", []string{jsonKeyTools}, true, false, false},
-		{"tools and tool_choice", []string{jsonKeyTools, jsonKeyToolChoice}, true, true, false},
-		{"all three", []string{jsonKeyTools, jsonKeyToolChoice, jsonKeyReasoningEffort}, true, true, true},
+		{"nil caps sends the reasoning object", nil, true, true, "", enabled},
+		{"tools only", []string{jsonKeyTools}, true, false, "", nil},
+		{"tools and tool_choice", []string{jsonKeyTools, jsonKeyToolChoice}, true, true, "", nil},
+		{"reasoning_effort without reasoning",
+			[]string{jsonKeyTools, jsonKeyToolChoice, jsonKeyReasoningEffort}, true, true, "medium", nil},
+		{"reasoning", []string{jsonKeyTools, jsonKeyReasoning}, true, false, "", enabled},
+		{"reasoning and reasoning_effort",
+			[]string{jsonKeyTools, jsonKeyReasoning, jsonKeyReasoningEffort}, true, false, "", enabled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,11 +97,78 @@ func TestKilo_SupportedParameterGating(t *testing.T) {
 			if _, ok := body[jsonKeyToolChoice]; ok != tc.wantChoice {
 				t.Errorf("tool_choice present = %v, want %v", ok, tc.wantChoice)
 			}
-			if _, ok := body[jsonKeyReasoningEffort]; ok != tc.wantEffort {
-				t.Errorf("reasoning_effort present = %v, want %v", ok, tc.wantEffort)
-			}
+			assertKiloReasoning(t, body, tc.wantEffort, tc.wantReasoning)
 		})
 	}
+}
+
+// assertKiloReasoning checks the two reasoning fields of a Kilo request body:
+// wantEffort "" means reasoning_effort is absent, and a nil wantReasoning
+// means the reasoning object is absent.
+func assertKiloReasoning(t *testing.T, body map[string]any, wantEffort string, wantReasoning map[string]any) {
+	t.Helper()
+	effort, hasEffort := body[jsonKeyReasoningEffort]
+	switch {
+	case wantEffort == "" && hasEffort:
+		t.Errorf("reasoning_effort = %v, want absent", effort)
+	case wantEffort != "" && effort != wantEffort:
+		t.Errorf("reasoning_effort = %v, want %q", effort, wantEffort)
+	}
+	reasoning, hasReasoning := body[jsonKeyReasoning]
+	switch {
+	case wantReasoning == nil && hasReasoning:
+		t.Errorf("reasoning = %v, want absent", reasoning)
+	case wantReasoning != nil && !reflect.DeepEqual(reasoning, wantReasoning):
+		t.Errorf("reasoning = %v, want %v", reasoning, wantReasoning)
+	}
+}
+
+// TestKilo_ReasoningEffortConfigured pins MADR 0010 §6 with an effort set:
+// {"effort": …} in the reasoning object, reasoning_effort only for models that
+// list it and not "reasoning", and nothing on a plain call.
+func TestKilo_ReasoningEffortConfigured(t *testing.T) {
+	low := map[string]any{"effort": "low"}
+	tests := []struct {
+		name          string
+		caps          []string
+		wantEffort    string
+		wantReasoning map[string]any
+	}{
+		{"nil caps", nil, "", low},
+		{"reasoning", []string{jsonKeyTools, jsonKeyReasoning}, "", low},
+		{"reasoning_effort only", []string{jsonKeyTools, jsonKeyReasoningEffort}, "low", nil},
+		{"neither", []string{jsonKeyTools}, "", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := captureServer(t, &body, fxKiloChat)
+			opts := []ProviderOption{WithBaseURL(srv.URL), WithReasoningEffort("low")}
+			if tc.caps != nil {
+				opts = append(opts, WithKiloCapabilities(tc.caps...))
+			}
+			p, err := NewKilo("k", "kilo-auto/free", opts...)
+			if err != nil {
+				t.Fatalf("NewKilo: %v", err)
+			}
+			if _, err := p.GenerateItemsThinking(context.Background(), MessageItem{Role: jsonRoleUser, Text: "hi"}); err != nil {
+				t.Fatalf("GenerateItemsThinking: %v", err)
+			}
+			assertKiloReasoning(t, body, tc.wantEffort, tc.wantReasoning)
+		})
+	}
+	t.Run("plain call", func(t *testing.T) {
+		var body map[string]any
+		srv := captureServer(t, &body, fxKiloChat)
+		p, err := NewKilo("k", "kilo-auto/free", WithBaseURL(srv.URL), WithReasoningEffort("low"))
+		if err != nil {
+			t.Fatalf("NewKilo: %v", err)
+		}
+		if _, err := p.GenerateItems(context.Background(), MessageItem{Role: jsonRoleUser, Text: "hi"}); err != nil {
+			t.Fatalf("GenerateItems: %v", err)
+		}
+		assertKiloReasoning(t, body, "", nil)
+	})
 }
 
 // TestWithKiloCapabilities proves caps is reachable from the public API — the

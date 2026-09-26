@@ -47,7 +47,7 @@ const (
 	jsonKeyMaxTokens       = "max_tokens"
 	jsonKeyToolChoice      = "tool_choice"
 	jsonKeyReasoningEffort = "reasoning_effort"
-	// jsonKeyReasoning is the Responses API reasoning block (OpenCode responses route).
+	// jsonKeyReasoning is the Responses API reasoning block (OpenCode responses route) and Kilo's reasoning object.
 	jsonKeyReasoning = "reasoning"
 	// jsonKeyMaxOutputTokens and jsonKeyEffort are Responses API field names.
 	// They are named here so opencode.go does not push the existing literals in

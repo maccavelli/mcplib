@@ -580,9 +580,27 @@ which is the documented degradation (`models_catalog.go:638-640`).
 
   The utility recipe's explicit `low` therefore differs from Kilo's own
   commit-message call, which uses the default effort, and matches Codex and
-  Grok. It is **gated on a live opt-in test** against `kilo-auto/free`, a
-  reasoning-only model reachable without a key. If the gateway rejects either
+  Grok. It is **gated on a live opt-in test** ~~against `kilo-auto/free`, a
+  reasoning-only model reachable without a key~~. If the gateway rejects either
   shape or returns no reasoning, the change stops and this MADR is amended.
+
+  > **Amendment (2026-09-26, during PLAN Phase 5).** The premise above no
+  > longer holds. Probes found:
+  >
+  > * **No reasoning from `kilo-auto/free`.** It now routes to
+  >   `poolside/laguna-s-2.1:free`, which returns no reasoning for any request.
+  >   That includes a request with no reasoning field: `reasoning_tokens` was 0
+  >   in all three baseline rounds.
+  > * **No keyless access.** The gateway rejects a placeholder bearer with HTTP
+  >   401. This was reproduced on the unmodified tree, so it predates this
+  >   change.
+  > * **No shape validation.** Both shapes, and even an invalid effort, were
+  >   answered with HTTP 200 whenever the upstream was not rate-limiting.
+  >
+  > The maintainer chose a new gate. It runs with `KILO_API_KEY` against
+  > `deepseek/deepseek-v4.1-flash`, Kilo's first utility default (Context
+  > §7), which advertises `reasoning`. Both shapes must return HTTP 200 and
+  > reasoning. The test skips only when the key is unset.
 * **OpenCode chat route.**
   * **Today:** `mcplib` sends no reasoning parameter
     (`llmprovider/opencode.go:222-226`), so `GenerateThinking` does not reason
@@ -700,7 +718,8 @@ Each gate must first be seen to fail against a planted defect:
   * The Kilo request body carries `reasoning.effort` when an effort is set,
     `reasoning.enabled` when none is set, and `reasoning_effort` only when
     capabilities list it and not `reasoning`.
-  * The live gate on `kilo-auto/free` passes for both shapes.
+  * The live gate ~~on `kilo-auto/free`~~ on `deepseek/deepseek-v4.1-flash`,
+    with `KILO_API_KEY` (§6 amendment, 2026-09-26), passes for both shapes.
 * **Static catalogs:** the new lists satisfy the utility criteria. The existing
   count tests (`≤ MaxListedModels`) still hold.
 * **Go gates:**
