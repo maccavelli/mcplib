@@ -8,6 +8,12 @@ informed: mcplib contributors
 
 # Adopt a Responses-API-Shaped Canonical Contract Across All `llmprovider` Providers, Including a New Grok Provider
 
+> **Audit note (2026-09-26).** [0011-REPORT-provider-source-compatibility-audit.md](0011-REPORT-provider-source-compatibility-audit.md) finding G2: the Grok CLI's model
+> catalog offers `grok-4.5` only `high`/`medium`/`low`, not `xhigh`, which
+> contradicts the statement at lines 151-152 (as of `55e4b31`). Finding X1 also affects the
+> canonical item contract: three converters drop `FunctionCallItem` input.
+> This record's text is unchanged; the report proposes follow-up work.
+
 > **Revision notes (both applied to this same `proposed` document, not superseding
 > MADRs, since neither revision had been accepted at the time it was made):**
 >

@@ -8,6 +8,26 @@ informed: mcplib contributors
 
 # Add OpenCode Zen/Go, Hugging Face and Kilo Gateway Providers on a Shared Chat Completions Primitive
 
+> **Partially superseded (2026-09-26) by [0009-MADR-live-catalog-model-search.md](0009-MADR-live-catalog-model-search.md) §1b and §1c:** the Hugging Face and Kilo filter `input_modalities == ["text"]` is replaced by "input contains `text`", and the Zen/Go "Bearer on every route" rule is replaced by a per-route key header. The output filter, tools rule, training policy and ranking below stand.
+
+> **Audit note (2026-09-26).** [0011-REPORT-provider-source-compatibility-audit.md](0011-REPORT-provider-source-compatibility-audit.md) contradicts four statements here (line
+> numbers as of `55e4b31`, before this note was added):
+>
+> * **O1:** Zen/Go auth is Bearer-only (lines 126-137). The Zen server reads
+>   `x-api-key` on `/messages` and `x-goog-api-key` on the Google route. This
+>   was confirmed live on 2026-09-26. The probe here covered `/responses` only.
+> * **O2:** models.dev npm "does not describe gateway dispatch" (lines
+>   188-191). The per-model `provider.npm` in `api.json` does, and OpenCode's
+>   client routes by it.
+> * **X3:** Zen 429s carry no `Retry-After` (line 212). The server sets it for
+>   gateway-generated limits and strips it from upstream 429s. Re-measure.
+> * **K6:** `/api/openrouter` is an editor-extension alias (lines 402-407). It
+>   is the Kilo CLI's primary chat and catalog path.
+>
+> The input-modality filter is also partially superseded by
+> [0009-MADR-live-catalog-model-search.md](0009-MADR-live-catalog-model-search.md)
+> §1b once that record is accepted. This record's text is unchanged.
+
 > **Revision notes (revision 4, applied in place to this same `proposed` document,
 > not a superseding MADR, since it has not been accepted — same convention as
 > `0001-MADR`):**

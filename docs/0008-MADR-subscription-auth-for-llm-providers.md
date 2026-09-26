@@ -8,6 +8,29 @@ informed: all mcplib consumers
 
 # Support Browser, API-Key, and Headless Subscription Authentication for OpenAI and xAI Grok in `mcplib`
 
+> **Audit note (2026-09-26).** [0011-REPORT-provider-source-compatibility-audit.md](0011-REPORT-provider-source-compatibility-audit.md) bears on this record:
+>
+> * **G1 confirms §2:** Grok sessions go to `api.x.ai` without
+>   `X-XAI-Token-Auth`.
+> * **C1 (ChatGPT transport):** the Codex CLI always streams, sends
+>   `store: false`, and never sends `max_output_tokens`. This record's
+>   transport sends none of that, and no live ChatGPT probe has run.
+> * **C2 (catalog):** `gpt-5.4`, `gpt-5.4-mini` and `gpt-5.3-codex` are no
+>   longer in Codex's catalog.
+> * **C3 (errors):** usage-limit errors are typed and terminal in Codex.
+> * **C5 (redirect):** Codex now redirects to `127.0.0.1`.
+> * **C6 (`CODEX_ACCESS_TOKEN`, lines 145-146 and 564 as of `55e4b31`):** in Codex this is a
+>   personal access token or an agent-identity token, not a ChatGPT OAuth
+>   bearer.
+> * **G3, G5 and C4 (import):** both vendors detect refresh-token reuse, so an
+>   imported session that refreshes independently can revoke the vendor
+>   CLI's session or its own.
+> * **G4 (Grok refresh):** team logins also need `principal_type` and
+>   `principal_id`.
+>
+> This record's text is unchanged; the report groups these into candidate
+> decisions.
+
 > **Revision notes (revision 2, 2026-09-12, applied in place to this same
 > `proposed` document — same convention as `0001-MADR` and `0004-MADR`).**
 >
