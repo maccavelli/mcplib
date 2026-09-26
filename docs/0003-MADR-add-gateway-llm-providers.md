@@ -10,6 +10,8 @@ informed: mcplib contributors
 
 > **Partially superseded (2026-09-26) by [0009-MADR-live-catalog-model-search.md](0009-MADR-live-catalog-model-search.md) §1b and §1c:** the Hugging Face and Kilo filter `input_modalities == ["text"]` is replaced by "input contains `text`", and the Zen/Go "Bearer on every route" rule is replaced by a per-route key header. The output filter, tools rule, training policy and ranking below stand.
 
+> **Partially superseded (2026-09-26) by [0010-MADR-use-case-aware-default-model-ranking.md](0010-MADR-use-case-aware-default-model-ranking.md) §4–§5:** Kilo's price-ascending and Hugging Face's throughput-descending orders no longer choose the recommended six; they remain the fallback order when ranking cannot run and the fill order when fewer than six models are eligible. The static catalogs chosen here are replaced. The filters, training policy and tools rule below stand.
+
 > **Audit note (2026-09-26).** [0011-REPORT-provider-source-compatibility-audit.md](0011-REPORT-provider-source-compatibility-audit.md) contradicts four statements here (line
 > numbers as of `55e4b31`, before this note was added):
 >

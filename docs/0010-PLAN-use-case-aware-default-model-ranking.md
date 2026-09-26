@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-09-26
 associated-madr: "0010-MADR-use-case-aware-default-model-ranking.md"
 decision-makers: mcplib maintainers
