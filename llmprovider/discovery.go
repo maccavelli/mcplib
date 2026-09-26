@@ -125,8 +125,10 @@ func modelCatalogFor(ctx context.Context, providerName, apiKey string, cfg Provi
 	case ProviderOpencodeZen, ProviderOpencodeGo:
 		return opencodeCatalog(ctx, p, apiKey, cfg)
 	case ProviderHuggingFace:
+		meta := startModelMetadata(ctx, cfg)
 		usable, err := fetchHuggingFaceUsable(ctx, apiKey, cfg)
-		return catalogFrom(usable, err, StaticModels(ProviderHuggingFace), curateHuggingFace), nil
+		return catalogFrom(usable, err, StaticModels(ProviderHuggingFace),
+			metadataCurate(ProviderHuggingFace, cfg.ModelProfile, meta, curateHuggingFace)), nil
 	case ProviderKilo:
 		entries, err := fetchKiloCatalog(ctx, apiKey, cfg)
 		// Deliberate: a failed Kilo fetch degrades to the static catalog rather
@@ -476,11 +478,12 @@ func opencodeCatalog(ctx context.Context, gateway, apiKey string, cfg ProviderCo
 	if _, err := opencodeBaseURL(gateway); err != nil {
 		return ModelCatalog{}, err
 	}
+	meta := startModelMetadata(ctx, cfg)
 	usable, fetchErr := fetchOpencodeUsable(ctx, gateway, apiKey, cfg)
 	curate := func(usable []string) []string {
 		return curateFromCatalog(staticOpencodeCatalog(gateway), usable, isUsableOpencodeModel, RankOpencodeModel)
 	}
-	return catalogFrom(usable, fetchErr, StaticModels(gateway), curate), nil
+	return catalogFrom(usable, fetchErr, StaticModels(gateway), metadataCurate(gateway, cfg.ModelProfile, meta, curate)), nil
 }
 
 // fetchOpencodeUsable returns the usable gateway models in listing order.

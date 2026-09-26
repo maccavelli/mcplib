@@ -46,6 +46,11 @@ type ProviderConfig struct {
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
 	// ProfileUtility. Ignored by provider constructors.
 	ModelProfile ModelProfile
+	// ModelMetadataURL overrides the models.dev-format document the open
+	// catalogs are ranked with, and OpenCode's chat route reads
+	// reasoning_options from. Empty uses MCPLIB_MODELS_METADATA_URL, then
+	// https://models.opencode.ai/api.json.
+	ModelMetadataURL string
 }
 
 // ProviderOption is a functional option for provider constructors.
@@ -119,6 +124,14 @@ func WithKiloCapabilities(params ...string) ProviderOption {
 func WithModelProfile(p ModelProfile) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.ModelProfile = p
+	}
+}
+
+// WithModelMetadataURL overrides the model metadata document (MADR 0010 §2).
+// MCPLIB_DISABLE_MODELS_METADATA=1 turns the fetch off whatever the URL.
+func WithModelMetadataURL(url string) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.ModelMetadataURL = url
 	}
 }
 
