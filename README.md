@@ -125,6 +125,16 @@ saved through the caller's `TokenStore`, while consumers persist the returned
 mode and model selection in their own schema. Orchestrated processes use
 `NewBackplaneClient`, not this standalone credential wizard.
 
+With `Options.Discover` set, `ConfigureLLM` lists the provider's models once
+and asks for a search before each model menu. A blank search shows the
+curated recommendations, as before. A query searches every usable model the
+provider lists: a glob such as `kilo-auto/*` or `*llama*` matches whole ids,
+and other queries match loosely (`sonet`, `llama 8b`). The same search is
+offered for fallbacks. `llmprovider.ListModelCatalog` and
+`llmprovider.SearchModels` expose the listing and the matcher to other callers.
+Scripts that drive the wizard need one extra (blank) line before each model
+and fallback selection.
+
 Retries are opt-in (`GenerateWithRetry`). Typed sentinels
 (`ErrRateLimited`, `ErrAuthFailure`, `ErrInvalidRequest`,
 `ErrProviderUnavailable`) classify failures. OAuth sessions make one

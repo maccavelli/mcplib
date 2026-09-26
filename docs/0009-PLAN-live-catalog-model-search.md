@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-26
 associated-madr: "0009-MADR-live-catalog-model-search.md"
 decision-makers: mcplib maintainers
@@ -1339,6 +1339,58 @@ p4-control: expect=pass exit=0 OK []
   the nil-versus-empty return shape, and `matchIDs`.
 * `otherModelLabel` and its comment moved from `configure.go` to
   `model_select.go`, as §1.5 specifies.
+
+Commit: `41a04cc`.
+
+### Phase 5 — complete (2026-09-26)
+
+* **README:** the §5 step 1 paragraph was inserted after the wizard paragraph
+  that ends "…not this standalone credential wizard.".
+* **Full module:** `go test -count=1 ./...` exited 0, with all 8 packages `ok`.
+* **Untouched files (A13):** `git diff 55e4b31 -- go.mod go.sum
+  llmprovider/models_catalog.go llmprovider/probe.go wizard/prompter.go
+  wizard/text_prompter.go` has 0 lines.
+* **No network in unit tests (A15):**
+  * every new `Discover: true` wizard test uses `zenOptions()` against an
+    `httptest` server whose URL is scripted as the endpoint, except
+    `TestConfigureLLM_ChatGPTNoStaticNotice`, which uses the ChatGPT
+    short-circuit;
+  * every new `llmprovider` test uses `WithBaseURL` to an `httptest` server,
+    the ChatGPT short-circuit, or an error path that returns before any
+    request.
+
+### Acceptance
+
+| # | Holds | Evidence |
+|---|---|---|
+| A1 | yes | pre-existing `llmprovider` tests unmodified except the two curation tests rewritten in Phase 1b; equivalence test green |
+| A2 | yes | Phase 1 tests; `p1-skip-curation` caught |
+| A3 | yes | `TestListModelCatalog_FiltersStillApply`; `p1-kilo-policy` caught |
+| A4 | yes | `TestListModelCatalog_LiveFlag`, `_Errors`; `p1-static-live` caught |
+| A5 | yes | `TestListModelCatalog_OllamaSplit`; `p1-ollama-alias` caught |
+| A6 | yes | Phase 2 tests; `p2-*` caught, after the §10 bound-test fix |
+| A7 | yes | `TestSearchModels_Glob*`; `p3-glob-to-fuzzy`, `p3-unanchored` caught |
+| A8 | yes | Phase 3 tests; `p3-*` caught |
+| A9 | yes | Phase 4 primary tests; `p4-search-recommended` caught |
+| A10 | yes | `TestConfigureLLM_CurrentModel*`; `p4-current-any-provider` caught |
+| A11 | yes | fallback tests; `TestConfigureLLM_Fallbacks` unmodified; `p4-primary-not-excluded`, `p4-no-confirm`, `p4-confirm-on-blank` caught |
+| A12 | yes | `…SearchResultsCapped`, `…StaticCatalogNotice`, `…NoStaticNoticeWithoutDiscover`, `…ChatGPTNoStaticNotice`; `p4-cap`, `p4-no-static-notice` caught |
+| A13 | yes | Phase 5 untouched-files diff has 0 lines |
+| A14 | yes | every phase gate PASS; full module green |
+| A15 | yes | Phase 5 review above |
+| A16 | yes | Phase 1b tests; `p1b-*` caught; live evidence matches MADR Context §5 |
+| A17 | yes | `TestOpencode_KeyInHeader`; `TestLive_OpencodeKeyHeaderPerRoute` PASS live; `p0b-*` caught |
+
+**Deviations:** four, all resolved by maintainer decision and logged in §10:
+* Phase 0: commit scope;
+* Phase 0b: `opencode_route.go` comment;
+* Phase 1: unused wrappers;
+* Phase 2: the bound test.
+
+No MADR amendment was needed.
+
+**Not done, by design:** no `git push` and no tag (§6). Consumer adoption is out
+of scope (§8).
 
 ## Appendix A — `phase_gate.py`
 
