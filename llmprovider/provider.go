@@ -126,7 +126,26 @@ var ProviderEnvVars = map[string]string{
 // GenerateWithRetry executes a Generate call with the specified number of retries
 // and jittered delay. It will stop retrying if the context is cancelled.
 func GenerateWithRetry(ctx context.Context, p Provider, prompt string, retries int, delay time.Duration) (string, error) {
+	return retryWithBackoff(ctx, retries, delay, "llm: retrying after failure", func() (string, error) {
+		return p.Generate(ctx, prompt)
+	})
+}
+
+// GenerateThinkingWithRetry is GenerateWithRetry for the extended-thinking
+// path: the same backoff, jitter and error classification around
+// GenerateThinking (MADR 0010 §6).
+func GenerateThinkingWithRetry(ctx context.Context, p ThinkingProvider, prompt string, retries int, delay time.Duration) (string, error) {
+	return retryWithBackoff(ctx, retries, delay, "llm: retrying thinking after failure", func() (string, error) {
+		return p.GenerateThinking(ctx, prompt)
+	})
+}
+
+// retryWithBackoff runs call up to retries+1 times with exponential, jittered
+// backoff capped at 30s, honouring a server-directed Retry-After. It stops at
+// once on ErrAuthFailure or ErrInvalidRequest, and on context cancellation.
+func retryWithBackoff[T any](ctx context.Context, retries int, delay time.Duration, logMsg string, call func() (T, error)) (T, error) {
 	const maxBackoff = 30 * time.Second
+	var zero T
 	var lastErr error
 	for i := 0; i <= retries; i++ {
 		if i > 0 {
@@ -144,7 +163,7 @@ func GenerateWithRetry(ctx context.Context, p Provider, prompt string, retries i
 			if errors.As(lastErr, &rl) && rl.RetryAfter > 0 {
 				jitteredDelay = min(rl.RetryAfter, maxBackoff)
 			}
-			slog.Warn("llm: retrying after failure",
+			slog.Warn(logMsg,
 				"attempt", i,
 				"max_attempts", retries+1,
 				"delay", jitteredDelay,
@@ -153,23 +172,23 @@ func GenerateWithRetry(ctx context.Context, p Provider, prompt string, retries i
 			select {
 			case <-ctx.Done():
 				retryTimer.Stop()
-				return "", ctx.Err()
+				return zero, ctx.Err()
 			case <-retryTimer.C:
 				// Ready for next attempt
 			}
 		}
 
-		res, err := p.Generate(ctx, prompt)
+		res, err := call()
 		if err == nil {
 			return res, nil
 		}
 		lastErr = err
 		// Non-retryable errors will never succeed — stop immediately.
 		if errors.Is(err, ErrAuthFailure) || errors.Is(err, ErrInvalidRequest) {
-			return "", err
+			return zero, err
 		}
 	}
-	return "", fmt.Errorf("failed after %d attempts: %w", retries+1, lastErr)
+	return zero, fmt.Errorf("failed after %d attempts: %w", retries+1, lastErr)
 }
 
 // GenerateItemsWithRetry executes a GenerateItems call with the specified number of retries

@@ -42,6 +42,10 @@ type ProviderConfig struct {
 	// accepts (its supported_parameters). Empty means "unknown — send
 	// everything". Ignored by all other providers.
 	KiloCapabilities []string
+	// ModelProfile selects how the recommended models of the open catalogs
+	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
+	// ProfileUtility. Ignored by provider constructors.
+	ModelProfile ModelProfile
 }
 
 // ProviderOption is a functional option for provider constructors.
@@ -106,6 +110,15 @@ func WithOpencodeRoute(route OpencodeRoute) ProviderOption {
 func WithKiloCapabilities(params ...string) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.KiloCapabilities = params
+	}
+}
+
+// WithModelProfile selects how ListAvailableModels and ListModelCatalog rank
+// the recommended models of the open catalogs (MADR 0010 §1). Ignored by
+// provider constructors.
+func WithModelProfile(p ModelProfile) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.ModelProfile = p
 	}
 }
 
