@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+// ModelCatalog is the result of one model listing, viewed two ways.
+type ModelCatalog struct {
+	// Recommended is what ListAvailableModels returns: at most
+	// MaxListedModels ids, curated against the static catalog.
+	Recommended []string
+	// Usable is every id the provider's usability filters admit, in listing
+	// order, uncapped. It equals Recommended when Live is false.
+	Usable []string
+	// Live reports whether Usable came from the provider's listing rather
+	// than the static catalog.
+	Live bool
+}
+
 // ListAvailableModels fetches models from a provider listing API when available,
 // then curates them against the static catalog so configure UIs never show
 // huge unusable lists (embeddings, TTS, Live, image, dated previews, …).
@@ -25,45 +38,104 @@ func ListAvailableModels(ctx context.Context, providerName, apiKey string, opts 
 
 // ListAvailableModelsWithSource lists models using a static or refreshable token source.
 func ListAvailableModelsWithSource(ctx context.Context, providerName string, src TokenSource, opts ...ProviderOption) ([]string, error) {
+	return recommendedOf(ListModelCatalogWithSource(ctx, providerName, src, opts...))
+}
+
+// ListModelCatalog performs one model listing and returns both the curated
+// recommendation and every usable id (MADR 0009 §1).
+func ListModelCatalog(ctx context.Context, providerName, apiKey string, opts ...ProviderOption) (ModelCatalog, error) {
+	return ListModelCatalogWithSource(ctx, providerName, NewStaticToken(apiKey), opts...)
+}
+
+// ListModelCatalogWithSource is ListModelCatalog with a static or refreshable
+// token source. A failed listing degrades to the static catalog with a nil
+// error and Live false; only Ollama, an unknown provider, a missing source or
+// a token failure return an error.
+func ListModelCatalogWithSource(ctx context.Context, providerName string, src TokenSource, opts ...ProviderOption) (ModelCatalog, error) {
 	cfg := ApplyOptions(opts)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if strings.EqualFold(providerName, ProviderOpenAI) && isChatGPTTokenSource(src) {
-		return append([]string(nil), StaticOpenAIChatGPT...), nil
+		return staticCatalog(slices.Clone(StaticOpenAIChatGPT)), nil
 	}
 	if src == nil {
-		return nil, errors.New("model listing: TokenSource is required")
+		return ModelCatalog{}, errors.New("model listing: TokenSource is required")
 	}
 	token, err := src.Token(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("model listing: acquire token: %w", err)
+		return ModelCatalog{}, fmt.Errorf("model listing: acquire token: %w", err)
 	}
+	return modelCatalogFor(ctx, providerName, token.Value, cfg)
+}
 
-	switch strings.ToLower(providerName) {
+// recommendedOf adapts a catalog result to the ListAvailableModels contract.
+func recommendedOf(cat ModelCatalog, err error) ([]string, error) {
+	if err != nil {
+		return nil, err
+	}
+	return cat.Recommended, nil
+}
+
+// catalogFrom applies the degrade-to-static contract every lister except
+// Ollama has always had: a failed fetch, or one that yields no usable id,
+// substitutes the static catalog.
+func catalogFrom(usable []string, fetchErr error, static []string, curate func([]string) []string) ModelCatalog {
+	if fetchErr != nil || len(usable) == 0 {
+		return staticCatalog(static)
+	}
+	recommended := curate(usable)
+	if len(recommended) == 0 {
+		return staticCatalog(static)
+	}
+	return ModelCatalog{Recommended: recommended, Usable: usable, Live: true}
+}
+
+// staticCatalog wraps a caller-owned copy of a static catalog.
+func staticCatalog(static []string) ModelCatalog {
+	return ModelCatalog{Recommended: static, Usable: slices.Clone(static), Live: false}
+}
+
+// modelCatalogFor dispatches one provider's fetch and curation. The caller
+// owns the timeout.
+func modelCatalogFor(ctx context.Context, providerName, apiKey string, cfg ProviderConfig) (ModelCatalog, error) {
+	switch p := strings.ToLower(providerName); p {
 	case ProviderGemini:
-		return listGeminiModels(ctx, token.Value, cfg)
+		usable, err := fetchGeminiUsable(ctx, apiKey, cfg)
+		return catalogFrom(usable, err, StaticModels(ProviderGemini), curateGemini), nil
 	case ProviderOpenAI:
-		return listOpenAIModels(ctx, token.Value, cfg)
+		usable, err := fetchOpenAIUsable(ctx, apiKey, cfg)
+		return catalogFrom(usable, err, StaticModels(ProviderOpenAI), curateOpenAI), nil
 	case ProviderClaude:
-		return listClaudeModels(ctx, token.Value, cfg)
+		usable, err := fetchClaudeUsable(ctx, apiKey, cfg)
+		return catalogFrom(usable, err, StaticModels(ProviderClaude), curateClaude), nil
 	case ProviderGrok:
-		return listGrokModels(ctx, token.Value, cfg)
+		usable, err := fetchGrokUsable(ctx, apiKey, cfg)
+		return catalogFrom(usable, err, StaticModels(ProviderGrok), curateGrok), nil
 	case ProviderOpencodeZen, ProviderOpencodeGo:
-		return listOpencodeModels(ctx, strings.ToLower(providerName), token.Value, cfg)
+		return opencodeCatalog(ctx, p, apiKey, cfg)
 	case ProviderHuggingFace:
-		return listHuggingFaceModels(ctx, token.Value, cfg)
+		usable, err := fetchHuggingFaceUsable(ctx, apiKey, cfg)
+		return catalogFrom(usable, err, StaticModels(ProviderHuggingFace), curateHuggingFace), nil
 	case ProviderKilo:
-		return listKiloModels(ctx, token.Value, cfg)
+		entries, err := fetchKiloCatalog(ctx, apiKey, cfg)
+		// Deliberate: a failed Kilo fetch degrades to the static catalog rather
+		// than failing, like every other lister here. See catalogFrom.
+		return catalogFrom(kiloUsable(entries), err, StaticModels(ProviderKilo), curateKilo), nil
 	case ProviderOllama:
-		return listOllamaModels(ctx, cfg)
+		return ollamaCatalog(ctx, cfg)
 	default:
-		return nil, fmt.Errorf("unsupported provider for model listing: %s", providerName)
+		return ModelCatalog{}, fmt.Errorf("unsupported provider for model listing: %s", providerName)
 	}
 }
 
 // listGeminiModels lists Gemini models and returns a short curated production set.
 func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+	return recommendedOf(modelCatalogFor(ctx, ProviderGemini, apiKey, cfg))
+}
+
+// fetchGeminiUsable returns the usable Gemini text models in listing order.
+func fetchGeminiUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://generativelanguage.googleapis.com/v1beta"
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
@@ -72,18 +144,18 @@ func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 	url := fmt.Sprintf("%s/models", baseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
-		return StaticModels(ProviderGemini), nil
+		return nil, err
 	}
 	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return StaticModels(ProviderGemini), nil
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return StaticModels(ProviderGemini), nil
+		return nil, fmt.Errorf("gemini: models endpoint returned HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -93,7 +165,7 @@ func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(ProviderGemini), nil
+		return nil, err
 	}
 
 	var available []string
@@ -103,65 +175,40 @@ func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 			available = append(available, id)
 		}
 	}
-
-	curated := curateFromCatalog(StaticGemini, available, func(s string) bool {
-		return isUsableGeminiTextModel(s, []string{methodGenerateContent})
-	}, RankGeminiModel)
-	if len(curated) == 0 {
-		return StaticModels(ProviderGemini), nil
-	}
-	return curated, nil
+	return available, nil
 }
 
-// listOpenAIModels fetches OpenAI models and curates to chat-capable catalog hits.
-func listOpenAIModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+func curateGemini(usable []string) []string {
+	return curateFromCatalog(StaticGemini, usable, func(s string) bool {
+		return isUsableGeminiTextModel(s, []string{methodGenerateContent})
+	}, RankGeminiModel)
+}
+
+// fetchOpenAIUsable returns the usable OpenAI chat models in listing order.
+func fetchOpenAIUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://api.openai.com/v1"
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	ids, err := fetchDataIDs(ctx, baseURL+"/models", "Bearer "+apiKey, cfg, ProviderOpenAI)
 	if err != nil {
-		return StaticModels(ProviderOpenAI), nil
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	return filterIDs(ids, isUsableOpenAIChatModel), nil
+}
 
-	resp, err := cfg.HTTPClient.Do(req)
-	if err != nil {
-		return StaticModels(ProviderOpenAI), nil
-	}
-	defer closeResponseBody(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return StaticModels(ProviderOpenAI), nil
-	}
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(ProviderOpenAI), nil
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		if isUsableOpenAIChatModel(m.ID) {
-			available = append(available, m.ID)
-		}
-	}
-
-	curated := curateFromCatalog(StaticOpenAI, available, isUsableOpenAIChatModel, RankOpenAIModel)
-	if len(curated) == 0 {
-		return StaticModels(ProviderOpenAI), nil
-	}
-	return curated, nil
+func curateOpenAI(usable []string) []string {
+	return curateFromCatalog(StaticOpenAI, usable, isUsableOpenAIChatModel, RankOpenAIModel)
 }
 
 // listClaudeModels uses Anthropic's Models API when available; otherwise returns
 // the curated static catalog (Anthropic historically lacked a public list endpoint).
 func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+	return recommendedOf(modelCatalogFor(ctx, ProviderClaude, apiKey, cfg))
+}
+
+// fetchClaudeUsable returns the usable Claude text models in listing order.
+func fetchClaudeUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://api.anthropic.com"
 	if cfg.BaseURL != "" {
 		baseURL = strings.TrimRight(cfg.BaseURL, "/")
@@ -169,20 +216,20 @@ func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 
 	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/v1/models", http.NoBody)
 	if err != nil {
-		return StaticModels(ProviderClaude), nil
+		return nil, err
 	}
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return StaticModels(ProviderClaude), nil
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		// Older keys / regional proxies may not support Models API.
-		return StaticModels(ProviderClaude), nil
+		return nil, fmt.Errorf("claude: models endpoint returned HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -191,7 +238,7 @@ func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(ProviderClaude), nil
+		return nil, err
 	}
 
 	var available []string
@@ -200,19 +247,35 @@ func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 			available = append(available, m.ID)
 		}
 	}
-	if len(available) == 0 {
-		return StaticModels(ProviderClaude), nil
-	}
+	return available, nil
+}
 
-	curated := curateFromCatalog(StaticClaude, available, isUsableClaudeTextModel, RankClaudeModel)
-	if len(curated) == 0 {
-		return StaticModels(ProviderClaude), nil
-	}
-	return curated, nil
+func curateClaude(usable []string) []string {
+	return curateFromCatalog(StaticClaude, usable, isUsableClaudeTextModel, RankClaudeModel)
 }
 
 // listOllamaModels fetches installed models from a local Ollama instance.
 func listOllamaModels(ctx context.Context, cfg ProviderConfig) ([]string, error) {
+	return recommendedOf(ollamaCatalog(ctx, cfg))
+}
+
+// ollamaCatalog lists every installed model. Ollama has no static catalog, so
+// its errors are returned rather than degraded, and an empty install is a
+// successful (Live) listing.
+func ollamaCatalog(ctx context.Context, cfg ProviderConfig) (ModelCatalog, error) {
+	names, err := fetchOllamaNames(ctx, cfg)
+	if err != nil {
+		return ModelCatalog{}, err
+	}
+	recommended := names
+	if len(names) > MaxListedModels {
+		recommended = slices.Clone(names[:MaxListedModels])
+	}
+	return ModelCatalog{Recommended: recommended, Usable: names, Live: true}, nil
+}
+
+// fetchOllamaNames returns every installed model name in /api/tags order.
+func fetchOllamaNames(ctx context.Context, cfg ProviderConfig) ([]string, error) {
 	baseURL := "http://localhost:11434"
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
@@ -246,9 +309,6 @@ func listOllamaModels(ctx context.Context, cfg ProviderConfig) ([]string, error)
 	for _, m := range result.Models {
 		models = append(models, m.Name)
 	}
-	if len(models) > MaxListedModels {
-		models = models[:MaxListedModels]
-	}
 	return models, nil
 }
 
@@ -275,27 +335,42 @@ func ValidateOllamaURL(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// listGrokModels fetches xAI models and curates to usable Grok chat models.
-func listGrokModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+// fetchGrokUsable returns the usable Grok models in listing order.
+func fetchGrokUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := "https://api.x.ai/v1"
 	if cfg.BaseURL != "" {
 		baseURL = cfg.BaseURL
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	ids, err := fetchDataIDs(ctx, baseURL+"/models", "Bearer "+apiKey, cfg, ProviderGrok)
 	if err != nil {
-		return StaticModels(ProviderGrok), nil
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	return filterIDs(ids, isUsableGrokModel), nil
+}
+
+func curateGrok(usable []string) []string {
+	return curateFromCatalog(StaticGrok, usable, isUsableGrokModel, RankGrokModel)
+}
+
+// fetchDataIDs performs GET endpoint and decodes a {"data":[{"id":…}]} body.
+// authorization is sent as the Authorization header when non-empty.
+func fetchDataIDs(ctx context.Context, endpoint, authorization string, cfg ProviderConfig, provider string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return StaticModels(ProviderGrok), nil
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return StaticModels(ProviderGrok), nil
+		return nil, fmt.Errorf("%s: models endpoint returned HTTP %d", provider, resp.StatusCode)
 	}
 
 	var result struct {
@@ -304,21 +379,24 @@ func listGrokModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]s
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(ProviderGrok), nil
+		return nil, err
 	}
-
-	var available []string
+	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if isUsableGrokModel(m.ID) {
-			available = append(available, m.ID)
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
+}
+
+// filterIDs keeps the ids usable admits, preserving order.
+func filterIDs(ids []string, usable func(string) bool) []string {
+	var out []string
+	for _, id := range ids {
+		if usable(id) {
+			out = append(out, id)
 		}
 	}
-
-	curated := curateFromCatalog(StaticGrok, available, isUsableGrokModel, RankGrokModel)
-	if len(curated) == 0 {
-		return StaticModels(ProviderGrok), nil
-	}
-	return curated, nil
+	return out
 }
 
 // listOpencodeModels fetches the gateway catalog and curates it. The OpenCode
@@ -330,6 +408,24 @@ func listGrokModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]s
 // owned_by "opencode"), so route selection cannot be derived from it; see
 // opencode_route.go.
 func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) ([]string, error) {
+	return recommendedOf(opencodeCatalog(ctx, gateway, apiKey, cfg))
+}
+
+// opencodeCatalog lists one OpenCode gateway. An unknown gateway is an error,
+// not a degradation.
+func opencodeCatalog(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) (ModelCatalog, error) {
+	if _, err := opencodeBaseURL(gateway); err != nil {
+		return ModelCatalog{}, err
+	}
+	usable, fetchErr := fetchOpencodeUsable(ctx, gateway, apiKey, cfg)
+	curate := func(usable []string) []string {
+		return curateFromCatalog(staticOpencodeCatalog(gateway), usable, isUsableOpencodeModel, RankOpencodeModel)
+	}
+	return catalogFrom(usable, fetchErr, StaticModels(gateway), curate), nil
+}
+
+// fetchOpencodeUsable returns the usable gateway models in listing order.
+func fetchOpencodeUsable(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL, err := opencodeBaseURL(gateway)
 	if err != nil {
 		return nil, err
@@ -337,47 +433,15 @@ func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg Provide
 	if cfg.BaseURL != "" {
 		baseURL = strings.TrimRight(cfg.BaseURL, "/")
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
-	if err != nil {
-		return StaticModels(gateway), nil
-	}
+	authorization := ""
 	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+		authorization = "Bearer " + apiKey
 	}
-
-	resp, err := cfg.HTTPClient.Do(req)
+	ids, err := fetchDataIDs(ctx, baseURL+"/models", authorization, cfg, "opencode")
 	if err != nil {
-		return StaticModels(gateway), nil
+		return nil, err
 	}
-	defer closeResponseBody(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return StaticModels(gateway), nil
-	}
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(gateway), nil
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		if isUsableOpencodeModel(m.ID) {
-			available = append(available, m.ID)
-		}
-	}
-
-	curated := curateFromCatalog(staticOpencodeCatalog(gateway), available,
-		isUsableOpencodeModel, RankOpencodeModel)
-	if len(curated) == 0 {
-		return StaticModels(gateway), nil
-	}
-	return curated, nil
+	return filterIDs(ids, isUsableOpencodeModel), nil
 }
 
 // onlyText reports whether a modality list is exactly ["text"].
@@ -392,6 +456,11 @@ func onlyText(mods []string) bool { return len(mods) == 1 && mods[0] == jsonKeyT
 // (tokens/sec) and first_token_latency_ms per provider offering. The sorted
 // order is handed to curateFromCatalog with a nil rankFn, which preserves it.
 func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
+	return recommendedOf(modelCatalogFor(ctx, ProviderHuggingFace, apiKey, cfg))
+}
+
+// fetchHuggingFaceUsable returns the usable router models, fastest first.
+func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
 	baseURL := huggingFaceBaseURL
 	if cfg.BaseURL != "" {
 		baseURL = strings.TrimRight(cfg.BaseURL, "/")
@@ -399,7 +468,7 @@ func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfi
 
 	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
 	if err != nil {
-		return StaticModels(ProviderHuggingFace), nil
+		return nil, err
 	}
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -407,12 +476,12 @@ func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfi
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-		return StaticModels(ProviderHuggingFace), nil
+		return nil, err
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-		return StaticModels(ProviderHuggingFace), nil
+		return nil, fmt.Errorf("huggingface: models endpoint returned HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -431,7 +500,7 @@ func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfi
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return StaticModels(ProviderHuggingFace), nil
+		return nil, err
 	}
 
 	type scored struct {
@@ -483,13 +552,12 @@ func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfi
 	for _, r := range ranked {
 		available = append(available, r.id)
 	}
+	return available, nil
+}
 
-	// nil rankFn preserves the metadata-derived order above.
-	curated := curateFromCatalog(StaticHuggingFace, available, isUsableHuggingFaceModel, nil)
-	if len(curated) == 0 {
-		return StaticModels(ProviderHuggingFace), nil
-	}
-	return curated, nil
+// curateHuggingFace passes a nil rankFn, which preserves the metadata order.
+func curateHuggingFace(usable []string) []string {
+	return curateFromCatalog(StaticHuggingFace, usable, isUsableHuggingFaceModel, nil)
 }
 
 // kiloCatalogEntry is the subset of Kilo's OpenRouter-shaped catalog entry this
@@ -551,7 +619,7 @@ func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 
 // listKiloModels fetches the Kilo catalog and curates it.
 //
-// Two documented traps are handled here:
+// Two documented traps are handled in kiloUsable:
 //
 //  1. pricing.completion is a STRING and is "-1" for the variable-priced
 //     kilo-auto/{frontier,balanced,efficient} tiers. A naive ascending sort would
@@ -564,17 +632,11 @@ func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 // Models flagged mayTrainOnYourPrompts are excluded. That is a POLICY decision,
 // not a capability filter — see isUsableKiloModel's comment.
 func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-	entries, err := fetchKiloCatalog(ctx, apiKey, cfg)
-	if err != nil {
-		// Deliberate: every lister in this file degrades to the static catalog
-		// rather than failing, so a configure wizard still offers models when
-		// the network is down. Asserted by TestListAvailableModels_*Fallback.
-		// The other listers inline the fetch, which hides this from nilerr;
-		// extracting fetchKiloCatalog for KiloModelCapabilities made it visible.
-		//nolint:nilerr // fallback-to-static is the established contract here
-		return StaticModels(ProviderKilo), nil
-	}
+	return recommendedOf(modelCatalogFor(ctx, ProviderKilo, apiKey, cfg))
+}
 
+// kiloUsable returns the usable Kilo models, cheapest first.
+func kiloUsable(entries []kiloCatalogEntry) []string {
 	type priced struct {
 		id    string
 		price float64
@@ -609,13 +671,12 @@ func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]s
 	for _, r := range ranked {
 		available = append(available, r.id)
 	}
+	return available
+}
 
-	// nil rankFn preserves the price ordering above.
-	curated := curateFromCatalog(StaticKilo, available, isUsableKiloModel, nil)
-	if len(curated) == 0 {
-		return StaticModels(ProviderKilo), nil
-	}
-	return curated, nil
+// curateKilo passes a nil rankFn, which preserves the price ordering.
+func curateKilo(usable []string) []string {
+	return curateFromCatalog(StaticKilo, usable, isUsableKiloModel, nil)
 }
 
 // KiloModelCapabilities returns the supported_parameters published for one Kilo

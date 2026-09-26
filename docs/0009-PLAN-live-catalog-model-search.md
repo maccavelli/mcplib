@@ -258,8 +258,10 @@ options, add the 10s timeout, ChatGPT short-circuit, nil-source error, token
 acquisition, then `modelCatalogFor`. The ChatGPT short-circuit returns
 `staticCatalog(slices.Clone(StaticOpenAIChatGPT)), nil`.
 
-The unexported `list*Models` functions stay, because each provider's
-`DiscoverModels` calls them directly (`gemini.go:298`, `claude.go:298`,
+~~The unexported `list*Models` functions stay~~ The unexported `list*Models`
+functions called by a `DiscoverModels` stay (2026-09-26 deviation, §10:
+`listOpenAIModels` and `listGrokModels` had no such caller and are deleted),
+because each provider's `DiscoverModels` calls them directly (`gemini.go:298`, `claude.go:298`,
 `opencode.go:310`, `kilo.go:200`, `huggingface.go:174`, `ollama.go:195`). Each
 becomes a three-line wrapper that calls `modelCatalogFor` and returns
 `.Recommended` (or `nil, err`). `listOpencodeModels` keeps its `gateway`
@@ -1054,6 +1056,7 @@ its pin.
 |---|---|---|---|---|
 | 2026-09-26 | 0 | The 0009 MADR and PLAN link to records that are not committed: `0010-MADR-use-case-aware-default-model-ranking.md`, `0011-REPORT-provider-source-compatibility-audit.md` and `0012-MADR-conform-providers-to-reference-clients.md`. MADR 0003 already carries the 0011 audit note. Committing only the three planned files would leave broken links and pull the 0003 audit note into the commit anyway. | Maintainer chose "Commit all docs". Phase 0 commits every pending docs change. Only 0009 changes status (accepted); 0010 and 0012 stay `proposed` and nothing of them is implemented. No MADR amendment: no decision or asserted fact changes. | `docs/0001-MADR-add-grok-xai-llm-provider.md`, `docs/0008-MADR-subscription-auth-for-llm-providers.md` (audit notes only), `docs/0010-MADR-use-case-aware-default-model-ranking.md`, `docs/0011-REPORT-provider-source-compatibility-audit.md`, `docs/0012-MADR-conform-providers-to-reference-clients.md` |
 | 2026-09-26 | 0b | `llmprovider/opencode_route.go:8-10` says both gateways use "one auth scheme (Authorization: Bearer)". §1c makes that false, and the file is not in Phase 0b's list. | Maintainer chose "Add file to phase": a comment-only edit pointing to `opencodeKeyHeader` and §1c, gated with the phase. No behaviour change and no MADR amendment. | `llmprovider/opencode_route.go` |
+| 2026-09-26 | 1 | `make lint` failed: `func listOpenAIModels is unused` and `func listGrokModels is unused` (`discovery.go`). The plan said every `list*Models` wrapper stays, but its own caller list names no OpenAI or Grok caller. Those two were reached only through the old dispatch switch, which `modelCatalogFor` replaces. `openai.go:204` and `grok.go:239` call `ListAvailableModelsWithSource`. | Maintainer chose "Delete the two wrappers". Their logic lives in `fetchOpenAIUsable`/`curateOpenAI` and `fetchGrokUsable`/`curateGrok`, reached through `modelCatalogFor`. No behaviour change and no MADR amendment. | none (same file) |
 
 ## 11. Execution record
 
@@ -1113,6 +1116,47 @@ golint on all four files, vet, `make lint` and tests.
 
 **Deviation:** `llmprovider/opencode_route.go` was added to the phase for a
 comment-only fix (§10).
+
+Commit: `90554f9`.
+
+### Phase 1 — complete (2026-09-26)
+
+**Red run:** `go test -count=1 -run 'TestListModelCatalog' ./llmprovider` failed
+to compile, exit 1.
+
+```
+llmprovider/discovery_catalog_test.go:95:16: undefined: ListModelCatalog
+```
+
+**Green:**
+* `go test -count=1 -run 'TestListModelCatalog' ./llmprovider`: `ok`;
+* `go test -count=1 ./llmprovider ./wizard`: both `ok`, with no pre-existing
+  test edited.
+
+**Deviation:** the first gate run failed `make lint`: `listOpenAIModels` and
+`listGrokModels` were unused. Both were deleted by maintainer decision (§10).
+
+**Mutation proofs:** `mut=0`.
+
+```
+p1-skip-curation: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_OpenAIRecommendedIsCurated (0.00s)']
+p1-static-live: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_LiveFlag (0.00s)']
+p1-ollama-alias: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_OllamaSplit (0.00s)']
+p1-kilo-policy: expect=fail exit=1 OK ['--- FAIL: TestListModelCatalog_FiltersStillApply (0.00s)']
+p1-control: expect=pass exit=0 OK []
+5/5 behaved as expected
+```
+
+**Phase gate:** `gate=0`, `gate=PASS (6/6 checks)`. `make lint` reported
+`0 issues.`, and the pre-approved `nilerr` annotation was not needed.
+
+**Implementation notes, within §1.2:**
+* `fetchOpenAIUsable`, `fetchGrokUsable` and `fetchOpencodeUsable` share an
+  unexported `fetchDataIDs`/`filterIDs` pair for the identical
+  `{"data":[{"id"}]}` fetch.
+* The per-provider curation expressions are named `curateGemini`,
+  `curateOpenAI`, `curateClaude`, `curateGrok`, `curateHuggingFace` and
+  `curateKilo`. The OpenCode curation is a closure over the gateway.
 
 ## Appendix A — `phase_gate.py`
 
