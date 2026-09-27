@@ -50,6 +50,10 @@ type ProviderConfig struct {
 	// accepts (its supported_parameters). Empty means "unknown — send
 	// everything". Ignored by all other providers.
 	KiloCapabilities []string
+	// KiloDataCollection allows Kilo upstreams that may train on prompts.
+	// false (the default) sends provider.data_collection "deny"; see
+	// WithKiloDataCollection. Ignored by all other providers.
+	KiloDataCollection bool
 	// ModelProfile selects how the recommended models of the open catalogs
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
 	// ProfileUtility. Those providers' DiscoverModels ranks with it too.
@@ -131,6 +135,18 @@ func WithOpencodeRoute(route OpencodeRoute) ProviderOption {
 func WithKiloCapabilities(params ...string) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.KiloCapabilities = params
+	}
+}
+
+// WithKiloDataCollection lets Kilo route to upstreams that may train on
+// prompts when allow is true. By default every Kilo request sends
+// provider.data_collection "deny", matching the listing's exclusion of such
+// models (MADR 0012 §3.3). A model that requires collection is then refused
+// with ErrNotPermitted: kilo-auto/free was, and on 2026-09-27 every free text
+// model in Kilo's listing was flagged mayTrainOnYourPrompts.
+func WithKiloDataCollection(allow bool) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.KiloDataCollection = allow
 	}
 }
 

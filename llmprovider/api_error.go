@@ -159,7 +159,7 @@ func classifyAPIError(service string, status int, env apiErrorEnvelope, body []b
 		return true, ErrQuotaExhausted
 	case service == serviceOpencode && has(opencodeForbiddenTypes...),
 		service == ProviderOpenAI && has("usage_not_included"),
-		service == ProviderKilo && status == http.StatusForbidden:
+		service == ProviderKilo && (status == http.StatusForbidden || has("data_collection_required")):
 		return true, ErrNotPermitted
 	case service == serviceOpencode && has("ModelError"),
 		service == ProviderKilo && has("PAID_MODEL_AUTH_REQUIRED"):
@@ -179,7 +179,8 @@ func classifyAPIError(service string, status int, env apiErrorEnvelope, body []b
 
 // apiErrorEnvelope is the union of the error bodies MADR 0012 §1.1 lists:
 // OpenCode and Claude {type:"error",error:{type,message}}, Kilo
-// {error:{code,message}} or {code}, OpenAI/Codex {error:{type,code,message}},
+// {error:{code,message}}, {code} or {error,error_type,message},
+// OpenAI/Codex {error:{type,code,message}},
 // xAI nested or flat {code,error}, Gemini {error:{code,message,status}}.
 type apiErrorEnvelope struct {
 	types []string // candidate classifications, most specific first
@@ -199,10 +200,11 @@ func (e apiErrorEnvelope) hasType(t string) bool { return slices.Contains(e.type
 
 func parseAPIErrorBody(body []byte) apiErrorEnvelope {
 	var top struct {
-		Type    string          `json:"type"`
-		Code    json.RawMessage `json:"code"`
-		Message string          `json:"message"`
-		Error   json.RawMessage `json:"error"`
+		Type      string          `json:"type"`
+		Code      json.RawMessage `json:"code"`
+		ErrorType string          `json:"error_type"`
+		Message   string          `json:"message"`
+		Error     json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal(body, &top) != nil {
 		return apiErrorEnvelope{msg: strings.TrimSpace(string(body))}
@@ -229,7 +231,7 @@ func parseAPIErrorBody(body []byte) apiErrorEnvelope {
 	case json.Unmarshal(top.Error, &text) == nil:
 		env.msg = text
 	}
-	add(jsonString(top.Code), top.Type)
+	add(top.ErrorType, jsonString(top.Code), top.Type)
 	if env.msg == "" {
 		env.msg = top.Message
 	}

@@ -49,6 +49,8 @@ type KiloProvider struct {
 	// nil means "unknown" — send the standard request rather than guessing a
 	// model lacks a capability.
 	caps map[string]struct{}
+	// allowDataCollection omits the data_collection "deny" preference.
+	allowDataCollection bool
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
 }
@@ -85,6 +87,8 @@ func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error
 		reasoningEffort: cfg.ReasoningEffort,
 		modelProfile:    cfg.ModelProfile,
 		caps:            caps,
+
+		allowDataCollection: cfg.KiloDataCollection,
 	}, nil
 }
 
@@ -191,6 +195,11 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 		ReasoningEffort: effort,
 		Reasoning:       reasoning,
 	})
+	if !p.allowDataCollection {
+		// Kilo's opt-out from upstreams that train on prompts, which its client
+		// sends with hide_prompt_training_models (MADR 0012 §3.3).
+		body["provider"] = map[string]any{"data_collection": "deny"}
+	}
 
 	reqBody, err := json.Marshal(body)
 	if err != nil {

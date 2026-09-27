@@ -189,7 +189,7 @@ func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
 func TestLive_KiloChatCompletions(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo(kiloKey(t), "kilo-auto/free")
+	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithKiloDataCollection(true))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestLive_KiloChatCompletions(t *testing.T) {
 func TestLive_KiloToolCall(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithMaxTokens(400))
+	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithMaxTokens(400), WithKiloDataCollection(true))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
