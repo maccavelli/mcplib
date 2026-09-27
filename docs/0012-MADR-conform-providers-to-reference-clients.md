@@ -1158,3 +1158,16 @@ No other test in the repository has a handler that blocks without bound.
 | Plan | Covers |
 |---|---|
 | [0012-PLAN-circuit-breaker-test.md](0012-PLAN-circuit-breaker-test.md) | this revision; runs before the five plans |
+
+## Amendment — 2026-09-27 (revision 5): the `127.0.0.1` redirect has moved
+
+Revision 2 made the OpenAI redirect's move to `127.0.0.1` wait for one
+owner-run live ChatGPT browser login from `mcplib`. That login ran on
+2026-09-27: `TestLive_ChatGPTBrowserLogin` passed in 78.65 s from O6's tree.
+* The server accepted `http://127.0.0.1:1455/auth/callback`.
+* The new session generated once.
+* `RevokeOAuthSession` then revoked the session.
+
+Phase O6 landed as `a5f2460`, and
+[0012-PLAN-oauth-hygiene.md](0012-PLAN-oauth-hygiene.md) is complete. The
+dual-stack `localhost` listener stays, as revision 2 decided.

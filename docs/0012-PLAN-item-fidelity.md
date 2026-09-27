@@ -220,8 +220,8 @@ Executed on `main`, 2026-09-27, after `0012-PLAN-circuit-breaker-test.md`
 document, and checked equal to the proven diff.
 
 * **F1**, commit `a346457`: 10 red tests failed as required; 0 base guards passed; gate passed; 2/2 mutants killed.
-* **F2**, commit `d5429e6`: 2 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
-* **F3**, commit `db2d0d6`: 2 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
+* **F2**, commit `d5429e6`: 2 red tests failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
+* **F3**, commit `db2d0d6`: 2 red tests failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 13 passed, 0 skipped, 0 failed.
 

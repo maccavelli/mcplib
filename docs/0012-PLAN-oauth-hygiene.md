@@ -339,8 +339,8 @@ document, and checked equal to the proven diff.
 * **O2**, commit `73e2b41`: 7 red tests failed as required; 3 base guards passed; gate passed; 4/4 mutants killed.
 * **O3**, commit `46bd8c7`: 4 red tests failed as required; 2 base guards passed; gate passed; 3/3 mutants killed.
 * **O4**, commit `45fabc0`: nothing red (see Appendix A); 0 base guards passed; gate passed; 4/4 mutants killed.
-* **O5**, commit `85e20ab`: 1 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
-* **O6**, commit `a5f2460`: 1 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
+* **O5**, commit `85e20ab`: 1 red test failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
+* **O6**, commit `a5f2460`: 1 red test failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 4 passed, 0 skipped, 0 failed.
 

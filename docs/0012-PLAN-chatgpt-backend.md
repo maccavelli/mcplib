@@ -234,9 +234,9 @@ Executed on `main`, 2026-09-27, after `0012-PLAN-circuit-breaker-test.md`
 (`05a1fcf`). Each phase applied Appendix B with `git apply`, taken from this
 document, and checked equal to the proven diff.
 
-* **C1**, commit `ef88c1d`: 5 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
-* **C2**, commit `87b12e9`: 2 red tests failed as required; 1 base guards passed; gate passed; 2/2 mutants killed.
-* **C3**, commit `bba7d27`: 4 red tests failed as required; 1 base guards passed; gate passed; 4/4 mutants killed.
+* **C1**, commit `ef88c1d`: 5 red tests failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
+* **C2**, commit `87b12e9`: 2 red tests failed as required; 1 base guard passed; gate passed; 2/2 mutants killed.
+* **C3**, commit `bba7d27`: 4 red tests failed as required; 1 base guard passed; gate passed; 4/4 mutants killed.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 3 passed, 0 skipped, 0 failed.
 
