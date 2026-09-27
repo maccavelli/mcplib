@@ -197,9 +197,9 @@ func utilityExcluded(profile ModelProfile, provider, id string) bool {
 	return profile != ProfileCapable && provider == ProviderKilo && strings.HasPrefix(id, "kilo-auto/")
 }
 
-// rankRecommended returns at most MaxListedModels ids: the eligible
+// rankRecommended returns at most MaxListedModels distinct ids: the eligible
 // candidates in profile order, at most maxPerRankGroup per group, then fill in
-// order, skipping ids already chosen or excluded (MADR 0010 §4).
+// order, skipping ids already chosen or excluded (MADR 0010 §4, MADR 0013 A1).
 func rankRecommended(profile ModelProfile, provider string, cands []rankCandidate, fill []string) []string {
 	var eligible []rankCandidate
 	for _, c := range cands {
@@ -219,7 +219,7 @@ func rankRecommended(profile ModelProfile, provider string, cands []rankCandidat
 		if len(out) == MaxListedModels {
 			break
 		}
-		if perGroup[c.group] >= maxPerRankGroup {
+		if perGroup[c.group] >= maxPerRankGroup || slices.Contains(out, c.id) {
 			continue
 		}
 		perGroup[c.group]++
@@ -300,13 +300,10 @@ func kiloCandidate(e kiloCatalogEntry, now time.Time) rankCandidate {
 	return c
 }
 
-// kiloPrice parses one Kilo per-token price. An empty price is 0; a negative
-// ("-1", the variable-priced kilo-auto tiers) or unparseable one is unknown.
+// kiloPrice parses one Kilo per-token price. A blank, negative ("-1", the
+// variable-priced kilo-auto tiers), non-finite or unparseable price is unknown
+// (MADR 0010 §3; MADR 0013 A2–A3).
 func kiloPrice(s string) (float64, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, true
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	return v, err == nil && v >= 0
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return v, err == nil && v >= 0 && !math.IsInf(v, 1)
 }

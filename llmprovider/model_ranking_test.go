@@ -317,7 +317,7 @@ func TestKiloCandidate_Fields(t *testing.T) {
 		costKnown bool
 	}{
 		{`{"id":"org/free","pricing":{"prompt":"0","completion":"0"}}`, 0, true},
-		{`{"id":"org/blank","pricing":{"prompt":"","completion":""}}`, 0, true},
+		{`{"id":"org/blank","pricing":{"prompt":"","completion":""}}`, 0, false},
 		{`{"id":"org/bad","pricing":{"prompt":"abc","completion":"0.000001"}}`, 0, false},
 	} {
 		c := kiloCandidate(decodeKiloEntry(t, tc.js), refNow)

@@ -33,8 +33,8 @@ type ModelCatalog struct {
 	// Recommended is what ListAvailableModels returns: at most
 	// MaxListedModels ids, curated against the static catalog.
 	Recommended []string
-	// Usable is every id the provider's usability filters admit, in listing
-	// order, uncapped. It equals Recommended when Live is false.
+	// Usable is every id the provider's usability filters admit, once each,
+	// in listing order, uncapped. It equals Recommended when Live is false.
 	Usable []string
 	// Live reports whether Usable came from the provider's listing rather
 	// than the static catalog.
@@ -96,6 +96,7 @@ func recommendedOf(cat ModelCatalog, err error) ([]string, error) {
 // Ollama has always had: a failed fetch, or one that yields no usable id,
 // substitutes the static catalog.
 func catalogFrom(usable []string, fetchErr error, static []string, curate func([]string) []string) ModelCatalog {
+	usable = uniqueIDs(usable)
 	if fetchErr != nil || len(usable) == 0 {
 		return staticCatalog(static)
 	}
@@ -104,6 +105,19 @@ func catalogFrom(usable []string, fetchErr error, static []string, curate func([
 		return staticCatalog(static)
 	}
 	return ModelCatalog{Recommended: recommended, Usable: usable, Live: true}
+}
+
+// uniqueIDs drops repeated ids, keeping the first of each (MADR 0013 A1).
+func uniqueIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; !dup {
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // staticCatalog wraps a caller-owned copy of a static catalog.
