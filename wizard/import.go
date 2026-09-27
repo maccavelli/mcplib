@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,11 +88,33 @@ func importOpenAIAuth(data []byte) (*llmprovider.OAuthSession, error) {
 		Provider:  llmprovider.ProviderOpenAI,
 		Access:    auth.Tokens.AccessToken,
 		Refresh:   auth.Tokens.RefreshToken,
+		Expiry:    jwtExpiry(auth.Tokens.AccessToken),
 		Issuer:    llmprovider.DefaultOpenAIIssuer,
 		ClientID:  llmprovider.DefaultOpenAIClientID,
 		AccountID: auth.Tokens.AccountID,
 		TokenURL:  llmprovider.DefaultOpenAIIssuer + "/oauth/token",
 	}, nil
+}
+
+// jwtExpiry reads a JWT access token's numeric exp claim (MADR 0009 F11). A
+// token that is not a JWT, or has no exp, gives the zero time; the session then
+// refreshes on its first rejection instead.
+func jwtExpiry(token string) time.Time {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}
+	}
+	var claims struct {
+		Exp *float64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == nil {
+		return time.Time{}
+	}
+	return time.Unix(int64(*claims.Exp), 0).UTC()
 }
 
 func importGrokAuth(data []byte) (*llmprovider.OAuthSession, error) {

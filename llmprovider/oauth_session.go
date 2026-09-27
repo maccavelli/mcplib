@@ -22,6 +22,32 @@ const (
 	oauthErrorBodyLimit = 2048
 )
 
+// chatGPTAccessFixture is the stub access token a consumer test once wrote into
+// a live token store (MADR 0009 F3, F8).
+const chatGPTAccessFixture = "chatgpt-access"
+
+// ValidateOAuthSession reports whether a session can be used for generation
+// (MADR 0009 D7). It must be refreshable, or the explicit access-only ChatGPT
+// token that token_stdin and CODEX_ACCESS_TOKEN produce, and never a stub. A
+// refreshable session needs a client id. Its token URL may be empty, because
+// the refresh derives it from the issuer.
+func ValidateOAuthSession(session *OAuthSession) error {
+	switch {
+	case session == nil || strings.TrimSpace(session.Access) == "":
+		return errors.New("oauth: session has no access token")
+	case session.Access == chatGPTAccessFixture:
+		return errors.New("oauth: session holds the chatgpt-access test fixture, not a real token")
+	case session.Refresh == "":
+		if strings.TrimRight(session.Issuer, "/") != DefaultOpenAIIssuer ||
+			session.ClientID != DefaultOpenAIClientID || !session.Expiry.IsZero() {
+			return errors.New("oauth: no refresh token")
+		}
+	case session.ClientID == "":
+		return errors.New("oauth: refreshable session has no client id")
+	}
+	return nil
+}
+
 // oauthHTTPStatusError reports a failed token-endpoint response by its status
 // and the first oauthErrorBodyLimit bytes of its body, redacted. It closes the
 // body; the raw body is never logged.

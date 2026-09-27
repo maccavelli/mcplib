@@ -127,6 +127,7 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 		wantAPIKey string
 		wantAccess string
 		wantSaves  int
+		wantErr    bool
 	}{
 		{
 			name:       "openai platform key",
@@ -138,10 +139,16 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 		{
 			name:       "openai access token",
 			provider:   llmprovider.ProviderOpenAI,
-			secret:     "chatgpt-access",
+			secret:     jwtShapedAccess,
 			wantKind:   CredOAuth,
-			wantAccess: "chatgpt-access",
+			wantAccess: jwtShapedAccess,
 			wantSaves:  1,
+		},
+		{
+			name:     "chatgpt-access fixture",
+			provider: llmprovider.ProviderOpenAI,
+			secret:   "chatgpt-access",
+			wantErr:  true,
 		},
 		{
 			name:       "grok always api key",
@@ -163,6 +170,12 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 				f.inputs = []string{"chatgpt-model"}
 			}
 			res, err := ConfigureLLM(context.Background(), f, Options{TokenStore: store})
+			if test.wantErr {
+				if err == nil || store.saves != 0 {
+					t.Fatalf("ConfigureLLM() error = %v with %d saves, want an error and no save", err, store.saves)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ConfigureLLM() error = %v", err)
 			}
@@ -384,6 +397,47 @@ func TestConfigureLLM_ChatGPTListingFailurePromptsForModel(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// jwtShapedAccess is an access-only ChatGPT token as token_stdin receives it.
+const jwtShapedAccess = "eyJhbGciOiJub25lIn0.e30.x"
+
+func TestSaveOAuthCredential_RejectsFixture(t *testing.T) {
+	store := newMemoryTokenStore()
+	_, err := saveOAuthCredential(context.Background(), store, llmprovider.ProviderOpenAI, &llmprovider.OAuthSession{
+		Access: "chatgpt-access",
+		Issuer: llmprovider.DefaultOpenAIIssuer,
+	})
+	if err == nil || store.saves != 0 {
+		t.Fatalf("saveOAuthCredential() error = %v with %d saves, want an error and no save", err, store.saves)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "chatgpt-access") && !strings.Contains(msg, "stub") &&
+		!strings.Contains(msg, "refresh") {
+		t.Fatalf("error = %q, want it to name the fixture or the missing refresh", msg)
+	}
+}
+
+// TestConfigureLLM_KeepRefusesStubSession: a saved stub is not kept (D7); the
+// user must sign in again.
+func TestConfigureLLM_KeepRefusesStubSession(t *testing.T) {
+	store := newMemoryTokenStore()
+	f := &fakePrompter{
+		t: t, selects: []int{providerIdx(t, llmprovider.ProviderOpenAI), 1}, confirms: []bool{true},
+		inputs: []string{"chatgpt-model"},
+	}
+	_, err := ConfigureLLM(context.Background(), f, Options{
+		Existing: Result{
+			Provider:    llmprovider.ProviderOpenAI,
+			Kind:        CredOAuth,
+			AccessToken: "chatgpt-access",
+			Issuer:      llmprovider.DefaultOpenAIIssuer,
+			ClientID:    llmprovider.DefaultOpenAIClientID,
+		},
+		TokenStore: store,
+	})
+	if err == nil || !strings.Contains(err.Error(), "sign in again") || store.saves != 0 {
+		t.Fatalf("ConfigureLLM() error = %v with %d saves, want the stub refused", err, store.saves)
+	}
+}
 
 // TestConfigureLLM_BrowserOAuthSetsInputCode: browser sign-in races a paste
 // prompt, and the authorize URL and paste instruction are shown even when the

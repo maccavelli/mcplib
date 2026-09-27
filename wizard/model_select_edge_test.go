@@ -222,21 +222,26 @@ func TestConfigureLLM_FallbackSearchNoMatches(t *testing.T) {
 
 // TestConfigureLLM_ListingTokenFailureUsesStaticCatalog covers configure.go's
 // listing-error branch for a provider that has a static catalog: a kept Grok
-// session that cannot refresh fails the listing, so the wizard warns and
-// offers the built-in catalog.
+// session whose refresh cannot finish inside the listing's deadline fails the
+// listing, so the wizard warns and offers the built-in catalog. The 1 ns limit
+// has already passed when the refresh starts, so no request leaves the host.
 func TestConfigureLLM_ListingTokenFailureUsesStaticCatalog(t *testing.T) {
 	withEnv(t, nil)
 	static := llmprovider.StaticModels(llmprovider.ProviderGrok)
 	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), 1, 0}, confirms: []bool{true}}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Existing: Result{
-			Provider:    llmprovider.ProviderGrok,
-			Kind:        CredOAuth,
-			AccessToken: "expired-access-abcd",
-			TokenExpiry: time.Now().Add(-time.Hour),
+			Provider:     llmprovider.ProviderGrok,
+			Kind:         CredOAuth,
+			AccessToken:  "expired-access-abcd",
+			RefreshToken: "refresh",
+			TokenExpiry:  time.Now().Add(-time.Hour),
+			Issuer:       llmprovider.DefaultGrokOAuthIssuer,
+			ClientID:     llmprovider.DefaultGrokOAuthClientID,
 		},
-		TokenStore: newMemoryTokenStore(),
-		Discover:   true,
+		TokenStore:    newMemoryTokenStore(),
+		Discover:      true,
+		DiscoverLimit: time.Nanosecond,
 	})
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
@@ -244,7 +249,7 @@ func TestConfigureLLM_ListingTokenFailureUsesStaticCatalog(t *testing.T) {
 	if res.Model != static[0] {
 		t.Errorf("Model = %q, want the first built-in model %q", res.Model, static[0])
 	}
-	if n := countContaining(f.seenNotify, "no refresh token); using the built-in catalog"); n != 1 {
+	if n := countContaining(f.seenNotify, "deadline exceeded); using the built-in catalog"); n != 1 {
 		t.Errorf("listing warning seen %d times, want 1: %v", n, f.seenNotify)
 	}
 }

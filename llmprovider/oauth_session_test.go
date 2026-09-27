@@ -12,6 +12,43 @@ import (
 	"time"
 )
 
+func TestValidateOAuthSession_RejectsFixture(t *testing.T) {
+	t.Parallel()
+
+	accessOnly := func(expiry time.Time) *OAuthSession {
+		return &OAuthSession{Access: "eyJhbGciOiJub25lIn0.e30.x", Issuer: DefaultOpenAIIssuer,
+			ClientID: DefaultOpenAIClientID, Expiry: expiry}
+	}
+	for _, test := range []struct {
+		name    string
+		session *OAuthSession
+		valid   bool
+	}{
+		{name: "nil", session: nil},
+		{name: "empty access", session: &OAuthSession{Refresh: "refresh", ClientID: "client"}},
+		{name: "chatgpt-access fixture", session: &OAuthSession{Access: "chatgpt-access", Issuer: DefaultOpenAIIssuer}},
+		{name: "chatgpt-access fixture with refresh", session: &OAuthSession{Access: "chatgpt-access", Refresh: "refresh",
+			Issuer: DefaultOpenAIIssuer, ClientID: DefaultOpenAIClientID}},
+		{name: "no refresh outside ChatGPT", session: &OAuthSession{Access: "access", Issuer: DefaultGrokOAuthIssuer,
+			ClientID: DefaultOpenAIClientID}},
+		{name: "refreshable with token URL", session: &OAuthSession{Access: "access", Refresh: "refresh",
+			ClientID: "client", TokenURL: "https://issuer.test/token"}, valid: true},
+		{name: "refreshable with derived token URL", session: &OAuthSession{Access: "access", Refresh: "refresh",
+			ClientID: DefaultGrokOAuthClientID, Issuer: DefaultGrokOAuthIssuer}, valid: true},
+		{name: "refreshable without client id", session: &OAuthSession{Access: "access", Refresh: "refresh",
+			TokenURL: "https://issuer.test/token"}},
+		{name: "ChatGPT access-only", session: accessOnly(time.Time{}), valid: true},
+		{name: "ChatGPT access-only with expiry", session: accessOnly(time.Now().Add(time.Hour))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateOAuthSession(test.session)
+			if (err == nil) != test.valid {
+				t.Fatalf("ValidateOAuthSession() = %v, want valid=%t", err, test.valid)
+			}
+		})
+	}
+}
+
 // jwtShapedDescription gives the redactor a token to remove from an error body.
 const jwtShapedDescription = "eyJhbGciOiJub25lIn0.aaa.bbb"
 

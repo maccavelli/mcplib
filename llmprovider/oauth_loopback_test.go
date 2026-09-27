@@ -273,6 +273,9 @@ func TestLoginBrowserOAuth_OpenAICompletesCallbackAndExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoginBrowserOAuth() error = %v", err)
 	}
+	if session.TokenURL != srv.URL+"/oauth/token" || session.ClientID != "test-client" {
+		t.Fatalf("session token URL/client = %q/%q, want the exchange endpoint and client (D7)", session.TokenURL, session.ClientID)
+	}
 	if session.Access != "access" || session.Refresh != "refresh" || session.Provider != ProviderOpenAI {
 		t.Fatalf("session = %#v", session)
 	}
@@ -351,6 +354,9 @@ func TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("LoginBrowserOAuth() error = %v", err)
+	}
+	if session.TokenURL != srv.URL+"/token" || session.ClientID != "test-client" {
+		t.Fatalf("session token URL/client = %q/%q, want the exchange endpoint and client (D7)", session.TokenURL, session.ClientID)
 	}
 	if session.Access != "access" || session.Refresh != "refresh" || session.Provider != ProviderGrok {
 		t.Fatalf("session = %#v", session)

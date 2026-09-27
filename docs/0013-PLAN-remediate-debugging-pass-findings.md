@@ -573,6 +573,14 @@ the working tree, never on the tree itself. Nothing was pushed.
     `go test -count=1 ./...` and `go test -race -count=1 ./llmprovider
     ./wizard` all exited 0.
 
+**Later change (2026-09-27).** The OAuth plan's P6
+([decisions/0009-PLAN-repair-oauth-loopback-and-session-wiring.md](decisions/0009-PLAN-repair-oauth-loopback-and-session-wiring.md))
+refuses to keep a session with no refresh token. Phase 4's
+`TestConfigureLLM_ListingTokenFailureUsesStaticCatalog` therefore now keeps a
+refreshable Grok session with `DiscoverLimit: time.Nanosecond`. It still covers
+the same branch, and its mutant (`p4-no-static-listing-warning`) is still
+killed.
+
 **Observed outside scope, not changed.** `golint ./...` across the whole
 repository also reports `backplane.go:16:1: package comment is detached`.
 This plan did not touch that file, and it is unchanged since `e219e11`

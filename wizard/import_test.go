@@ -2,9 +2,11 @@ package wizard
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/maccavelli/mcplib/llmprovider"
 )
@@ -23,6 +25,26 @@ const grokVendorAuthFixture = `{
     "oidc_client_id": "b1a00492-073a-47ea-816f-4c329264a828"
   }
 }`
+
+// TestImportOpenAIAuth_SetsExpiryFromJWT: an imported ChatGPT session takes
+// its expiry from the access token's exp claim, so it refreshes before the
+// backend rejects it (F11). A token without one still imports.
+func TestImportOpenAIAuth_SetsExpiryFromJWT(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":2000000000}`))
+	withExp := `{"tokens":{"access_token":"eyJhbGciOiJub25lIn0.` + payload + `.sig","refresh_token":"rt-chatgpt"}}`
+	session, err := importOpenAIAuth([]byte(withExp))
+	if err != nil {
+		t.Fatalf("importOpenAIAuth() error = %v", err)
+	}
+	if want := time.Unix(2000000000, 0).UTC(); !session.Expiry.Equal(want) || session.Expiry.Location() != time.UTC {
+		t.Fatalf("Expiry = %v, want %v", session.Expiry, want)
+	}
+
+	session, err = importOpenAIAuth([]byte(`{"tokens":{"access_token":"at-chatgpt","refresh_token":"rt-chatgpt"}}`))
+	if err != nil || !session.Expiry.IsZero() {
+		t.Fatalf("no-exp import: Expiry = %v, err = %v; want zero and no error", session.Expiry, err)
+	}
+}
 
 func TestImportGrok_SkipsAPIKeyScope(t *testing.T) {
 	dir := t.TempDir()

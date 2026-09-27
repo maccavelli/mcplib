@@ -154,7 +154,7 @@ func keepExistingOAuth(
 	if !keep {
 		return nil, false, nil
 	}
-	return &llmprovider.OAuthSession{
+	session := &llmprovider.OAuthSession{
 		Provider:  d.ID,
 		Access:    o.Existing.AccessToken,
 		Refresh:   o.Existing.RefreshToken,
@@ -163,7 +163,11 @@ func keepExistingOAuth(
 		ClientID:  o.Existing.ClientID,
 		AccountID: o.Existing.AccountID,
 		Store:     o.TokenStore,
-	}, true, nil
+	}
+	if err := llmprovider.ValidateOAuthSession(session); err != nil {
+		return nil, false, fmt.Errorf("wizard: the saved %s session cannot be kept (%w); sign in again", d.Label, err)
+	}
+	return session, true, nil
 }
 
 func resolveTokenStdin(
@@ -311,6 +315,9 @@ func saveOAuthCredential(
 ) (resolvedCredential, error) {
 	if session == nil {
 		return resolvedCredential{}, errors.New("wizard: OAuth login returned no session")
+	}
+	if err := llmprovider.ValidateOAuthSession(session); err != nil {
+		return resolvedCredential{}, fmt.Errorf("wizard: refusing to save the OAuth session: %w", err)
 	}
 	session.Provider = provider
 	session.Store = store
