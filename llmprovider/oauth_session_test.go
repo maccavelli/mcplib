@@ -6,10 +6,71 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// jwtShapedDescription gives the redactor a token to remove from an error body.
+const jwtShapedDescription = "eyJhbGciOiJub25lIn0.aaa.bbb"
+
+func TestExchangeOAuthCode_IncludesRedactedBody(t *testing.T) {
+	t.Parallel()
+	srv := tokenErrorServer(t, `{"error":"invalid_grant","error_description":"`+jwtShapedDescription+`"}`)
+	_, err := exchangeOAuthCode(context.Background(),
+		oauthFlowConfig{provider: ProviderGrok, clientID: "test-client", httpClient: srv.Client()},
+		srv.URL, "code", "http://127.0.0.1/callback", "verifier")
+	assertRedactedTokenError(t, err)
+}
+
+func TestRefreshOAuthSession_IncludesRedactedBody(t *testing.T) {
+	t.Parallel()
+	srv := tokenErrorServer(t, `{"error":"invalid_grant","error_description":"`+jwtShapedDescription+`"}`)
+	_, _, err := refreshOAuthSession(context.Background(), oauthSessionState{
+		provider: ProviderGrok, refresh: "refresh", clientID: "test-client", tokenURL: srv.URL, httpClient: srv.Client(),
+	})
+	assertRedactedTokenError(t, err)
+}
+
+func TestOAuthTokenError_CapsBody(t *testing.T) {
+	t.Parallel()
+	srv := tokenErrorServer(t, strings.Repeat("A", 4096))
+	_, err := exchangeOAuthCode(context.Background(),
+		oauthFlowConfig{provider: ProviderGrok, clientID: "test-client", httpClient: srv.Client()},
+		srv.URL, "code", "http://127.0.0.1/callback", "verifier")
+	if err == nil {
+		t.Fatal("exchangeOAuthCode() error = nil, want the 400")
+	}
+	if msg := err.Error(); !strings.Contains(msg, strings.Repeat("A", 2048)) || strings.Contains(msg, strings.Repeat("A", 2049)) {
+		t.Fatalf("error carries %d body bytes, want exactly the first 2048", strings.Count(msg, "A"))
+	}
+}
+
+func tokenErrorServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func assertRedactedTokenError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want the token endpoint's 400")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "400") || !strings.Contains(msg, "invalid_grant") {
+		t.Errorf("error = %q, want the status and the body's invalid_grant", msg)
+	}
+	if strings.Contains(msg, "eyJ") {
+		t.Errorf("error = %q leaks the JWT-shaped value", msg)
+	}
+}
 
 type failingTokenStore struct {
 	err          error

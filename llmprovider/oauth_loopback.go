@@ -505,11 +505,7 @@ func exchangeOAuthCode(
 		return nil, fmt.Errorf("oauth: token request: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		statusErr := fmt.Errorf("oauth: token exchange failed: %s", resp.Status)
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			return nil, errors.Join(statusErr, fmt.Errorf("oauth: close token response: %w", closeErr))
-		}
-		return nil, statusErr
+		return nil, oauthHTTPStatusError("token exchange", resp)
 	}
 	var payload oauthTokenResponse
 	if err := decodeOAuthResponse(resp, &payload); err != nil {

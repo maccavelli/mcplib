@@ -5,16 +5,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/maccavelli/mcplib/logging"
 )
 
 const (
 	oauthRefreshSkew         = 2 * time.Minute
 	oauthAuthorizationHeader = "Authorization"
+	// oauthErrorBodyLimit caps how much of a failed token response an error
+	// carries (MADR 0009 D8).
+	oauthErrorBodyLimit = 2048
 )
+
+// oauthHTTPStatusError reports a failed token-endpoint response by its status
+// and the first oauthErrorBodyLimit bytes of its body, redacted. It closes the
+// body; the raw body is never logged.
+func oauthHTTPStatusError(op string, resp *http.Response) error {
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, oauthErrorBodyLimit))
+	closeErr := resp.Body.Close()
+	err := fmt.Errorf("oauth: %s failed: %s: %s", op, resp.Status,
+		logging.RedactString(strings.TrimSpace(string(body))))
+	if readErr != nil {
+		err = errors.Join(err, fmt.Errorf("oauth: read %s response: %w", op, readErr))
+	}
+	if closeErr != nil {
+		err = errors.Join(err, fmt.Errorf("oauth: close %s response: %w", op, closeErr))
+	}
+	return err
+}
 
 type oauthRefreshResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -152,11 +175,7 @@ func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSe
 		return nil, Token{}, fmt.Errorf("oauth: refresh request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		statusErr := fmt.Errorf("oauth: refresh failed: %s", resp.Status)
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			return nil, Token{}, errors.Join(statusErr, fmt.Errorf("oauth: close refresh response: %w", closeErr))
-		}
-		return nil, Token{}, statusErr
+		return nil, Token{}, oauthHTTPStatusError("refresh", resp)
 	}
 
 	var payload oauthRefreshResponse
