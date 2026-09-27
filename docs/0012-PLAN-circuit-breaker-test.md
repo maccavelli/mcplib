@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: complete
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -67,7 +67,17 @@ None yet.
 
 ## 10. Execution record
 
-Not executed. Appendix A was proven in scratch copies of `5d05cf5`.
+**B1, 2026-09-27, commit `05a1fcf`.**
+* Appendix B applied with `git apply`. The result is byte-identical to the
+  proven file.
+* The gate passed: `gofmt`, `golint`, `go vet` (both), `make lint`,
+  `go test ./...` and `go test -race ./llmprovider ./wizard`.
+* Mutants, re-run on a scratch copy of the executed tree:
+  * `cb-handler-select-forever: exit=1 KILLED :: timed out (hang)`
+  * `cb-no-release: exit=1 KILLED :: timed out (hang)`
+  * `cb-counts-cancelled: exit=1 KILLED :: backplane_test.go:290: circuit breaker tripped on context cancellation — should be ignored`
+* Stress, 3,000 runs under `-race -cpu 1,2,4` on the executed tree:
+  `ok  	github.com/maccavelli/mcplib	160.055s`.
 
 ## Appendix A — Proof record (2026-09-27, scratch copies of `5d05cf5`)
 
