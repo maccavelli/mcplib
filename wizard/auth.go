@@ -22,6 +22,10 @@ const (
 	CredAPIKey CredentialKind = "api_key"
 	// CredOAuth means the OAuth fields contain a refreshable or access-only session.
 	CredOAuth CredentialKind = "oauth"
+	// CredVendorCLI means VendorAuthPath names a vendor CLI's auth file, read on
+	// every request through llmprovider.VendorCLISession; the CLI keeps it
+	// fresh and mcplib holds no token (MADR 0012 §5.1).
+	CredVendorCLI CredentialKind = "vendor_cli"
 )
 
 // ErrOrchestrated reports that an orchestrator-owned process must use the LLM backplane.
@@ -33,10 +37,11 @@ var (
 )
 
 type resolvedCredential struct {
-	kind    CredentialKind
-	apiKey  string
-	session *llmprovider.OAuthSession
-	source  llmprovider.TokenSource
+	kind       CredentialKind
+	apiKey     string
+	session    *llmprovider.OAuthSession
+	source     llmprovider.TokenSource
+	vendorPath string
 }
 
 func orchestrated(o Options) bool {
@@ -83,6 +88,9 @@ func resolveCredential(
 	if method == llmprovider.AuthTokenStdin {
 		return resolveTokenStdin(ctx, p, d, o)
 	}
+	if method == llmprovider.AuthImportVendorCLI {
+		return resolveVendorCLI(ctx, p, d, o)
+	}
 	if o.TokenStore == nil {
 		return resolvedCredential{}, errors.New("wizard: TokenStore is required for OAuth")
 	}
@@ -107,23 +115,38 @@ func resolveCredential(
 			return resolvedCredential{}, loginErr
 		}
 		return saveOAuthCredential(ctx, o.TokenStore, d.ID, session)
-	case llmprovider.AuthImportVendorCLI:
-		session, importErr := importVendorSession(d.ID, o)
-		if importErr != nil {
-			return resolvedCredential{}, importErr
-		}
-		use, confirmErr := p.Confirm(
-			fmt.Sprintf("Import the existing session (%s)?", logging.MaskSecret(session.Access)), true)
-		if confirmErr != nil {
-			return resolvedCredential{}, confirmErr
-		}
-		if !use {
-			return resolvedCredential{}, errors.New("wizard: vendor session import declined")
-		}
-		return saveOAuthCredential(ctx, o.TokenStore, d.ID, session)
 	default:
 		return resolvedCredential{}, fmt.Errorf("wizard: unsupported authentication method %q", method)
 	}
+}
+
+// resolveVendorCLI uses a vendor CLI's login read-through: it checks the
+// file holds a live token, asks, and returns the path, never the tokens
+// (MADR 0012 §5.1). No TokenStore is needed.
+func resolveVendorCLI(
+	ctx context.Context,
+	p Prompter,
+	d llmprovider.ProviderDescriptor,
+	o Options,
+) (resolvedCredential, error) {
+	path, err := vendorAuthPath(d.ID, o)
+	if err != nil {
+		return resolvedCredential{}, err
+	}
+	session := &llmprovider.VendorCLISession{Provider: d.ID, Path: path}
+	token, err := session.Token(ctx)
+	if err != nil {
+		return resolvedCredential{}, err
+	}
+	use, err := p.Confirm(fmt.Sprintf("Use the %s CLI login in %s (%s)?", d.Label, path,
+		logging.MaskSecret(token.Value)), true)
+	if err != nil {
+		return resolvedCredential{}, err
+	}
+	if !use {
+		return resolvedCredential{}, errors.New("wizard: vendor CLI login declined")
+	}
+	return resolvedCredential{kind: CredVendorCLI, source: session, vendorPath: path}, nil
 }
 
 func staticCredential(kind CredentialKind, key string) resolvedCredential {

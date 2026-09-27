@@ -34,6 +34,9 @@ type Result struct {
 	Model        string
 	BaseURL      string
 	Fallbacks    []string
+	// VendorAuthPath is the vendor CLI auth file a CredVendorCLI result reads
+	// through; consumers persist it and build llmprovider.VendorCLISession.
+	VendorAuthPath string
 }
 
 // Options controls the flow. The zero value runs a full interactive
@@ -133,6 +136,7 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 	}
 	res.Kind = credential.kind
 	res.APIKey = credential.apiKey
+	res.VendorAuthPath = credential.vendorPath
 	if credential.session != nil {
 		res.AccessToken = credential.session.Access
 		res.RefreshToken = credential.session.Refresh
@@ -278,7 +282,7 @@ func discoverModels(
 	source llmprovider.TokenSource,
 	o Options,
 ) llmprovider.ModelCatalog {
-	chatGPT := res.Kind == CredOAuth && d.ID == llmprovider.ProviderOpenAI
+	chatGPT := (res.Kind == CredOAuth || res.Kind == CredVendorCLI) && d.ID == llmprovider.ProviderOpenAI
 	// A ChatGPT session lists only from the Codex backend (MADR 0009 D11):
 	// the Platform catalog is not available to it, so there is no fallback.
 	static := d.StaticModels

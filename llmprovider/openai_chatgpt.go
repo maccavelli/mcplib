@@ -48,11 +48,18 @@ func NewOpenAIWithSource(src TokenSource, model string, opts ...ProviderOption) 
 }
 
 func isChatGPTTokenSource(src TokenSource) bool {
+	if vendor, ok := src.(*VendorCLISession); ok {
+		return vendor.Provider == ProviderOpenAI
+	}
 	session, ok := src.(*OAuthSession)
 	return ok && session.ChatGPT()
 }
 
 func openAIAccountID(src TokenSource) string {
+	if vendor, ok := src.(*VendorCLISession); ok {
+		accountID, _ := vendor.vendorAccount()
+		return accountID
+	}
 	session, ok := src.(*OAuthSession)
 	if !ok {
 		return ""
@@ -64,6 +71,10 @@ func openAIAccountID(src TokenSource) string {
 
 // openAIFedRAMP reports whether src is a FedRAMP ChatGPT session.
 func openAIFedRAMP(src TokenSource) bool {
+	if vendor, ok := src.(*VendorCLISession); ok {
+		_, fedramp := vendor.vendorAccount()
+		return fedramp
+	}
 	session, ok := src.(*OAuthSession)
 	if !ok {
 		return false

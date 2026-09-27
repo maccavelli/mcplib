@@ -106,7 +106,7 @@ func TestConfigureLLM_DoesNotOfferClaudeOAuth(t *testing.T) {
 }
 
 func TestConfigureLLM_OAuthMethodsRequireTokenStore(t *testing.T) {
-	for _, authIdx := range []int{1, 2, 4} {
+	for _, authIdx := range []int{1, 2} {
 		f := &fakePrompter{
 			t:       t,
 			selects: []int{providerIdx(t, llmprovider.ProviderOpenAI), authIdx},

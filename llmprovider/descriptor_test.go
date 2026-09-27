@@ -49,7 +49,7 @@ func TestDescriptors_OpenAIAndGrokOfferOAuth(t *testing.T) {
 			},
 			{
 				ID:          AuthImportVendorCLI,
-				Label:       "Import ~/.codex/auth.json",
+				Label:       "Use the Codex CLI login (~/.codex/auth.json)",
 				Interactive: true,
 				HeadlessOK:  true,
 			},
@@ -81,7 +81,7 @@ func TestDescriptors_OpenAIAndGrokOfferOAuth(t *testing.T) {
 			},
 			{
 				ID:          AuthImportVendorCLI,
-				Label:       "Import ~/.grok/auth.json",
+				Label:       "Use the Grok CLI login (~/.grok/auth.json)",
 				Interactive: true,
 				HeadlessOK:  true,
 			},

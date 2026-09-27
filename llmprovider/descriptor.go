@@ -100,7 +100,7 @@ var descriptorSpecs = []struct {
 			},
 			{
 				ID:          AuthImportVendorCLI,
-				Label:       "Import ~/.codex/auth.json",
+				Label:       "Use the Codex CLI login (~/.codex/auth.json)",
 				Interactive: true,
 				HeadlessOK:  true,
 			},
@@ -136,7 +136,7 @@ var descriptorSpecs = []struct {
 			},
 			{
 				ID:          AuthImportVendorCLI,
-				Label:       "Import ~/.grok/auth.json",
+				Label:       "Use the Grok CLI login (~/.grok/auth.json)",
 				Interactive: true,
 				HeadlessOK:  true,
 			},
