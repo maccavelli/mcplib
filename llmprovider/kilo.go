@@ -53,10 +53,15 @@ type KiloProvider struct {
 	identity clientIdentity
 }
 
-// NewKilo creates a Kilo Gateway provider.
+// kiloAnonymousToken is the bearer Kilo's own client sends without a login;
+// free models answer it and paid ones fail with a typed error (MADR 0012 §1.7).
+const kiloAnonymousToken = "anonymous"
+
+// NewKilo creates a Kilo Gateway provider. An empty apiKey uses Kilo's
+// anonymous token.
 func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("kilo api key is required")
+		apiKey = kiloAnonymousToken
 	}
 	cfg := ApplyOptions(opts)
 	baseURL := kiloBaseURL

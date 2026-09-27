@@ -402,8 +402,9 @@ func TestOpencode_ConstructorErrors(t *testing.T) {
 	if _, err := NewOpencode("nope", "k", "m"); err == nil {
 		t.Error("expected error for unknown gateway")
 	}
-	if _, err := NewOpencode(ProviderOpencodeZen, "", "m"); err == nil {
-		t.Error("expected error for empty api key")
+	// MADR 0012 §1.7: an empty key is the gateway's public token, not an error.
+	if _, err := NewOpencode(ProviderOpencodeZen, "", "m"); err != nil {
+		t.Errorf("empty api key: %v, want the public token", err)
 	}
 	_, err := NewOpencode(ProviderOpencodeZen, "k", "m", WithOpencodeRoute(OpencodeRoute("bogus")))
 	if !errors.Is(err, ErrInvalidRequest) {

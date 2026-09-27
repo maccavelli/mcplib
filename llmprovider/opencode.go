@@ -44,16 +44,21 @@ type OpencodeProvider struct {
 // gateways use it for routing and prompt caching.
 const opencodeSessionHeader = "x-opencode-session"
 
+// opencodePublicToken is the key the Zen/Go server treats as anonymous; free
+// models answer it and paid ones fail with a typed error (MADR 0012 §1.7).
+const opencodePublicToken = "public"
+
 // NewOpencode creates an OpenCode gateway provider. gateway must be
 // ProviderOpencodeZen or ProviderOpencodeGo. The wire format is resolved once,
 // here, so a misroute is a construction-time fact rather than a per-call surprise.
+// An empty apiKey uses the gateway's public token.
 func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*OpencodeProvider, error) {
 	defaultBase, err := opencodeBaseURL(gateway)
 	if err != nil {
 		return nil, err
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("opencode api key is required")
+		apiKey = opencodePublicToken
 	}
 	cfg := ApplyOptions(opts)
 	baseURL := defaultBase
