@@ -166,7 +166,7 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 	// response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if err := classifyHTTPStatus(ProviderHuggingFace, resp); err != nil {
+	if err := classifyHTTPError(ProviderHuggingFace, resp); err != nil {
 		return nil, err
 	}
 	return decodeChatCompletionsResponse(limitedBody)

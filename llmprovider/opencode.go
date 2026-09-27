@@ -297,7 +297,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	// response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if err := classifyHTTPStatus(p.gateway+"/"+string(p.route), resp); err != nil {
+	if err := classifyHTTPError(p.gateway+"/"+string(p.route), resp); err != nil {
 		return nil, err
 	}
 

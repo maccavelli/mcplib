@@ -206,17 +206,8 @@ func (p *ClaudeProvider) doGenerateItems(ctx context.Context, input []Item, tool
 
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode, Provider: ProviderClaude}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return nil, fmt.Errorf("%w: claude HTTP %d", ErrAuthFailure, resp.StatusCode)
-		case resp.StatusCode >= 500:
-			return nil, fmt.Errorf("%w: claude HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return nil, fmt.Errorf("%w: claude HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
+	if err := classifyHTTPError(ProviderClaude, resp); err != nil {
+		return nil, err
 	}
 
 	return decodeClaudeResponse(limitedBody)

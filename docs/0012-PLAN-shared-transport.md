@@ -385,9 +385,28 @@ depends on T1's `APIError`. There is no data migration.
 
 ## 9. Deviation log
 
-*(Empty.)*
+* **2026-09-27 — T1 clarification: `APIError` unwraps to two sentinels.**
+  * The conflict: MADR §1.1 maps a 402 to `ErrQuotaExhausted`. Today a 402
+    is `ErrInvalidRequest`, and `TestClassifyHTTPStatus` pins that. MADR §7
+    requires every existing sentinel to "still match the conditions it
+    matched before".
+  * The resolution satisfies both clauses: `APIError.Unwrap() []error`
+    returns the classified sentinel and, when it differs, the sentinel the
+    status alone gave before 0012. A Kilo 402 therefore matches
+    `ErrQuotaExhausted`, `ErrRateLimited` (through `ErrQuotaExhausted`) and
+    `ErrInvalidRequest`.
+  * The retry loop decides from `APIError.Terminal`, not from the legacy
+    sentinel. That is what lets a 408 retry (B4) while it still matches
+    `ErrInvalidRequest`.
+  * No decision changes. `TestClassifyHTTPStatus` keeps its assertions, and
+    only its call is renamed to `classifyHTTPError`.
+  * The per-provider `openAIAuthError` and `grokAuthError` are replaced by
+    `*APIError`. The forced refresh after a 401 now checks
+    `APIError.Status`.
 
 ## 10. Execution record
 
-*(Filled during execution: per phase, the commit, the red messages, the
-gate, the mutants and the live results.)*
+| Phase | Commit | Red (unfixed code) | Mutants | Gate |
+|---|---|---|---|---|
+| T0 | `46c5510` | n/a | n/a | baseline `go test ./...` passed |
+| T1 | the T1 commit | `TestProviders_ErrorCarriesServiceMessage` ran on an archive of HEAD. All 11 providers and routes failed with the body discarded, e.g. `llm: invalid request: claude HTTP 400, want it to carry the service's message` | 10 killed: FreeTierError not special-cased; 525 retryable; no 408 rule; 402 not quota; no legacy unwrap (`TestClassifyHTTPStatus`: `want wrapping llm: invalid request`); Kilo body scan off; no message bound; no redaction; a plain 429 as `*APIError`; flat xAI message dropped | PASS; `make lint` needed fixes in the new code first (errorlint, goconst, revive, bodyclose, errcheck) |

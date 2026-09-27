@@ -182,7 +182,7 @@ func (p *OllamaProvider) doGenerateItems(ctx context.Context, input []Item, tool
 	// response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if err := classifyHTTPStatus(ProviderOllama, resp); err != nil {
+	if err := classifyHTTPError(ProviderOllama, resp); err != nil {
 		return nil, err
 	}
 	return decodeChatCompletionsResponse(limitedBody)

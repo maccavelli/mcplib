@@ -206,7 +206,7 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 	// response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if err := classifyHTTPStatus(ProviderKilo, resp); err != nil {
+	if err := classifyHTTPError(ProviderKilo, resp); err != nil {
 		return nil, err
 	}
 	return decodeChatCompletionsResponse(limitedBody)

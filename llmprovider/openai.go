@@ -108,8 +108,8 @@ func (p *OpenAIProvider) Continue(ctx context.Context, previousResponseID string
 
 func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
 	response, err := p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
-	var authErr *openAIAuthError
-	if err == nil || !errors.As(err, &authErr) || authErr.status != http.StatusUnauthorized || !expireOpenAISession(p.src) {
+	var apiErr *APIError
+	if err == nil || !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized || !expireOpenAISession(p.src) {
 		return response, err
 	}
 	return p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
@@ -183,17 +183,8 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode, Provider: ProviderOpenAI}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return nil, &openAIAuthError{status: resp.StatusCode}
-		case resp.StatusCode >= 500:
-			return nil, fmt.Errorf("%w: openai HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return nil, fmt.Errorf("%w: openai HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
+	if err := classifyHTTPError(ProviderOpenAI, resp); err != nil {
+		return nil, err
 	}
 
 	return decodeResponsesAPIOutput(limitedBody)

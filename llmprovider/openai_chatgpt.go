@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -39,18 +38,6 @@ func NewOpenAIWithSource(src TokenSource, model string, opts ...ProviderOption) 
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 	}, nil
-}
-
-type openAIAuthError struct {
-	status int
-}
-
-func (err *openAIAuthError) Error() string {
-	return fmt.Sprintf("%v: openai HTTP %d", ErrAuthFailure, err.status)
-}
-
-func (err *openAIAuthError) Unwrap() error {
-	return ErrAuthFailure
 }
 
 func isChatGPTTokenSource(src TokenSource) bool {

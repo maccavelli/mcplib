@@ -80,13 +80,20 @@ type RateLimitError struct {
 	// caller holds several providers. Empty is valid and reproduces the
 	// original message verbatim.
 	Provider string
+	// Message is the service's own explanation, redacted and bounded (MADR
+	// 0012 §1.1). Empty reproduces the original message verbatim.
+	Message string
 }
 
 func (e *RateLimitError) Error() string {
-	if e.Provider == "" {
-		return fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	msg := fmt.Sprintf("%v: HTTP %d (retry-after %s)", ErrRateLimited, e.Status, e.RetryAfter)
+	if e.Provider != "" {
+		msg = fmt.Sprintf("%v: %s HTTP %d (retry-after %s)", ErrRateLimited, e.Provider, e.Status, e.RetryAfter)
 	}
-	return fmt.Sprintf("%v: %s HTTP %d (retry-after %s)", ErrRateLimited, e.Provider, e.Status, e.RetryAfter)
+	if e.Message != "" {
+		msg += ": " + e.Message
+	}
+	return msg
 }
 
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }

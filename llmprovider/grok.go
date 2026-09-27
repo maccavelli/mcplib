@@ -151,8 +151,8 @@ func itemsToInput(items []Item) []map[string]any {
 
 func (p *GrokProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
 	response, err := p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
-	var authErr *grokAuthError
-	if err == nil || !errors.As(err, &authErr) || authErr.status != http.StatusUnauthorized || !expireGrokSession(p.src) {
+	var apiErr *APIError
+	if err == nil || !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized || !expireGrokSession(p.src) {
 		return response, err
 	}
 	return p.doGenerateItemsOnce(ctx, input, tool, thinking, prevResponseID)
@@ -217,17 +217,8 @@ func (p *GrokProvider) doGenerateItemsOnce(ctx context.Context, input []Item, to
 	// Applied BEFORE status check so error response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if resp.StatusCode != http.StatusOK {
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Status: resp.StatusCode, Provider: ProviderGrok}
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-			return nil, &grokAuthError{status: resp.StatusCode}
-		case resp.StatusCode >= 500:
-			return nil, fmt.Errorf("%w: grok HTTP %d", ErrProviderUnavailable, resp.StatusCode)
-		default:
-			return nil, fmt.Errorf("%w: grok HTTP %d", ErrInvalidRequest, resp.StatusCode)
-		}
+	if err := classifyHTTPError(ProviderGrok, resp); err != nil {
+		return nil, err
 	}
 
 	return decodeResponsesAPIOutput(limitedBody)
@@ -258,18 +249,6 @@ func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		return healthy, nil
 	}
 	return listed, nil
-}
-
-type grokAuthError struct {
-	status int
-}
-
-func (err *grokAuthError) Error() string {
-	return fmt.Sprintf("%v: grok HTTP %d", ErrAuthFailure, err.status)
-}
-
-func (err *grokAuthError) Unwrap() error {
-	return ErrAuthFailure
 }
 
 func expireGrokSession(src TokenSource) bool {
