@@ -35,6 +35,7 @@ type OpencodeProvider struct {
 	reasoningEffort string
 	route           OpencodeRoute
 	metadataURL     string
+	modelProfile    ModelProfile
 	// sessionID is sent as x-opencode-session on every request, fixed for the
 	// provider's lifetime (MADR 0012 §1.4, pulled forward by 0010 Phase 6).
 	sessionID string
@@ -76,6 +77,7 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 		reasoningEffort: cfg.ReasoningEffort,
 		route:           route,
 		metadataURL:     cfg.ModelMetadataURL,
+		modelProfile:    cfg.ModelProfile,
 		sessionID:       rand.Text(),
 	}, nil
 }
@@ -352,8 +354,10 @@ func firstFunctionCallArgs(resp *Response, provider string) (string, error) {
 // format and 500 on most of them.
 func (p *OpencodeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listOpencodeModels(ctx, p.gateway, p.apiKey, ProviderConfig{
-		HTTPClient: p.client,
-		BaseURL:    p.baseURL,
+		HTTPClient:       p.client,
+		BaseURL:          p.baseURL,
+		ModelProfile:     p.modelProfile,
+		ModelMetadataURL: p.metadataURL,
 	})
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(p.gateway)

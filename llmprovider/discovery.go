@@ -28,6 +28,11 @@ const (
 	claudeListPageLimit = "1000"
 )
 
+// modelListingTimeout bounds one model listing, its metadata fetch included
+// (MADR 0010 §2). ListModelCatalogWithSource and every DiscoverModels listing
+// apply it (MADR 0013 A5).
+const modelListingTimeout = 10 * time.Second
+
 // ModelCatalog is the result of one model listing, viewed two ways.
 type ModelCatalog struct {
 	// Recommended is what ListAvailableModels returns: at most
@@ -69,7 +74,7 @@ func ListModelCatalog(ctx context.Context, providerName, apiKey string, opts ...
 func ListModelCatalogWithSource(ctx context.Context, providerName string, src TokenSource, opts ...ProviderOption) (ModelCatalog, error) {
 	cfg := ApplyOptions(opts)
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, modelListingTimeout)
 	defer cancel()
 	if strings.EqualFold(providerName, ProviderOpenAI) && isChatGPTTokenSource(src) {
 		return listChatGPTModels(ctx, src, cfg)
@@ -82,6 +87,14 @@ func ListModelCatalogWithSource(ctx context.Context, providerName string, src To
 		return ModelCatalog{}, fmt.Errorf("model listing: acquire token: %w", err)
 	}
 	return modelCatalogFor(ctx, providerName, token.Value, cfg)
+}
+
+// boundedListing runs one DiscoverModels listing under modelListingTimeout
+// and returns its recommendation (MADR 0013 A5).
+func boundedListing(ctx context.Context, list func(context.Context) (ModelCatalog, error)) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, modelListingTimeout)
+	defer cancel()
+	return recommendedOf(list(ctx))
 }
 
 // recommendedOf adapts a catalog result to the ListAvailableModels contract.
@@ -262,7 +275,9 @@ func modelCatalogFor(ctx context.Context, providerName, apiKey string, cfg Provi
 
 // listGeminiModels lists Gemini models and returns a short curated production set.
 func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(modelCatalogFor(ctx, ProviderGemini, apiKey, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return modelCatalogFor(ctx, ProviderGemini, apiKey, cfg)
+	})
 }
 
 // geminiModelsPage is one page of Gemini's GET {base}/models.
@@ -358,7 +373,9 @@ func curateOpenAI(usable []string) []string {
 // listClaudeModels uses Anthropic's Models API when available; otherwise returns
 // the curated static catalog (Anthropic historically lacked a public list endpoint).
 func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(modelCatalogFor(ctx, ProviderClaude, apiKey, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return modelCatalogFor(ctx, ProviderClaude, apiKey, cfg)
+	})
 }
 
 // claudeModelsPage is one page of Anthropic's GET /v1/models.
@@ -436,7 +453,9 @@ func curateClaude(usable []string) []string {
 
 // listOllamaModels fetches installed models from a local Ollama instance.
 func listOllamaModels(ctx context.Context, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(ollamaCatalog(ctx, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return ollamaCatalog(ctx, cfg)
+	})
 }
 
 // ollamaCatalog lists every installed model. Ollama has no static catalog, so
@@ -588,7 +607,9 @@ func filterIDs(ids []string, usable func(string) bool) []string {
 // owned_by "opencode"), so route selection cannot be derived from it; see
 // opencode_route.go.
 func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(opencodeCatalog(ctx, gateway, apiKey, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return opencodeCatalog(ctx, gateway, apiKey, cfg)
+	})
 }
 
 // opencodeCatalog lists one OpenCode gateway. An unknown gateway is an error,
@@ -641,7 +662,9 @@ func hasText(mods []string) bool { return slices.Contains(mods, jsonKeyText) }
 // (tokens/sec) and first_token_latency_ms per provider offering. The sorted
 // order is handed to curateFromCatalog with a nil rankFn, which preserves it.
 func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(modelCatalogFor(ctx, ProviderHuggingFace, apiKey, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return modelCatalogFor(ctx, ProviderHuggingFace, apiKey, cfg)
+	})
 }
 
 // fetchHuggingFaceUsable returns the usable router models, fastest first: input
@@ -832,7 +855,9 @@ func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 // Models flagged mayTrainOnYourPrompts are excluded. That is a POLICY decision,
 // not a capability filter — see isUsableKiloModel's comment.
 func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-	return recommendedOf(modelCatalogFor(ctx, ProviderKilo, apiKey, cfg))
+	return boundedListing(ctx, func(ctx context.Context) (ModelCatalog, error) {
+		return modelCatalogFor(ctx, ProviderKilo, apiKey, cfg)
+	})
 }
 
 // kiloUsable returns the usable Kilo models, cheapest first: input must include

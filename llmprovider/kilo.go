@@ -44,6 +44,7 @@ type KiloProvider struct {
 	client          *http.Client
 	maxTokens       int
 	reasoningEffort string
+	modelProfile    ModelProfile
 	// caps is the model's supported_parameters set, from WithKiloCapabilities.
 	// nil means "unknown" — send the standard request rather than guessing a
 	// model lacks a capability.
@@ -74,6 +75,7 @@ func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error
 		client:          cfg.HTTPClient,
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
+		modelProfile:    cfg.ModelProfile,
 		caps:            caps,
 	}, nil
 }
@@ -216,8 +218,9 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 // than sending everything.
 func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listKiloModels(ctx, p.apiKey, ProviderConfig{
-		HTTPClient: p.client,
-		BaseURL:    p.baseURL,
+		HTTPClient:   p.client,
+		BaseURL:      p.baseURL,
+		ModelProfile: p.modelProfile,
 	})
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderKilo)

@@ -44,7 +44,7 @@ type ProviderConfig struct {
 	KiloCapabilities []string
 	// ModelProfile selects how the recommended models of the open catalogs
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
-	// ProfileUtility. Ignored by provider constructors.
+	// ProfileUtility. Those providers' DiscoverModels ranks with it too.
 	ModelProfile ModelProfile
 	// ModelMetadataURL overrides the models.dev-format document the open
 	// catalogs are ranked with, and OpenCode's chat route reads
@@ -118,9 +118,9 @@ func WithKiloCapabilities(params ...string) ProviderOption {
 	}
 }
 
-// WithModelProfile selects how ListAvailableModels and ListModelCatalog rank
-// the recommended models of the open catalogs (MADR 0010 §1). Ignored by
-// provider constructors.
+// WithModelProfile selects how ListAvailableModels, ListModelCatalog and the
+// open catalogs' DiscoverModels rank the recommended models (MADR 0010 §1,
+// MADR 0013 A4).
 func WithModelProfile(p ModelProfile) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.ModelProfile = p

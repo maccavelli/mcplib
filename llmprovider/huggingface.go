@@ -41,6 +41,8 @@ type HuggingFaceProvider struct {
 	client          *http.Client
 	maxTokens       int
 	reasoningEffort string
+	modelProfile    ModelProfile
+	metadataURL     string
 }
 
 // NewHuggingFace creates a Hugging Face Inference Providers router client.
@@ -60,6 +62,8 @@ func NewHuggingFace(apiKey, model string, opts ...ProviderOption) (*HuggingFaceP
 		client:          cfg.HTTPClient,
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
+		modelProfile:    cfg.ModelProfile,
+		metadataURL:     cfg.ModelMetadataURL,
 	}, nil
 }
 
@@ -172,8 +176,10 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 // Falls back to the static catalog.
 func (p *HuggingFaceProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listHuggingFaceModels(ctx, p.apiKey, ProviderConfig{
-		HTTPClient: p.client,
-		BaseURL:    p.baseURL,
+		HTTPClient:       p.client,
+		BaseURL:          p.baseURL,
+		ModelProfile:     p.modelProfile,
+		ModelMetadataURL: p.metadataURL,
 	})
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderHuggingFace)
