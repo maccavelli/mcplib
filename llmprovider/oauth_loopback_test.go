@@ -542,6 +542,86 @@ func TestOAuthCallback_OpenAIHasNoGrokCORS(t *testing.T) {
 	assertWaiterIdle(t, result)
 }
 
+func TestParseOAuthInput_URLAndBareCode(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, input, code, errText string
+	}{
+		{name: "bare code", input: "  pasted-code  ", code: "pasted-code"},
+		{name: "URL with matching state", input: "http://127.0.0.1:1/callback?code=pasted-code&state=expected", code: "pasted-code"},
+		{name: "URL with mismatched state", input: "http://127.0.0.1:1/callback?code=pasted-code&state=other", errText: "state mismatch"},
+		{name: "URL with IdP error", input: "http://127.0.0.1:1/callback?error=access_denied&state=expected", errText: "access_denied"},
+		{name: "empty", input: "   ", errText: "empty authorization code"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			code, err := parseOAuthInput(test.input, "expected")
+			if test.errText != "" {
+				if err == nil || !strings.Contains(err.Error(), test.errText) {
+					t.Fatalf("parseOAuthInput() = %q/%v, want an error containing %q", code, err, test.errText)
+				}
+				return
+			}
+			if err != nil || code != test.code {
+				t.Fatalf("parseOAuthInput() = %q/%v, want %q", code, err, test.code)
+			}
+		})
+	}
+}
+
+// TestLoginBrowserOAuth_InputCodeWinsBeforeLoopback: a pasted redirect URL
+// completes the login when the browser never reaches the loopback (D3).
+func TestLoginBrowserOAuth_InputCodeWinsBeforeLoopback(t *testing.T) {
+	t.Parallel()
+
+	var exchanged string
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(t, w, `{"authorization_endpoint":`+strconv.Quote(srv.URL+"/authorize")+`,"token_endpoint":`+strconv.Quote(srv.URL+"/token")+`}`)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse token form: %v", err)
+		}
+		exchanged = r.PostForm.Get("code")
+		writeTestJSON(t, w, `{"access_token":"access","refresh_token":"refresh","expires_in":3600}`)
+	})
+
+	authorizeURLs := make(chan string, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	session, err := LoginBrowserOAuth(ctx, ProviderGrok, OAuthFlowOptions{
+		HTTPClient: srv.Client(),
+		ClientID:   "test-client",
+		Issuer:     srv.URL,
+		OpenURL: func(rawURL string) error {
+			authorizeURLs <- rawURL // the browser never reaches the loopback
+			return nil
+		},
+		InputCode: func(ctx context.Context) (string, error) {
+			select {
+			case rawURL := <-authorizeURLs:
+				authURL, err := url.Parse(rawURL)
+				if err != nil {
+					return "", err
+				}
+				query := authURL.Query()
+				return query.Get("redirect_uri") + "?code=pasted-secret&state=" + url.QueryEscape(query.Get("state")), nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoginBrowserOAuth() error = %v", err)
+	}
+	if session.Access != "access" || exchanged != "pasted-secret" {
+		t.Fatalf("session access = %q, exchanged code = %q; want access and pasted-secret", session.Access, exchanged)
+	}
+}
+
 func preflightRequest(target, origin string) *http.Request {
 	request := httptest.NewRequest(http.MethodOptions, target, http.NoBody)
 	request.Header.Set("Origin", origin)

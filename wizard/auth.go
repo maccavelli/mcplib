@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	mcplib "github.com/maccavelli/mcplib"
 	"github.com/maccavelli/mcplib/llmprovider"
@@ -93,13 +94,15 @@ func resolveCredential(
 		} else if keep {
 			return oauthCredential(session), nil
 		}
-		session, loginErr := loginBrowserOAuth(ctx, d.ID, oauthFlowOptions(p, o))
+		flow, drain := browserFlowOptions(p, o)
+		session, loginErr := loginBrowserOAuth(ctx, d.ID, flow)
+		drain()
 		if loginErr != nil {
 			return resolvedCredential{}, loginErr
 		}
 		return saveOAuthCredential(ctx, o.TokenStore, d.ID, session)
 	case llmprovider.AuthDeviceCode:
-		session, loginErr := loginDeviceOAuth(ctx, d.ID, oauthFlowOptions(p, o))
+		session, loginErr := loginDeviceOAuth(ctx, d.ID, oauthFlowOptions(p))
 		if loginErr != nil {
 			return resolvedCredential{}, loginErr
 		}
@@ -213,19 +216,90 @@ func accessOnlyOpenAISession(access string) *llmprovider.OAuthSession {
 	}
 }
 
-func oauthFlowOptions(p Prompter, o Options) llmprovider.OAuthFlowOptions {
-	openURL := o.OpenURL
-	if openURL == nil {
-		openURL = func(authorizeURL string) error {
-			p.Notify(LevelInfo, "Open %s in your browser", authorizeURL)
-			return nil
-		}
-	}
+func oauthFlowOptions(p Prompter) llmprovider.OAuthFlowOptions {
 	return llmprovider.OAuthFlowOptions{
-		OpenURL: openURL,
 		NotifyDevice: func(verificationURL, userCode string) {
 			p.Notify(LevelInfo, "Open %s and enter code %s", verificationURL, userCode)
 		},
+	}
+}
+
+const pasteCodePrompt = "Paste the redirected URL or authorization code if the browser does not return"
+
+// browserFlowOptions adds MADR 0009 D3's paste-code race to oauthFlowOptions.
+// The authorize URL and the paste instruction are shown even when the consumer
+// opens the browser itself. The returned drain must run once the login
+// returns: it finishes a paste prompt the loopback overtook, so no later
+// prompt reads alongside it.
+func browserFlowOptions(p Prompter, o Options) (llmprovider.OAuthFlowOptions, func()) {
+	paste := &pastePrompt{p: p, shown: make(chan struct{})}
+	flow := oauthFlowOptions(p)
+	flow.OpenURL = func(authorizeURL string) error {
+		paste.show(authorizeURL)
+		if o.OpenURL == nil {
+			return nil
+		}
+		return o.OpenURL(authorizeURL)
+	}
+	flow.InputCode = paste.input
+	return flow, paste.drain
+}
+
+// pastePrompt is the paste-code prompt that races the loopback. The login
+// calls show and input on their own goroutines, so the prompter is used by
+// at most one of them at a time: input waits for show, and at most one read
+// is ever pending.
+type pastePrompt struct {
+	p     Prompter
+	shown chan struct{} // closed once the URL and instruction are shown
+
+	mu      sync.Mutex
+	done    bool          // drain ran: nothing further may use the prompter
+	pending chan struct{} // closed when the started read returns
+}
+
+func (s *pastePrompt) show(authorizeURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return
+	}
+	s.p.Notify(LevelInfo, "Open %s in your browser", authorizeURL)
+	s.p.Notify(LevelInfo, "If the browser does not return here, paste the redirected URL or the authorization code")
+	close(s.shown)
+}
+
+func (s *pastePrompt) input(ctx context.Context) (string, error) {
+	select {
+	case <-s.shown:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	s.mu.Lock()
+	if s.done || ctx.Err() != nil {
+		s.mu.Unlock()
+		return "", context.Canceled
+	}
+	pending := make(chan struct{})
+	s.pending = pending
+	s.mu.Unlock()
+	defer close(pending)
+	return s.p.Input(pasteCodePrompt, "")
+}
+
+func (s *pastePrompt) drain() {
+	s.mu.Lock()
+	s.done = true
+	pending := s.pending
+	s.mu.Unlock()
+	if pending == nil {
+		return
+	}
+	select {
+	case <-pending:
+	default:
+		s.p.Notify(LevelInfo, "Browser sign-in finished; press Enter to continue")
+		<-pending
 	}
 }
 

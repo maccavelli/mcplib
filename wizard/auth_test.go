@@ -3,9 +3,12 @@ package wizard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -381,3 +384,113 @@ func TestConfigureLLM_ChatGPTListingFailurePromptsForModel(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestConfigureLLM_BrowserOAuthSetsInputCode: browser sign-in races a paste
+// prompt, and the authorize URL and paste instruction are shown even when the
+// consumer opens the browser itself (MADR 0009 D3).
+func TestConfigureLLM_BrowserOAuthSetsInputCode(t *testing.T) {
+	stubBrowserLogin(t, func(_ context.Context, provider string, opts llmprovider.OAuthFlowOptions) (*llmprovider.OAuthSession, error) {
+		if opts.InputCode == nil {
+			t.Fatal("browser OAuth has no paste-code InputCode")
+		}
+		if err := opts.OpenURL("https://authorize.test"); err != nil {
+			t.Fatalf("OpenURL() error = %v", err)
+		}
+		return testOAuthSession(provider), nil
+	})
+	opened := 0
+	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), 1, 0}}
+	_, err := ConfigureLLM(context.Background(), f, Options{
+		TokenStore: newMemoryTokenStore(),
+		OpenURL:    func(string) error { opened++; return nil },
+	})
+	if err != nil {
+		t.Fatalf("ConfigureLLM() error = %v", err)
+	}
+	if opened != 1 {
+		t.Errorf("consumer OpenURL called %d times, want 1", opened)
+	}
+	if countContaining(f.seenNotify, "https://authorize.test") != 1 {
+		t.Errorf("notices = %v, want the authorize URL shown once", f.seenNotify)
+	}
+	pasteHint := false
+	for _, n := range f.seenNotify {
+		pasteHint = pasteHint || strings.Contains(strings.ToLower(n), "paste")
+	}
+	if !pasteHint {
+		t.Errorf("notices = %v, want a paste instruction", f.seenNotify)
+	}
+}
+
+// TestConfigureLLM_BrowserLoopbackWinDrainsPastePrompt: when the loopback wins
+// while the paste prompt is still reading, the wizard asks for Enter and waits
+// for that read before its next prompt, so two reads never share the input.
+func TestConfigureLLM_BrowserLoopbackWinDrainsPastePrompt(t *testing.T) {
+	p := &drainPrompter{
+		fakePrompter: &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), 1, 0}},
+		inputStarted: make(chan struct{}),
+		release:      make(chan struct{}),
+	}
+	stubBrowserLogin(t, func(ctx context.Context, provider string, opts llmprovider.OAuthFlowOptions) (*llmprovider.OAuthSession, error) {
+		if opts.InputCode == nil {
+			t.Fatal("browser OAuth has no paste-code InputCode")
+		}
+		if err := opts.OpenURL("https://authorize.test"); err != nil {
+			t.Fatalf("OpenURL() error = %v", err)
+		}
+		go func() { _, _ = opts.InputCode(ctx) }()
+		<-p.inputStarted
+		return testOAuthSession(provider), nil // the loopback won
+	})
+	res, err := ConfigureLLM(context.Background(), p, Options{TokenStore: newMemoryTokenStore()})
+	if err != nil {
+		t.Fatalf("ConfigureLLM() error = %v", err)
+	}
+	if res.Kind != CredOAuth || countContaining(p.seenNotify, "press Enter to continue") != 1 {
+		t.Fatalf("Kind = %q, notices = %v; want OAuth and one press-Enter notice", res.Kind, p.seenNotify)
+	}
+}
+
+// drainPrompter's Input blocks like a terminal read until the wizard asks for
+// the Enter that finishes it, and its Select fails a prompt that starts while
+// that read is pending.
+type drainPrompter struct {
+	*fakePrompter
+	inputStarted chan struct{}
+	release      chan struct{}
+	releaseOnce  sync.Once
+	reading      atomic.Bool
+}
+
+func (d *drainPrompter) Input(prompt, def string) (string, error) {
+	v, err := d.fakePrompter.Input(prompt, def)
+	if prompt != pasteCodePrompt {
+		return v, err
+	}
+	d.reading.Store(true)
+	close(d.inputStarted)
+	<-d.release
+	d.reading.Store(false)
+	return v, err
+}
+
+func (d *drainPrompter) Notify(level Level, format string, args ...any) {
+	d.fakePrompter.Notify(level, format, args...)
+	if strings.Contains(fmt.Sprintf(format, args...), "press Enter") {
+		d.releaseOnce.Do(func() { close(d.release) })
+	}
+}
+
+func (d *drainPrompter) Select(title string, choices []Choice, defaultIdx int) (int, error) {
+	if d.reading.Load() {
+		d.t.Errorf("Select(%q) started while the paste prompt was still reading", title)
+	}
+	return d.fakePrompter.Select(title, choices, defaultIdx)
+}
+
+func stubBrowserLogin(t *testing.T, login func(context.Context, string, llmprovider.OAuthFlowOptions) (*llmprovider.OAuthSession, error)) {
+	t.Helper()
+	original := loginBrowserOAuth
+	t.Cleanup(func() { loginBrowserOAuth = original })
+	loginBrowserOAuth = login
+}
