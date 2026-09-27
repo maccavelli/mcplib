@@ -44,6 +44,7 @@ func NewOpenAIWithSource(src TokenSource, model string, opts ...ProviderOption) 
 		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
+		store:           cfg.Store,
 	}, nil
 }
 

@@ -21,6 +21,9 @@ type OpenAIProvider struct {
 	reasoningEffort string // reasoning effort for the GenerateThinking path
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
+	// store is WithStore's value, or nil for the service default. A ChatGPT
+	// session ignores it.
+	store *bool
 }
 
 // defaultOpenAIReasoningEffort is used by GenerateThinking when none is configured.
@@ -137,6 +140,9 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 		body["prompt_cache_key"] = p.identity.session
 	} else {
 		body["max_output_tokens"] = p.maxTokens
+		if p.store != nil {
+			body["store"] = *p.store
+		}
 	}
 
 	if tool != nil {

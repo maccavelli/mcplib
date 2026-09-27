@@ -21,6 +21,8 @@ type GrokProvider struct {
 	reasoningEffort string // reasoning effort for the GenerateThinking path
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
+	// store is WithStore's value, or nil for the service default.
+	store *bool
 }
 
 // NewGrok creates a new Grok provider instance.
@@ -52,6 +54,7 @@ func newGrokWithSource(src TokenSource, model string, opts ...ProviderOption) (*
 		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
+		store:           cfg.Store,
 	}, nil
 }
 
@@ -174,13 +177,17 @@ func (p *GrokProvider) doGenerateItemsOnce(ctx context.Context, input []Item, to
 		jsonKeyInput:        itemsToInput(input),
 		"max_output_tokens": p.maxTokens,
 	}
+	if p.store != nil {
+		body["store"] = *p.store
+	}
 
 	if tool != nil {
 		body[jsonKeyTools] = []map[string]any{
 			{
-				jsonKeyType:       jsonKeyFunction,
-				jsonKeyName:       tool.Name,
-				jsonKeyParameters: tool.Schema,
+				jsonKeyType:        jsonKeyFunction,
+				jsonKeyName:        tool.Name,
+				jsonKeyDescription: tool.Description,
+				jsonKeyParameters:  tool.Schema,
 			},
 		}
 		body["tool_choice"] = map[string]any{

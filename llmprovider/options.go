@@ -57,6 +57,9 @@ type ProviderConfig struct {
 	// KiloOrganization scopes Kilo requests to an organization; see
 	// WithKiloOrganization. Ignored by all other providers.
 	KiloOrganization string
+	// Store sets the Responses API store field for OpenAI API-key mode and
+	// Grok; nil leaves the service default. See WithStore.
+	Store *bool
 	// ModelProfile selects how the recommended models of the open catalogs
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
 	// ProfileUtility. Those providers' DiscoverModels ranks with it too.
@@ -161,6 +164,17 @@ func WithKiloDataCollection(allow bool) ProviderOption {
 func WithKiloOrganization(id string) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.KiloOrganization = id
+	}
+}
+
+// WithStore sets whether OpenAI (API-key mode) and Grok store responses
+// (MADR 0012 §6). Without it the service default applies, which keeps
+// Continue working; callers under zero-data-retention pass false, after
+// which Continue has nothing to chain from. A ChatGPT session always sends
+// false. Ignored by all other providers.
+func WithStore(store bool) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.Store = &store
 	}
 }
 
