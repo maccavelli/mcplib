@@ -22,24 +22,32 @@ func TestLive_ToolRoundTrip(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name, env string
-		build     func(key string) (ItemProvider, error)
+		build     func(t *testing.T, key string) (ItemProvider, error)
 	}{
-		{"claude", "ANTHROPIC_API_KEY", func(k string) (ItemProvider, error) { return NewClaude(k, "claude-haiku-4-5") }},
-		{"gemini", "GEMINI_API_KEY", func(k string) (ItemProvider, error) {
+		{"claude", "ANTHROPIC_API_KEY", func(_ *testing.T, k string) (ItemProvider, error) { return NewClaude(k, "claude-haiku-4-5") }},
+		{"gemini", "GEMINI_API_KEY", func(_ *testing.T, k string) (ItemProvider, error) {
 			return NewGemini(context.Background(), k, "gemini-3.7-flash")
 		}},
-		{"grok", "XAI_API_KEY", func(k string) (ItemProvider, error) { return NewGrok(k, "grok-4.5") }},
-		{"kilo", "KILO_API_KEY", func(k string) (ItemProvider, error) { return NewKilo(k, "deepseek/deepseek-v4.1-flash") }},
-		{"go-chat", "OPENCODE_API_KEY", func(k string) (ItemProvider, error) { return NewOpencode(ProviderOpencodeGo, k, "glm-5.3-flash") }},
-		{"go-messages", "OPENCODE_API_KEY", func(k string) (ItemProvider, error) { return NewOpencode(ProviderOpencodeGo, k, "qwen3.8-flash") }},
-		{"go-responses", "OPENCODE_API_KEY", func(k string) (ItemProvider, error) { return NewOpencode(ProviderOpencodeGo, k, "gpt-6-luna") }},
+		{"grok", "XAI_API_KEY", func(_ *testing.T, k string) (ItemProvider, error) { return NewGrok(k, "grok-4.5") }},
+		{"kilo", "KILO_API_KEY", func(t *testing.T, k string) (ItemProvider, error) {
+			return NewKilo(k, liveModel(t, ProviderKilo, kiloNonTraining...))
+		}},
+		{"go-chat", "OPENCODE_API_KEY", func(t *testing.T, k string) (ItemProvider, error) {
+			return NewOpencode(ProviderOpencodeGo, k, liveModel(t, ProviderOpencodeGo, "glm-5.3-flash", "glm-5.3", "kimi-k2.6"))
+		}},
+		{"go-messages", "OPENCODE_API_KEY", func(t *testing.T, k string) (ItemProvider, error) {
+			return NewOpencode(ProviderOpencodeGo, k, liveModel(t, ProviderOpencodeGo, "qwen3.8-flash", "minimax-m3"))
+		}},
+		{"go-responses", "OPENCODE_API_KEY", func(t *testing.T, k string) (ItemProvider, error) {
+			return NewOpencode(ProviderOpencodeGo, k, liveModel(t, ProviderOpencodeGo, "gpt-6-luna", "grok-4.6"))
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			key := os.Getenv(c.env)
 			if key == "" {
 				t.Skipf("%s unset", c.env)
 			}
-			p, err := c.build(key)
+			p, err := c.build(t, key)
 			if err != nil {
 				t.Fatalf("construct: %v", err)
 			}

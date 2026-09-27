@@ -31,7 +31,8 @@ func TestLive_OpencodeResponsesStoreFalse(t *testing.T) {
 	var sent []byte
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "gpt-6-luna", WithHTTPClient(recordingClient(&sent)))
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), liveModel(t, ProviderOpencodeGo, "gpt-6-luna", "grok-4.6"),
+		WithHTTPClient(recordingClient(&sent)))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -56,7 +57,8 @@ func TestLive_OpencodeMinimaxM3Adaptive(t *testing.T) {
 	var sent []byte
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "minimax-m3", WithHTTPClient(recordingClient(&sent)))
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), liveModel(t, ProviderOpencodeGo, "minimax-m3"),
+		WithHTTPClient(recordingClient(&sent)))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}

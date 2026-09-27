@@ -35,7 +35,7 @@ func TestLive_InterleavedReasoningReplay(t *testing.T) {
 		}
 		return http.DefaultTransport.RoundTrip(r)
 	})}
-	p, err := NewOpencode(ProviderOpencodeGo, key, "kimi-k2.6", WithHTTPClient(client))
+	p, err := NewOpencode(ProviderOpencodeGo, key, liveModel(t, ProviderOpencodeGo, "kimi-k2.6"), WithHTTPClient(client))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}

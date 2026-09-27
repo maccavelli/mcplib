@@ -115,7 +115,8 @@ func getJSON(t *testing.T, url string, into any) int {
 func TestLive_OpencodeChatCompletions(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "hy3")
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t),
+		liveModel(t, ProviderOpencodeGo, "hy3", "glm-5.3-flash", "kimi-k2.6"))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -132,7 +133,8 @@ func TestLive_OpencodeChatCompletions(t *testing.T) {
 func TestLive_OpencodeResponses(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "gpt-6-luna")
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t),
+		liveModel(t, ProviderOpencodeGo, "gpt-6-luna", "grok-4.6"))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -159,7 +161,7 @@ func TestLive_OpencodeResponses(t *testing.T) {
 // route table rests on: routes are NOT interchangeable. If this fails, OpenCode
 // has become a translating gateway and the table is no longer necessary.
 func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
-	const model = "gpt-6-luna"
+	model := liveModel(t, ProviderOpencodeGo, "gpt-6-luna", "grok-4.6")
 	ctx, cancel := liveCtx(t)
 	defer cancel()
 
@@ -189,7 +191,7 @@ func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
 func TestLive_KiloChatCompletions(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithKiloDataCollection(true))
+	p, err := NewKilo(kiloKey(t), liveModel(t, ProviderKilo, kiloFreeCollecting...), WithKiloDataCollection(true))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
@@ -209,7 +211,8 @@ func TestLive_KiloChatCompletions(t *testing.T) {
 func TestLive_KiloToolCall(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo(kiloKey(t), "kilo-auto/free", WithMaxTokens(400), WithKiloDataCollection(true))
+	p, err := NewKilo(kiloKey(t), liveModel(t, ProviderKilo, kiloFreeCollecting...), WithMaxTokens(400),
+		WithKiloDataCollection(true))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}
@@ -239,7 +242,7 @@ func TestLive_KiloToolCall(t *testing.T) {
 func TestLive_KiloReasoningSpelling(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	body := chatCompletionsBody("kilo-auto/free", 400,
+	body := chatCompletionsBody(liveModel(t, ProviderKilo, kiloFreeCollecting...), 400,
 		[]Item{MessageItem{Role: jsonRoleUser, Text: "Say ALPHA only"}}, chatCompletionsOpts{})
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -490,8 +493,9 @@ func TestLive_ModelMetadataDocument(t *testing.T) {
 func TestLive_OpencodeChatReasoningEffort(t *testing.T) {
 	key := opencodeKey(t)
 	enableModelMetadata(t)
-	for _, model := range []string{"glm-5.3-flash", "hy3"} {
-		t.Run(model, func(t *testing.T) {
+	for _, candidate := range []string{"glm-5.3-flash", "hy3"} {
+		t.Run(candidate, func(t *testing.T) {
+			model := liveModel(t, ProviderOpencodeGo, candidate)
 			ctx, cancel := liveCtx(t)
 			defer cancel()
 			doc, err := loadModelMetadata(ctx, ApplyOptions(nil))
@@ -534,7 +538,8 @@ func TestLive_KiloReasoningShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := liveCtx(t)
 			defer cancel()
-			p, err := NewKilo(key, "deepseek/deepseek-v4.1-flash", WithMaxTokens(400), WithReasoningEffort(tc.effort))
+			p, err := NewKilo(key, liveModel(t, ProviderKilo, kiloNonTraining...), WithMaxTokens(400),
+				WithReasoningEffort(tc.effort))
 			if err != nil {
 				t.Fatalf("NewKilo: %v", err)
 			}

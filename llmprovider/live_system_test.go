@@ -19,17 +19,19 @@ func TestLive_SystemMessage(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name, env string
-		build     func(key string) (ItemProvider, error)
+		build     func(t *testing.T, key string) (ItemProvider, error)
 	}{
-		{"claude", "ANTHROPIC_API_KEY", func(k string) (ItemProvider, error) { return NewClaude(k, "claude-haiku-4-5") }},
-		{"go-messages", "OPENCODE_API_KEY", func(k string) (ItemProvider, error) { return NewOpencode(ProviderOpencodeGo, k, "qwen3.8-flash") }},
+		{"claude", "ANTHROPIC_API_KEY", func(_ *testing.T, k string) (ItemProvider, error) { return NewClaude(k, "claude-haiku-4-5") }},
+		{"go-messages", "OPENCODE_API_KEY", func(t *testing.T, k string) (ItemProvider, error) {
+			return NewOpencode(ProviderOpencodeGo, k, liveModel(t, ProviderOpencodeGo, "qwen3.8-flash", "minimax-m3"))
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			key := os.Getenv(c.env)
 			if key == "" {
 				t.Skipf("%s unset", c.env)
 			}
-			p, err := c.build(key)
+			p, err := c.build(t, key)
 			if err != nil {
 				t.Fatalf("construct: %v", err)
 			}

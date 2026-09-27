@@ -13,7 +13,7 @@ import (
 func TestLive_KiloDataCollectionDenied(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewKilo(kiloKey(t), "kilo-auto/free")
+	p, err := NewKilo(kiloKey(t), liveModel(t, ProviderKilo, kiloFreeCollecting...))
 	if err != nil {
 		t.Fatalf("NewKilo: %v", err)
 	}

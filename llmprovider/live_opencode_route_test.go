@@ -29,7 +29,8 @@ func TestLive_OpencodeRoutesFromMetadata(t *testing.T) {
 	})}
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "qwen3.8-max", WithHTTPClient(client))
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), liveModel(t, ProviderOpencodeGo, "qwen3.8-max"),
+		WithHTTPClient(client))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}

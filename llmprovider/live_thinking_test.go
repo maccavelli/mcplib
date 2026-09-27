@@ -85,7 +85,8 @@ func TestLive_GeminiThinkingShapes(t *testing.T) {
 func TestLive_OpencodeMessagesThinking(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "qwen3.8-flash", WithReasoningEffort(effortLow))
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), liveModel(t, ProviderOpencodeGo, "qwen3.8-flash"),
+		WithReasoningEffort(effortLow))
 	if err != nil {
 		t.Fatal(err)
 	}
