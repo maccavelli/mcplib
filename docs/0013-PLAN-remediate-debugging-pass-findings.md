@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-27
 associated-madr: "0013-MADR-remediate-debugging-pass-findings.md"
 decision-makers: mcplib maintainers
@@ -542,8 +542,51 @@ continuing.)*
 
 ## 10. Execution record
 
-*(Filled during execution: per phase, the commit, the red output, the gate
-output, the mutant results and the live results.)*
+Executed 2026-09-27 on `main`, from base `bc590e2` (`e219e11` plus docs).
+Each phase applied its two Appendix B diffs with `git apply`, taken verbatim
+from this document, in the working tree. Mutants ran on a scratch copy of
+the working tree, never on the tree itself. Nothing was pushed.
+
+| Phase | Commit | Red (before the fix) | Gate (§0.3) | Mutants | Live |
+|---|---|---|---|---|---|
+| 0 | `16cb907` | n/a | n/a | n/a | n/a |
+| 1 | `d1973eb` | 6 of 6 failed, messages as A.1 | PASS (10 checks) | none listed | n/a |
+| 2 | `9322b87` | 2 of 2 failed: `ListingBounded` 6 of 6 subtests, `HonoursRankingOptions` 3 of 3 (A.2) | PASS (12 checks) | none listed | n/a |
+| 3 | `b9603b9` | 4 of 4 failed, as A.3 | PASS (10 checks) | `p3-backoff-longer` killed | n/a |
+| 4 | `8251cb9` | 6 of 6 failed, as A.4. In `OtherDefaultsOnlyToSameProvider` the two other-provider subtests failed and the same-provider guard passed | PASS (14 checks) | 11 killed; `p4-empty-listing-deleted` survived, as required | n/a |
+| 5 | `a47c53c` | Offline: `TestThinkingWire_Claude` (5 subtests: all but the two budget guards), `_Gemini`, `_OpencodeRoutes` failed. Live: `TestLive_ClaudeThinkingShapes` failed on `claude-sonnet-5` and `claude-opus-4-8` at both efforts with `llm: invalid request: claude HTTP 400`; `claude-haiku-4-5` passed | PASS (16 checks) | `p5-gemini-legacy-ignored` killed (`gemini HTTP 400`); `p5-messages-bad-type` killed (`opencode-go/messages HTTP 400`) | step 6: 13 PASS, 0 FAIL, 0 SKIP |
+| 6 | `358346a` | Live: `TestLive_StaticClaudeServed` failed on `claude-3-5-haiku-latest` and `claude-sonnet-4-20250514`, each `claude HTTP 404` | PASS (10 checks) | `p6-bad-key-chat`, `p6-bad-key-responses` killed (HTTP 401); `p6-route-override-ignored` killed (DRIFT) | step 5: 8 PASS, 0 FAIL, 0 SKIP |
+| 7 | the commit that adds this record | n/a | Final gate PASS (below) | n/a | Full suite: 50 PASS, 0 FAIL, 2 SKIP |
+
+**Phase 7.**
+* The five insertions landed once each, after their anchors: 0010 MADR,
+  0010 PLAN, 0012 MADR, and two in the README.
+* Full live suite (`-run Live`): 50 PASS, 0 FAIL, 2 SKIP. Both skips are
+  Kilo 429s: `TestLive_KiloChatCompletions` and
+  `TestLive_KiloReasoningSpelling` (MADR D4, allowed by step 2). No transport
+  timeout occurred, so there was nothing to re-run.
+* Final gate on the whole tree:
+  * `gofmt -l` on every tracked `.go` file printed nothing.
+  * Per-file `golint -set_exit_status` passed on all 30 `.go` files this plan
+    changed.
+  * `go vet ./...`, `go vet -tags live_gateways ./llmprovider`, `make lint`,
+    `go test -count=1 ./...` and `go test -race -count=1 ./llmprovider
+    ./wizard` all exited 0.
+
+**Observed outside scope, not changed.** `golint ./...` across the whole
+repository also reports `backplane.go:16:1: package comment is detached`.
+This plan did not touch that file, and it is unchanged since `e219e11`
+(last changed in `6da0d10`). It is pre-existing and outside §0.3's
+per-file gate, and it was left as found.
+
+**Acceptance (§7).**
+1. Every red test failed with its recorded message. Every listed mutant was
+   killed except the one equivalence mutant, which survived.
+2. The gate passed after every phase.
+3. `TestListModelCatalog_Snapshot20260926` passed unchanged in every
+   `go test ./...`.
+4. The full live suite had no FAIL.
+5. The 0010 MADR, the 0010 PLAN, 0012 and the README carry Phase 7's text.
 
 ## Appendix A — Proof record (2026-09-27, scratch copies of `e219e11`)
 

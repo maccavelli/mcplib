@@ -437,6 +437,11 @@ func (p ModelProfile) ReasoningEffort() string
   strongest-ranked model defaulting to `low` and the next to `medium`, so a
   fixed value would override vendor intent. Revision 2's `"medium"` is
   withdrawn.
+* **Amended by [0013-MADR-remediate-debugging-pass-findings.md](0013-MADR-remediate-debugging-pass-findings.md) (Q2):** `""` means each
+  provider's documented default. On the wire that is `medium` on the effort
+  APIs, `high` on Grok 4.5, `{"enabled": true}` on Kilo, adaptive thinking
+  with no effort on Claude 4.7 and later, a 4,096-token budget on older Claude,
+  and dynamic thinking on Gemini.
 
 ### 2. Metadata sources and the ranking hook
 

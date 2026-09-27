@@ -135,11 +135,22 @@ offered for fallbacks. `llmprovider.ListModelCatalog` and
 Scripts that drive the wizard need one extra (blank) line before each model
 and fallback selection.
 
+A live listing is bounded at 10 seconds; `Options.DiscoverLimit` can shorten
+that bound but not extend it. When the listing fails, the wizard's notice names
+the cause, and `ModelCatalog.Err` carries it for other callers.
+
 Retries are opt-in (`GenerateWithRetry`). Typed sentinels
 (`ErrRateLimited`, `ErrAuthFailure`, `ErrInvalidRequest`,
 `ErrProviderUnavailable`) classify failures. OAuth sessions make one
 forced-refresh retry after a 401; static-key 401/403 responses and other 4xx
 responses are not retried.
+
+`WithReasoningEffort` sets the effort for every provider's thinking path.
+Effort APIs send it as given. Claude 4.7 and later use adaptive thinking with
+`output_config.effort`. Older Claude models map `low` to a 1,024-token budget.
+Gemini maps `low` to `thinkingLevel` on Gemini 3 and to a 1,024-token budget on
+Gemini 2.x. `DiscoverModels` on Kilo, OpenCode and Hugging Face ranks with the
+provider's `WithModelProfile` and `WithModelMetadataURL`.
 
 ## Self-update
 

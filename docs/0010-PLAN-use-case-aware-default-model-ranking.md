@@ -1160,6 +1160,9 @@ deviation.
    approximately.
 3. **Metadata failures are not cached.** A later listing in the same process
    retries. A success is cached for 10 minutes per URL.
+   *Amended by [0013-MADR-remediate-debugging-pass-findings.md](0013-MADR-remediate-debugging-pass-findings.md) (A6):* a failure is now remembered
+   for one minute, a stale document is kept when a refresh fails, and a lookup
+   inside a request waits at most 5 seconds.
 4. **`MCPLIB_DISABLE_MODELS_METADATA` accepts any `strconv.ParseBool` true
    value.** MADR §2 names `=1`, and `1` is one of them.
 5. **`GenerateItemsWithRetry` keeps its own loop.** MADR §6 names two helpers

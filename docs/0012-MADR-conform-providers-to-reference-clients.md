@@ -705,6 +705,20 @@ method of `0009-PLAN-live-catalog-model-search.md` Appendix B):
   * its §6 request-side reasoning is referenced, not repeated;
   * its Go gates handle defaults, and §1.1's `ErrNotPermitted` handles
     requests.
+* **`0013-MADR-remediate-debugging-pass-findings.md`:** routes six findings here:
+  * B3 to §1.1: every 4xx other than 401, 403 and 429 becomes
+    `ErrInvalidRequest` and its body is discarded. §1.1's table also needs
+    OpenCode's 403 `FreeTierError` (Zen's free tier refuses other clients) and
+    its 402 "Upstream request failed: Insufficient account funds";
+  * B4 (408 is terminal) and B6 (`GenerateItemsWithRetry` keeps its own loop)
+    to §1.2;
+  * B7 (no `x-opencode-session` on listings, and a new id per health probe) to
+    §1.4;
+  * D5 (the live suite's `skipIfTransient` skips every `ErrInvalidRequest`, so
+    a wire regression answering 400 is skipped) to §1.1, whose typed errors
+    let it skip only the transient classes;
+  * D6 (a 30-second response-header timeout on OpenCode Go failed one live
+    run) to §1.3.
 
 ### Out of scope
 
