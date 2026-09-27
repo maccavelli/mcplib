@@ -48,7 +48,7 @@ const chatGPTAccessFixture = "chatgpt-access"
 
 // ValidateOAuthSession reports whether a session can be used for generation
 // (MADR 0009 D7). It must be refreshable, or the explicit access-only ChatGPT
-// token that token_stdin and CODEX_ACCESS_TOKEN produce, and never a stub. A
+// token that token_stdin produces, and never a stub. A
 // refreshable session needs a client id. Its token URL may be empty, because
 // the refresh derives it from the issuer.
 func ValidateOAuthSession(session *OAuthSession) error {

@@ -200,19 +200,8 @@ func resolveTokenStdin(
 	d llmprovider.ProviderDescriptor,
 	o Options,
 ) (resolvedCredential, error) {
-	if d.ID == llmprovider.ProviderOpenAI && o.AllowEnv {
-		if access := o.lookupEnv()("CODEX_ACCESS_TOKEN"); access != "" {
-			use, err := p.Confirm(
-				fmt.Sprintf("Use CODEX_ACCESS_TOKEN from the environment (%s)?", logging.MaskSecret(access)), true)
-			if err != nil {
-				return resolvedCredential{}, err
-			}
-			if use {
-				return saveAccessOnlyOpenAI(ctx, o, access)
-			}
-		}
-	}
-
+	// CODEX_ACCESS_TOKEN is not offered: in Codex it holds a personal access
+	// token or an agent-identity JWT, not a ChatGPT OAuth bearer (MADR 0012 §5.4).
 	value, err := p.Secret(fmt.Sprintf("Paste your %s credential", d.Label))
 	if err != nil {
 		return resolvedCredential{}, fmt.Errorf("enter credential: %w", err)

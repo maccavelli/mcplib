@@ -204,37 +204,6 @@ func TestConfigureLLM_TokenStdinOAuthRequiresTokenStore(t *testing.T) {
 	}
 }
 
-func TestConfigureLLM_TokenStdinUsesCodexEnvironment(t *testing.T) {
-	store := newMemoryTokenStore()
-	f := &fakePrompter{
-		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 3},
-		confirms: []bool{true},
-		inputs:   []string{"chatgpt-model"},
-	}
-	res, err := ConfigureLLM(context.Background(), f, Options{
-		AllowEnv:   true,
-		TokenStore: store,
-		LookupEnv: func(name string) string {
-			if name == "CODEX_ACCESS_TOKEN" {
-				return "codex-access-abcd"
-			}
-			return ""
-		},
-	})
-	if err != nil {
-		t.Fatalf("ConfigureLLM() error = %v", err)
-	}
-	if res.Kind != CredOAuth || res.AccessToken != "codex-access-abcd" || res.Model != "chatgpt-model" ||
-		len(f.seenSecret) != 0 || store.saves != 1 {
-		t.Fatalf(
-			"result credential = %q/%q; model = %q; Secret calls = %d; TokenStore saves = %d",
-			res.Kind, res.AccessToken, res.Model, len(f.seenSecret), store.saves,
-		)
-	}
-	assertTextMasksSecret(t, f.allText, "codex-access-abcd")
-}
-
 func TestConfigureLLM_BrowserAndDevicePersistSessions(t *testing.T) {
 	originalBrowser := loginBrowserOAuth
 	originalDevice := loginDeviceOAuth
