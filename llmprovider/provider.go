@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -105,13 +106,55 @@ func parseRetryAfter(h string) time.Duration {
 	if h == "" {
 		return 0
 	}
-	if secs, err := strconv.Atoi(h); err == nil && secs >= 0 {
-		return time.Duration(secs) * time.Second
+	if secs, err := strconv.ParseFloat(h, 64); err == nil && secs >= 0 && !math.IsInf(secs, 0) {
+		return time.Duration(secs * float64(time.Second))
 	}
 	if t, err := http.ParseTime(h); err == nil {
 		if d := time.Until(t); d > 0 {
 			return d
 		}
+	}
+	return 0
+}
+
+// retryAfterFrom reads a server-directed delay from retry-after-ms (fractional
+// milliseconds), else Retry-After (MADR 0012 §1.2).
+func retryAfterFrom(h http.Header) time.Duration {
+	if ms, err := strconv.ParseFloat(strings.TrimSpace(h.Get("Retry-After-Ms")), 64); err == nil && ms >= 0 && !math.IsInf(ms, 0) {
+		return time.Duration(ms * float64(time.Millisecond))
+	}
+	return parseRetryAfter(h.Get("Retry-After"))
+}
+
+// retryBackoffCap bounds every retry delay. A server asking for longer gets its
+// error back instead, so the caller can reschedule (MADR 0012 §1.2).
+const retryBackoffCap = 30 * time.Second
+
+// retryStops reports whether a failed attempt must not be retried: a terminal
+// APIError, a server delay beyond retryBackoffCap, or an error whose sentinel
+// is never retryable. An APIError's Terminal flag decides even when it also
+// matches ErrInvalidRequest for compatibility (a 408 is retried, 0013 B4).
+func retryStops(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Terminal || apiErr.RetryAfter > retryBackoffCap
+	}
+	var rl *RateLimitError
+	if errors.As(err, &rl) && rl.RetryAfter > retryBackoffCap {
+		return true
+	}
+	return errors.Is(err, ErrAuthFailure) || errors.Is(err, ErrInvalidRequest)
+}
+
+// serverRetryAfter is the delay a failed attempt asked for, or 0.
+func serverRetryAfter(err error) time.Duration {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.RetryAfter
+	}
+	var rl *RateLimitError
+	if errors.As(err, &rl) {
+		return rl.RetryAfter
 	}
 	return 0
 }
@@ -147,28 +190,27 @@ func GenerateThinkingWithRetry(ctx context.Context, p ThinkingProvider, prompt s
 	})
 }
 
-// retryWithBackoff runs call up to retries+1 times with exponential, jittered
-// backoff capped at 30s, honouring a server-directed Retry-After. It stops at
-// once on ErrAuthFailure or ErrInvalidRequest, and on context cancellation.
+// retryWithBackoff runs call up to retries+1 times (at least once) with
+// exponential, jittered backoff capped at retryBackoffCap, honouring a
+// server-directed delay. It stops at once when retryStops says so, and on
+// context cancellation (MADR 0012 §1.2).
 func retryWithBackoff[T any](ctx context.Context, retries int, delay time.Duration, logMsg string, call func() (T, error)) (T, error) {
-	const maxBackoff = 30 * time.Second
 	var zero T
 	var lastErr error
+	retries = max(retries, 0)
 	for i := 0; i <= retries; i++ {
 		if i > 0 {
 			base := delay << (i - 1) // exponential
-			if base <= 0 || base > maxBackoff {
-				base = maxBackoff
+			if base <= 0 || base > retryBackoffCap {
+				base = retryBackoffCap
 			}
 			jitteredDelay := base
 			if base/4 > 0 {
 				//nolint:gosec // G404: non-crypto jitter for retry backoff spacing
 				jitteredDelay += rand.N(base / 4)
 			}
-			// Honor a server-directed Retry-After when present (capped at maxBackoff).
-			var rl *RateLimitError
-			if errors.As(lastErr, &rl) && rl.RetryAfter > 0 {
-				jitteredDelay = min(rl.RetryAfter, maxBackoff)
+			if server := serverRetryAfter(lastErr); server > 0 {
+				jitteredDelay = server // retryStops already refused one above the cap
 			}
 			slog.Warn(logMsg,
 				"attempt", i,
@@ -190,8 +232,7 @@ func retryWithBackoff[T any](ctx context.Context, retries int, delay time.Durati
 			return res, nil
 		}
 		lastErr = err
-		// Non-retryable errors will never succeed — stop immediately.
-		if errors.Is(err, ErrAuthFailure) || errors.Is(err, ErrInvalidRequest) {
+		if retryStops(err) {
 			return zero, err
 		}
 	}
@@ -199,52 +240,12 @@ func retryWithBackoff[T any](ctx context.Context, retries int, delay time.Durati
 }
 
 // GenerateItemsWithRetry executes a GenerateItems call with the specified number of retries
-// and jittered delay. It will stop retrying if the context is cancelled.
+// and jittered delay, under the same policy as GenerateWithRetry. It will stop
+// retrying if the context is cancelled.
 func GenerateItemsWithRetry(ctx context.Context, p ItemProvider, input []Item, retries int, delay time.Duration) (*Response, error) {
-	const maxBackoff = 30 * time.Second
-	var lastErr error
-	for i := 0; i <= retries; i++ {
-		if i > 0 {
-			base := delay << (i - 1) // exponential
-			if base <= 0 || base > maxBackoff {
-				base = maxBackoff
-			}
-			jitteredDelay := base
-			if base/4 > 0 {
-				//nolint:gosec // G404: non-crypto jitter for retry backoff spacing
-				jitteredDelay += rand.N(base / 4)
-			}
-			// Honor a server-directed Retry-After when present (capped at maxBackoff).
-			var rl *RateLimitError
-			if errors.As(lastErr, &rl) && rl.RetryAfter > 0 {
-				jitteredDelay = min(rl.RetryAfter, maxBackoff)
-			}
-			slog.Warn("llm: retrying items after failure",
-				"attempt", i,
-				"max_attempts", retries+1,
-				"delay", jitteredDelay,
-			)
-			retryTimer := time.NewTimer(jitteredDelay)
-			select {
-			case <-ctx.Done():
-				retryTimer.Stop()
-				return nil, ctx.Err()
-			case <-retryTimer.C:
-				// Ready for next attempt
-			}
-		}
-
-		res, err := p.GenerateItems(ctx, input...)
-		if err == nil {
-			return res, nil
-		}
-		lastErr = err
-		// Non-retryable errors will never succeed — stop immediately.
-		if errors.Is(err, ErrAuthFailure) || errors.Is(err, ErrInvalidRequest) {
-			return nil, err
-		}
-	}
-	return nil, fmt.Errorf("failed after %d attempts: %w", retries+1, lastErr)
+	return retryWithBackoff(ctx, retries, delay, "llm: retrying items after failure", func() (*Response, error) {
+		return p.GenerateItems(ctx, input...)
+	})
 }
 
 // NewProvider creates a Provider by canonical name. Accepts variadic ProviderOption

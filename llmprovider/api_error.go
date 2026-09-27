@@ -113,9 +113,13 @@ func classifyHTTPError(provider string, resp *http.Response) error {
 		Status:     resp.StatusCode,
 		Type:       envelope.errType(),
 		Message:    boundMessage(logging.RedactString(envelope.message())),
-		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+		RetryAfter: retryAfterFrom(resp.Header),
 	}
 	e.Terminal, e.sentinel = classifyAPIError(serviceOf(provider), resp.StatusCode, envelope, body)
+	// x-should-retry: false is the service saying no retry can succeed (§1.2).
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Should-Retry")), "false") {
+		e.Terminal = true
+	}
 	if errors.Is(e.sentinel, ErrRateLimited) && !e.Terminal {
 		return &RateLimitError{RetryAfter: e.RetryAfter, Status: e.Status, Provider: provider, Message: e.Message}
 	}
