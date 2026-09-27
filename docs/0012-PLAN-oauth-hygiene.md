@@ -331,8 +331,19 @@ None yet.
 
 ## 10. Execution record
 
-Not executed. The proof in Appendix A was made in scratch copies before
-execution. O6's owner-run login is outstanding.
+Executed on `main`, 2026-09-27, after `0012-PLAN-circuit-breaker-test.md`
+(`05a1fcf`). Each phase applied Appendix B with `git apply`, taken from this
+document, and checked equal to the proven diff.
+
+* **O1**, commit `93bc781`: 2 red tests failed as required; 0 base guards passed; gate passed; 5/5 mutants killed.
+* **O2**, commit `73e2b41`: 7 red tests failed as required; 3 base guards passed; gate passed; 4/4 mutants killed.
+* **O3**, commit `46bd8c7`: 4 red tests failed as required; 2 base guards passed; gate passed; 3/3 mutants killed.
+* **O4**, commit `45fabc0`: nothing red (see Appendix A); 0 base guards passed; gate passed; 4/4 mutants killed.
+* **O5**, commit `85e20ab`: 1 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
+
+**Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 4 passed, 0 skipped, 0 failed.
+
+**O6 has not run.** It is gated on the owner's live ChatGPT browser login (`TestLive_ChatGPTBrowserLogin`); this plan stays `in-progress` until it passes and O6 lands.
 
 ## Appendix A — Proof record (2026-09-27)
 
