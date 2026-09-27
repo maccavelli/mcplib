@@ -582,3 +582,20 @@ dials:
 `TokenURL`, because a kept session has none and the refresh derives it
 from the issuer. Fresh browser and device-code results still carry
 `TokenURL`, as D7 states. Both changes are in the PLAN's deviation log.
+
+## Amendment — 2026-09-27: D3's race must leave one reader
+
+D3 races the loopback against a paste prompt, and the PLAN's C6 accepted a
+paste prompt left blocked after the loopback wins. With `TextPrompter`, that
+leftover is not harmless:
+* every read shares one unlocked `bufio.Reader`;
+* the next wizard prompt then races it for the user's next line.
+
+D3 now also requires the wizard to drain that prompt:
+* The paste prompt starts only after the authorize URL and the paste
+  instruction are shown.
+* A prompt still waiting when the login returns is finished by one Enter,
+  asked for as "Browser sign-in finished; press Enter to continue", before
+  any other prompt.
+
+`Prompter` is unchanged.

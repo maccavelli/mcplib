@@ -976,6 +976,25 @@ validation in the consumer against a library that lacks
       `DiscoverLimit: time.Nanosecond`. Its refresh fails on the expired
       deadline before any network I/O, so the test still reaches the
       built-in-catalog warning.
+* **2026-09-27 — P5's paste race steals the next line.**
+  * Evidence: `TextPrompter` has no lock, and every read shares one
+    `bufio.Reader` (`readLine`, `wizard/text_prompter.go:101-114`).
+  * After a successful loopback login, the paste prompt's `Input` stays
+    blocked in `ReadString`, and C6 accepts that leftover. The wizard's next
+    prompt, the model menu, then reads the same reader concurrently. That
+    is a data race, and the user's model choice can be swallowed.
+  * Also, `LoginBrowserOAuth` runs `OpenURL` and `InputCode` on separate
+    goroutines since D4, so the prompter would be written from two
+    goroutines.
+  * Owner's resolution: drain after success.
+    * `InputCode` starts its prompt only after the `OpenURL` wrapper has
+      shown the authorize URL and the paste instruction.
+    * When the login returns while that prompt is still waiting, the wizard
+      shows "Browser sign-in finished; press Enter to continue". It then
+      waits for the pending read before its next prompt.
+    * So only one read is ever pending. The browser path costs one Enter.
+      `Prompter` is unchanged, as C6 requires.
+  * New test: `TestConfigureLLM_BrowserLoopbackWinDrainsPastePrompt`.
 
 ## Execution record (2026-09-27)
 
