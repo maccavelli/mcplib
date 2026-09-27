@@ -945,6 +945,37 @@ validation in the consumer against a library that lacks
   by the owner: repair in place (R1), not revert. Reverting would also drop
   D1, D4, D5 and D9, which do work, and the history is already published.
   The MADR records this in its 2026-09-27 amendment.
+* **2026-09-27 — P1 test 3 cannot work as written.**
+  * Evidence, from a probe on the macOS host: `LookupIP("localhost")` returns
+    `[::1 127.0.0.1]`, so the test's skip guard does not fire.
+    `net.DialTimeout("tcp", "localhost:port")` then connects to an
+    IPv4-only listener through `127.0.0.1`, because Go's dialer falls back
+    across families. `net.DialTimeout("tcp6", "[::1]:port")` is refused.
+  * The test as written would therefore always fail here. It also can't catch
+    the IPv4-only-bind mutant, which survived R1.
+  * Owner's resolution: explicit per-family dials. Test 3 asserts that an
+    IPv4-only listener refuses `tcp6 [::1]`, which is the browser's first
+    attempt. A new test, `TestListenLoopbackBothFamilies_AcceptsIPv6Loopback`,
+    requires the helper to accept `tcp6 [::1]`. Both skip only when the host
+    has no IPv6 loopback.
+* **2026-09-27 — P6 rule 4 would refuse every kept session.**
+  * Evidence: `wizard.Result` has no `TokenURL`, and `keepExistingOAuth`
+    builds its session without one. `refreshTokenURL` derives the URL from
+    the issuer (OpenAI) or uses the Grok default.
+  * A literal rule 4 fails `TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey`,
+    `TestConfigureLLM_ChatGPTListingFailurePromptsForModel` and
+    `TestConfigureLLM_ChatGPTNoStaticNotice`.
+  * Separately, any keep-time D7 check refuses the no-refresh Grok session
+    that 0013's `TestConfigureLLM_ListingTokenFailureUsesStaticCatalog`
+    relies on.
+  * Owner's resolution:
+    * Rule 4 requires a non-empty `ClientID`; `TokenURL` may be empty.
+    * The browser and device-code results must still carry `TokenURL`, as D7
+      says, and a test pins that.
+    * 0013's coverage test moves to a valid refreshable Grok session with
+      `DiscoverLimit: time.Nanosecond`. Its refresh fails on the expired
+      deadline before any network I/O, so the test still reaches the
+      built-in-catalog warning.
 
 ## Execution record (2026-09-27)
 

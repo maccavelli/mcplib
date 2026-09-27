@@ -567,3 +567,18 @@ The decision is unchanged, and D11 stands as written. PLAN phase R1 restores
 At `ba92db1`, these decisions have landed: D1, D4, D5 (state mismatch and
 missing code), D9 and the `llmprovider` half of D11. D2, D3, D7, D8 and F11
 have not. They remain PLAN work, as do P1's and P4's missing tests.
+
+## Amendment — 2026-09-27: how D1 and D7 are confirmed
+
+**D1's confirmation.** The first Confirmation bullet assumed a Go `localhost`
+dial behaves like a browser's. It does not. On a macOS host where
+`localhost` resolves to `::1` first, Go's dialer falls back to `127.0.0.1`
+and reaches an IPv4-only listener. D1 is therefore confirmed with explicit
+dials:
+* an IPv4-only listener refuses `tcp6 [::1]`;
+* the dual-stack helper accepts `tcp6 [::1]`.
+
+**D7's refreshable-session rule.** It requires a `ClientID` but not a
+`TokenURL`, because a kept session has none and the refresh derives it
+from the issuer. Fresh browser and device-code results still carry
+`TokenURL`, as D7 states. Both changes are in the PLAN's deviation log.
