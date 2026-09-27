@@ -193,8 +193,9 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 	return decodeResponsesAPIOutput(limitedBody)
 }
 
-// DiscoverModels returns curated chat models available to this key, with an
-// optional short health probe. Never returns the raw /v1/models dump.
+// DiscoverModels returns curated chat models available to this key. An API
+// key's models get a short health probe; a ChatGPT session's do not (MADR 0012
+// §1.6). Never returns the raw /v1/models dump.
 func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := ListAvailableModelsWithSource(
 		ctx,
@@ -208,6 +209,10 @@ func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		listed = StaticModels(ProviderOpenAI)
+	}
+	// A ChatGPT subscription meters every call: no generation probe (MADR 0012 §1.6).
+	if p.chatGPT {
+		return listed, nil
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

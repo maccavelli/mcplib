@@ -176,8 +176,8 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 	return decodeChatCompletionsResponse(limitedBody)
 }
 
-// DiscoverModels returns curated router models, with a short health probe.
-// Falls back to the static catalog.
+// DiscoverModels returns the curated router listing, falling back to the
+// static catalog. It spends no generation on probes (MADR 0012 §1.6).
 func (p *HuggingFaceProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listHuggingFaceModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:       p.client,
@@ -189,15 +189,6 @@ func (p *HuggingFaceProvider) DiscoverModels(ctx context.Context) ([]string, err
 		listed = StaticModels(ProviderHuggingFace)
 	}
 
-	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewHuggingFace(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
-		if err != nil {
-			return "", err
-		}
-		return tp.Generate(tCtx, "Respond with ONLY the word Hello")
-	})
-	if len(healthy) > 0 {
-		return healthy, nil
-	}
+	// No generation probe: this service meters every call (MADR 0012 §1.6).
 	return listed, nil
 }

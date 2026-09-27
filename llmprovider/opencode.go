@@ -339,12 +339,8 @@ func firstFunctionCallArgs(resp *Response, provider string) (string, error) {
 	return "", fmt.Errorf("%s: no function call in response", provider)
 }
 
-// DiscoverModels returns curated gateway models, with a short health probe.
-// Falls back to the static catalog.
-//
-// Each probe reconstructs the provider so the per-model route is resolved
-// correctly. Cloning p would send every candidate down the first model's wire
-// format and 500 on most of them.
+// DiscoverModels returns the curated gateway listing, falling back to the
+// static catalog. It spends no generation on probes (MADR 0012 §1.6).
 func (p *OpencodeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listOpencodeModels(ctx, p.gateway, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:       p.client,
@@ -356,16 +352,6 @@ func (p *OpencodeProvider) DiscoverModels(ctx context.Context) ([]string, error)
 		listed = StaticModels(p.gateway)
 	}
 
-	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewOpencode(p.gateway, p.apiKey, modelID,
-			append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
-		if err != nil {
-			return "", err
-		}
-		return tp.Generate(tCtx, "Respond with ONLY the word Hello")
-	})
-	if len(healthy) > 0 {
-		return healthy, nil
-	}
+	// No generation probe: this service meters every call (MADR 0012 §1.6).
 	return listed, nil
 }

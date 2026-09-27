@@ -218,10 +218,8 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 	return decodeChatCompletionsResponse(limitedBody)
 }
 
-// DiscoverModels returns curated gateway models, with a short health probe.
-// It deliberately does not populate caps: probing reconstructs a provider per
-// candidate, and attaching one model's capabilities to another would be worse
-// than sending everything.
+// DiscoverModels returns the curated gateway listing, falling back to the
+// static catalog. It spends no generation on probes (MADR 0012 §1.6).
 func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listKiloModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:   p.client,
@@ -232,15 +230,6 @@ func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		listed = StaticModels(ProviderKilo)
 	}
 
-	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewKilo(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
-		if err != nil {
-			return "", err
-		}
-		return tp.Generate(tCtx, "Respond with ONLY the word Hello")
-	})
-	if len(healthy) > 0 {
-		return healthy, nil
-	}
+	// No generation probe: this service meters every call (MADR 0012 §1.6).
 	return listed, nil
 }
