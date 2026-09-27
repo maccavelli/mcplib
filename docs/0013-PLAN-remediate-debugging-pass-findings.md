@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-09-27
 associated-madr: "0013-MADR-remediate-debugging-pass-findings.md"
 decision-makers: mcplib maintainers
