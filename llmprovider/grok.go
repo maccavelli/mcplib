@@ -233,7 +233,8 @@ func (p *GrokProvider) doGenerateItemsOnce(ctx context.Context, input []Item, to
 	return decodeResponsesAPIOutput(limitedBody)
 }
 
-// DiscoverModels returns live Grok text models with an optional health probe.
+// DiscoverModels returns curated Grok text models available to this key, with an
+// optional short health probe. Falls back to the static catalog.
 func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := ListAvailableModelsWithSource(
 		ctx,
@@ -243,7 +244,7 @@ func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		WithBaseURL(p.baseURL),
 	)
 	if err != nil || len(listed) == 0 {
-		return listed, err
+		listed = StaticModels(ProviderGrok)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

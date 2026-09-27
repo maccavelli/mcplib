@@ -290,15 +290,17 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 	return result, nil
 }
 
-// DiscoverModels returns live production text models from the Models API,
-// dropping TTS/image/Live/preview IDs, then optionally health-probes that list.
+// DiscoverModels returns a short, curated list of production text models.
+// It lists via the free Models API, intersects with the static catalog (never
+// dumps dozens of TTS/image/Live/preview IDs), then optionally health-probes
+// only that short list. On total probe failure the curated list is still returned.
 func (p *GeminiProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listGeminiModels(ctx, p.apiKey, ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
 	})
 	if err != nil || len(listed) == 0 {
-		return listed, err
+		listed = StaticModels(ProviderGemini)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

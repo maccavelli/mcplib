@@ -220,7 +220,7 @@ func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		BaseURL:    p.baseURL,
 	})
 	if err != nil || len(listed) == 0 {
-		return listed, err
+		listed = StaticModels(ProviderKilo)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

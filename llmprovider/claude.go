@@ -292,14 +292,15 @@ func decodeClaudeResponse(body io.Reader) (*Response, error) {
 	return res, nil
 }
 
-// DiscoverModels returns live Claude text models with an optional health probe.
+// DiscoverModels returns curated Claude text models (Models API + catalog),
+// with an optional short health probe. Falls back to the static catalog.
 func (p *ClaudeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listClaudeModels(ctx, p.apiKey, ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
 	})
 	if err != nil || len(listed) == 0 {
-		return listed, err
+		listed = StaticModels(ProviderClaude)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

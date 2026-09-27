@@ -255,11 +255,11 @@ func TestListModelCatalog_LiveFlag(t *testing.T) {
 	}
 }
 
-func TestListModelCatalogWithSource_ChatGPTDoesNotHTTP(t *testing.T) {
-	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		hits++
-		t.Error("ChatGPT model listing made an HTTP request")
+func TestListModelCatalogWithSource_ChatGPTListsCodexCatalog(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-6-astra","visibility":"list","priority":1}]}`))
 	}))
 	defer srv.Close()
 
@@ -268,23 +268,21 @@ func TestListModelCatalogWithSource_ChatGPTDoesNotHTTP(t *testing.T) {
 		Access: "session-access",
 		Expiry: time.Now().Add(time.Hour),
 	}
-	cat, err := ListModelCatalogWithSource(context.Background(), ProviderOpenAI, session, WithBaseURL(srv.URL))
+	cat, err := ListModelCatalogWithSource(context.Background(), ProviderOpenAI, session,
+		WithHTTPClient(srv.Client()), WithBaseURL(srv.URL))
 	if err != nil {
 		t.Fatalf("ListModelCatalogWithSource() error = %v", err)
 	}
-	if !reflect.DeepEqual(cat.Recommended, StaticOpenAIChatGPT) || !reflect.DeepEqual(cat.Usable, StaticOpenAIChatGPT) {
-		t.Fatalf("catalog = %+v, want both views = %v", cat, StaticOpenAIChatGPT)
+	want := []string{"gpt-6-astra"}
+	if !reflect.DeepEqual(cat.Recommended, want) || !reflect.DeepEqual(cat.Usable, want) || !cat.Live {
+		t.Fatalf("catalog = %+v, want a live catalog with both views = %v", cat, want)
 	}
-	if cat.Live {
-		t.Error("Live = true for the ChatGPT short-circuit")
+	if !reflect.DeepEqual(paths, []string{"/models"}) {
+		t.Fatalf("requests = %v, want one Codex /models listing", paths)
 	}
 	cat.Recommended[0] = "mutated"
-	again, err := ListModelCatalogWithSource(context.Background(), ProviderOpenAI, session)
-	if err != nil {
-		t.Fatalf("second call error = %v", err)
-	}
-	if hits != 0 || again.Recommended[0] == "mutated" {
-		t.Fatalf("HTTP hits/second result = %d/%v", hits, again.Recommended)
+	if cat.Usable[0] == "mutated" {
+		t.Fatal("Recommended and Usable share a backing array")
 	}
 }
 

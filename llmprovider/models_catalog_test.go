@@ -1,6 +1,7 @@
 package llmprovider
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -341,5 +342,13 @@ func TestStaticOpencode_Count(t *testing.T) {
 				t.Errorf("%s entry %q fails its own usability filter", name, m)
 			}
 		}
+	}
+}
+
+// TestStaticModels_OpenAIIsPlatformCatalog: the only OpenAI static catalog is
+// the Platform one; ChatGPT sessions have none (MADR 0009 D11).
+func TestStaticModels_OpenAIIsPlatformCatalog(t *testing.T) {
+	if got := StaticModels(ProviderOpenAI); !slices.Equal(got, StaticOpenAI) {
+		t.Fatalf("StaticModels(openai) = %v, want StaticOpenAI %v", got, StaticOpenAI)
 	}
 }

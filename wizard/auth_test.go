@@ -3,6 +3,8 @@ package wizard
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +28,7 @@ func TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey(t *testing.T) {
 	store := newMemoryTokenStore()
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 1, 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 1},
 		confirms: []bool{true},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{
@@ -68,7 +70,8 @@ func TestConfigureLLM_APIKeyKindUnchanged(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			selects := []int{providerIdx(t, test.provider)}
 			selects = append(selects, test.selections...)
-			f := &fakePrompter{t: t, selects: selects, secrets: []string{testKey}, inputs: []string{"test-model"}}
+			selects = append(selects, 0)
+			f := &fakePrompter{t: t, selects: selects, secrets: []string{testKey}}
 			res, err := ConfigureLLM(context.Background(), f, Options{})
 			if err != nil {
 				t.Fatalf("ConfigureLLM() error = %v", err)
@@ -83,15 +86,14 @@ func TestConfigureLLM_APIKeyKindUnchanged(t *testing.T) {
 func TestConfigureLLM_DoesNotOfferClaudeOAuth(t *testing.T) {
 	f := &fakePrompter{
 		t:       t,
-		selects: []int{providerIdx(t, llmprovider.ProviderClaude)},
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude), 0},
 		secrets: []string{testKey},
-		inputs:  []string{"test-model"},
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{}); err != nil {
 		t.Fatalf("ConfigureLLM() error = %v", err)
 	}
-	if len(f.seenSelect) != 1 {
-		t.Fatalf("Select calls = %d, want provider only", len(f.seenSelect))
+	if len(f.seenSelect) != 2 {
+		t.Fatalf("Select calls = %d, want provider and model only", len(f.seenSelect))
 	}
 	for _, title := range f.seenSelect {
 		if strings.Contains(strings.ToLower(title), "authentication") {
@@ -153,7 +155,6 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 				t:       t,
 				selects: []int{providerIdx(t, test.provider), 3, 0},
 				secrets: []string{test.secret},
-				inputs:  []string{"test-model"},
 			}
 			if test.wantKind == CredOAuth {
 				f.inputs = []string{"chatgpt-model"}
@@ -191,7 +192,7 @@ func TestConfigureLLM_TokenStdinUsesCodexEnvironment(t *testing.T) {
 	store := newMemoryTokenStore()
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 3, 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 3},
 		confirms: []bool{true},
 		inputs:   []string{"chatgpt-model"},
 	}
@@ -208,10 +209,11 @@ func TestConfigureLLM_TokenStdinUsesCodexEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigureLLM() error = %v", err)
 	}
-	if res.Kind != CredOAuth || res.AccessToken != "codex-access-abcd" || len(f.seenSecret) != 0 || store.saves != 1 {
+	if res.Kind != CredOAuth || res.AccessToken != "codex-access-abcd" || res.Model != "chatgpt-model" ||
+		len(f.seenSecret) != 0 || store.saves != 1 {
 		t.Fatalf(
-			"result credential = %q/%q; Secret calls = %d; TokenStore saves = %d",
-			res.Kind, res.AccessToken, len(f.seenSecret), store.saves,
+			"result credential = %q/%q; model = %q; Secret calls = %d; TokenStore saves = %d",
+			res.Kind, res.AccessToken, res.Model, len(f.seenSecret), store.saves,
 		)
 	}
 	assertTextMasksSecret(t, f.allText, "codex-access-abcd")
@@ -251,11 +253,7 @@ func TestConfigureLLM_BrowserAndDevicePersistSessions(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := newMemoryTokenStore()
-			f := &fakePrompter{
-				t:       t,
-				selects: []int{providerIdx(t, llmprovider.ProviderGrok), test.authIdx},
-				inputs:  []string{"test-model"},
-			}
+			f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), test.authIdx, 0}}
 			res, err := ConfigureLLM(context.Background(), f, Options{TokenStore: store})
 			if err != nil {
 				t.Fatalf("ConfigureLLM() error = %v", err)
@@ -321,3 +319,65 @@ func assertTextMasksSecret(t *testing.T, displayed []string, secret string) {
 		t.Fatalf("displayed text has no masked credential: %q", joined)
 	}
 }
+
+// TestConfigureLLM_ChatGPTListingFailurePromptsForModel: after ChatGPT sign-in
+// a failed Codex listing asks for a model id; it never offers the Platform
+// catalog or a frozen ChatGPT list (MADR 0009 D11).
+func TestConfigureLLM_ChatGPTListingFailurePromptsForModel(t *testing.T) {
+	var requests []string
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.URL.Host+r.URL.Path)
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    r,
+		}, nil
+	})}
+	f := &fakePrompter{
+		t:        t,
+		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 1},
+		confirms: []bool{true},
+		inputs:   []string{"manual-chatgpt"},
+	}
+	res, err := ConfigureLLM(context.Background(), f, Options{
+		Existing: Result{
+			Provider:     llmprovider.ProviderOpenAI,
+			Kind:         CredOAuth,
+			AccessToken:  "existing-access-abcd",
+			RefreshToken: "existing-refresh",
+			TokenExpiry:  time.Now().Add(time.Hour),
+			Issuer:       llmprovider.DefaultOpenAIIssuer,
+			ClientID:     llmprovider.DefaultOpenAIClientID,
+			AccountID:    "acct_test",
+		},
+		TokenStore: newMemoryTokenStore(),
+		Discover:   true,
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("ConfigureLLM() error = %v", err)
+	}
+	if res.Model != "manual-chatgpt" {
+		t.Fatalf("Model = %q, want the entered id", res.Model)
+	}
+	if len(requests) != 1 || strings.Contains(requests[0], "api.openai.com") {
+		t.Fatalf("listing requests = %v, want one Codex /models call", requests)
+	}
+	for _, items := range f.seenSelectItems {
+		for _, c := range items {
+			if strings.Contains(c.Label, "gpt-5.4") || strings.Contains(c.Label, "gpt-4.1") {
+				t.Fatalf("model menu offered %q after a failed ChatGPT listing", c.Label)
+			}
+		}
+	}
+	for _, n := range f.seenNotify {
+		if strings.Contains(n, "built-in catalog") {
+			t.Fatalf("notice %q claims a built-in catalog ChatGPT does not have", n)
+		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

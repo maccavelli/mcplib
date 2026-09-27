@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestProbeGenerateHealth(t *testing.T) {
@@ -122,5 +124,29 @@ func TestGrokProvider_DiscoverModels(t *testing.T) {
 	}
 	if len(models) == 0 {
 		t.Fatal("expected discovered models")
+	}
+}
+
+func TestOpenAIProvider_ChatGPTDiscoverModelsListingFailureIsError(t *testing.T) {
+	var hosts []string
+	client := &http.Client{Transport: openAITestRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		hosts = append(hosts, r.URL.Host+r.URL.Path)
+		return openAITestHTTPResponse(r, http.StatusBadGateway, ""), nil
+	})}
+	session := &OAuthSession{
+		Issuer: DefaultOpenAIIssuer,
+		Access: "session-access",
+		Expiry: time.Now().Add(time.Hour),
+	}
+	p, err := NewOpenAIWithSource(session, "chatgpt-model", WithHTTPClient(client))
+	if err != nil {
+		t.Fatalf("NewOpenAIWithSource() error = %v", err)
+	}
+	models, err := p.DiscoverModels(context.Background())
+	if err == nil || models != nil {
+		t.Fatalf("DiscoverModels() = %v/%v, want nil/listing error", models, err)
+	}
+	if len(hosts) != 1 || strings.Contains(hosts[0], "api.openai.com") || !strings.HasSuffix(hosts[0], "/models") {
+		t.Fatalf("requests = %v, want one Codex /models listing", hosts)
 	}
 }

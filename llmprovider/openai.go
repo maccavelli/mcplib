@@ -210,7 +210,11 @@ func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		WithBaseURL(p.baseURL),
 	)
 	if err != nil || len(listed) == 0 {
-		return listed, err
+		// A ChatGPT session has no static catalog (MADR 0009 D11).
+		if p.chatGPT {
+			return nil, err
+		}
+		listed = StaticModels(ProviderOpenAI)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

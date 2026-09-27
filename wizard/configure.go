@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"slices"
 	"time"
 
 	"github.com/maccavelli/mcplib/llmprovider"
@@ -48,7 +47,8 @@ type Options struct {
 	// variable.
 	AllowEnv bool
 	// Discover queries the provider's live model listing. When false, or when
-	// the listing fails or is empty, the user is asked to enter a model id.
+	// the listing fails or is empty, the static catalog is used. A ChatGPT
+	// session has no static catalog, so the user is asked for a model id.
 	Discover bool
 	// DiscoverLimit bounds the listing call. Zero uses defaultDiscoverLimit.
 	DiscoverLimit time.Duration
@@ -273,9 +273,11 @@ func discoverModels(
 	o Options,
 ) llmprovider.ModelCatalog {
 	chatGPT := res.Kind == CredOAuth && d.ID == llmprovider.ProviderOpenAI
+	// A ChatGPT session lists only from the Codex backend (MADR 0009 D11):
+	// the Platform catalog is not available to it, so there is no fallback.
 	static := d.StaticModels
 	if chatGPT {
-		static = slices.Clone(llmprovider.StaticOpenAIChatGPT)
+		static = nil
 	}
 	fallback := llmprovider.ModelCatalog{Recommended: static, Usable: static}
 	if !o.Discover {
@@ -292,15 +294,15 @@ func discoverModels(
 	if res.BaseURL != "" {
 		opts = append(opts, llmprovider.WithBaseURL(res.BaseURL))
 	}
-	baseURL := res.BaseURL
-	if baseURL == "" {
-		baseURL = o.Existing.BaseURL
-	}
-	if baseURL != "" {
-		opts = append(opts, llmprovider.WithBaseURL(baseURL))
+	if o.HTTPClient != nil {
+		opts = append(opts, llmprovider.WithHTTPClient(o.HTTPClient))
 	}
 	cat, err := llmprovider.ListModelCatalogWithSource(dCtx, d.ID, source, opts...)
 	if err != nil {
+		if len(static) == 0 {
+			p.Notify(LevelWarn, "could not list models for %s (%v)", d.Label, err)
+			return fallback
+		}
 		p.Notify(LevelWarn, "could not list models for %s (%v); using the built-in catalog", d.Label, err)
 		return fallback
 	}

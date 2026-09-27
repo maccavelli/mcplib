@@ -3,6 +3,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -262,6 +263,14 @@ func TestConfigureLLM_NoStaticNoticeWithoutDiscover(t *testing.T) {
 
 func TestConfigureLLM_ChatGPTNoStaticNotice(t *testing.T) {
 	store := newMemoryTokenStore()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"models":[{"slug":"gpt-6-astra","visibility":"list"}]}`)),
+			Request:    r,
+		}, nil
+	})}
 	f := &fakePrompter{
 		t:        t,
 		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 1, 0},
@@ -280,6 +289,7 @@ func TestConfigureLLM_ChatGPTNoStaticNotice(t *testing.T) {
 		},
 		TokenStore: store,
 		Discover:   true,
+		HTTPClient: client,
 	})
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
@@ -287,8 +297,8 @@ func TestConfigureLLM_ChatGPTNoStaticNotice(t *testing.T) {
 	if n := countContaining(f.seenNotify, "live model listing"); n != 0 {
 		t.Errorf("notices = %v, want no static notice for ChatGPT", f.seenNotify)
 	}
-	if res.Model != llmprovider.StaticOpenAIChatGPT[0] {
-		t.Errorf("Model = %q, want %q", res.Model, llmprovider.StaticOpenAIChatGPT[0])
+	if res.Model != "gpt-6-astra" {
+		t.Errorf("Model = %q, want the listed gpt-6-astra", res.Model)
 	}
 }
 

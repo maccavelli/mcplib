@@ -958,5 +958,50 @@ what the plan predicted incorrectly.
 | P2, P3, P5, P6 | not started | | | | |
 | P4 | partial | `ba92db1` | not recorded | `TestOpenAI_ChatGPTSetsOriginatorHeader` passes at R1 | `TestOpenAI_ChatGPTSendsMaxOutputTokens` missing |
 | P7 | done by R1 | `ba92db1`, then R1 | see R1 | see R1 | The llmprovider half landed in `ba92db1`; the wizard half and C1 only in R1 |
-| R1 | in progress | | `6e19cdf`: `go build ./...` exit 1, `discovery.go:335:1: syntax error: unexpected <<` | | Added 2026-09-27 |
+| R1 | done | the commit after `fc3e559` that adds this row | `6e19cdf`: `go build ./...` exit 1, `discovery.go:335:1: syntax error: unexpected <<` | Full gate PASS (below) | Added 2026-09-27. Two further stale `StaticOpenAIChatGPT` tests surfaced (`discovery_catalog_test.go`, `model_select_test.go`) and were rewritten in R1 |
 | P8 | not started | | | | Blocked on the `v1.5.1` tag |
+
+### R1 verification (2026-09-27)
+
+R1 was first built and proven on a scratch archive of `fc3e559`. It was then
+applied to the working tree, and the 17 changed files match the proven tree
+byte for byte. The gate was then run in the working tree:
+
+```text
+gofmt -l <17 files>                            exit=0, no output
+golint -set_exit_status <each file>            17 x exit=0
+go build ./...                                 exit=0
+go vet ./...                                   exit=0
+go vet -tags live_gateways ./llmprovider       exit=0
+make lint                                      exit=0
+go test -count=1 ./...                         exit=0 (8 packages ok)
+go test -race -count=1 ./llmprovider ./wizard  exit=0
+```
+
+Structure:
+* No `.go` file holds a conflict marker.
+* `StaticOpenAIChatGPT` has no references.
+* `discovery.go` against `ca29b81` removes exactly one line:
+  `return staticCatalog(slices.Clone(StaticOpenAIChatGPT)), nil`. Every other
+  change adds the D11 lister.
+* The eight restored files equal `ca29b81`.
+
+Mutants (a mutant counts as killed only by a runtime `--- FAIL`):
+
+| Mutant | Test | Result |
+| --- | --- | --- |
+| ChatGPT static fallback restored (`configure.go`) | `TestConfigureLLM_ChatGPTListingFailurePromptsForModel` | killed: `unexpected Select("Choose a OpenAI model:")` |
+| same | `TestConfigureLLM_TokenStdinClassification` | killed: `oauth model = "gpt-4.1-mini", want chatgpt-model` |
+| same | `TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey` | killed: `unexpected Select("Choose a OpenAI model:")` |
+| Failure notice claims a built-in catalog | `TestConfigureLLM_ChatGPTListingFailurePromptsForModel` | killed: `notice "…(model listing: chatgpt HTTP 502); using the built-in catalog" claims a built-in catalog…` |
+| No static catalog for any provider (C1) | `TestConfigureLLM_PromptsWhenNothingAvailable` | killed: `wizard: no model available for Claude (Anthropic) and none entered` |
+| ChatGPT `DiscoverModels` falls back to static | `TestOpenAIProvider_ChatGPTDiscoverModelsListingFailureIsError` | killed: `DiscoverModels() = [gpt-4.1-mini …]/<nil>, want nil/listing error` |
+| Gemini listing failure returns an error (C1) | `TestListAvailableModels_Gemini` | killed: `fallback error: gemini: models endpoint returned HTTP 500` |
+| Codex `hide` slugs kept | `TestListAvailableModelsWithSource_ChatGPTListsCodexCatalog` | killed |
+| Codex 502 returns `StaticOpenAI` | `TestListAvailableModelsWithSource_ChatGPTListingFailureIsError` | killed: `error = nil, want listing failure` |
+| Recommended and Usable share an array | `TestListModelCatalogWithSource_ChatGPTListsCodexCatalog` | killed: `Recommended and Usable share a backing array` |
+| Static notice fired for ChatGPT | `TestConfigureLLM_ChatGPTNoStaticNotice` | killed |
+| `StaticModels(openai)` returns the old ChatGPT slice | `TestStaticModels_OpenAIIsPlatformCatalog` | killed |
+| State mismatch does not complete the waiter (D5) | `TestOAuthCallback_RejectsStateMismatch` | killed: `mismatched state did not complete the waiter` |
+| No originator on generate (D9) | `TestOpenAI_ChatGPTSetsOriginatorHeader` | killed: `originator = "", want "mcplib"` |
+| IPv4-only loopback bind (D1) | `TestListenLoopbackBothFamilies_LocalhostDials` | survived, as expected on macOS: A1's negative case needs the Windows host (P1) |

@@ -48,8 +48,11 @@ func TestListAvailableModels_Gemini(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderGemini, "key", WithBaseURL(errSrv.URL))
-	if err == nil || fallbackModels != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
+	if err != nil {
+		t.Fatalf("fallback error: %v", err)
+	}
+	if len(fallbackModels) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 
@@ -84,8 +87,11 @@ func TestListAvailableModels_OpenAI(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderOpenAI, "key", WithBaseURL(errSrv.URL))
-	if err == nil || fallbackModels != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
+	if err != nil {
+		t.Fatalf("fallback error: %v", err)
+	}
+	if len(fallbackModels) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 
@@ -212,8 +218,11 @@ func TestListAvailableModels_Claude(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderClaude, "key", WithBaseURL(errSrv.URL))
-	if err == nil || fallbackModels != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
+	if err != nil {
+		t.Fatalf("fallback error: %v", err)
+	}
+	if len(fallbackModels) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 
@@ -248,8 +257,11 @@ func TestListAvailableModels_Grok(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderGrok, "key", WithBaseURL(errSrv.URL))
-	if err == nil || fallbackModels != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
+	if err != nil {
+		t.Fatalf("fallback error: %v", err)
+	}
+	if len(fallbackModels) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 
@@ -391,8 +403,11 @@ func TestListAvailableModels_OpencodeFallback(t *testing.T) {
 	defer srv.Close()
 
 	models, err := ListAvailableModels(context.Background(), ProviderOpencodeZen, "k", WithBaseURL(srv.URL))
-	if err == nil || models != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", models, err)
+	if err != nil {
+		t.Fatalf("fallback must not error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 
@@ -483,8 +498,11 @@ func TestListAvailableModels_HuggingFaceFallback(t *testing.T) {
 	defer srv.Close()
 
 	models, err := ListAvailableModels(context.Background(), ProviderHuggingFace, "k", WithBaseURL(srv.URL))
-	if err == nil || models != nil {
-		t.Fatalf("listing failure models/err = %v/%v, want nil/error", models, err)
+	if err != nil {
+		t.Fatalf("fallback must not error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected static catalog fallback")
 	}
 }
 

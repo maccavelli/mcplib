@@ -332,44 +332,13 @@ func fetchOpenAIUsable(ctx context.Context, apiKey string, cfg ProviderConfig) (
 	}
 	ids, err := fetchDataIDs(ctx, baseURL+"/models", "Bearer "+apiKey, cfg, ProviderOpenAI)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: openai: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	return filterIDs(ids, isUsableOpenAIChatModel), nil
 }
 
-<<<<<<< HEAD
-	resp, err := cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("model listing: openai: %w", err)
-	}
-	defer closeResponseBody(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("model listing: openai HTTP %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("model listing: decode openai catalog: %w", err)
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		available = append(available, m.ID)
-	}
-	return liveModels(available, isUsableOpenAIChatModel, RankOpenAIModel)
-=======
 func curateOpenAI(usable []string) []string {
 	return curateFromCatalog(StaticOpenAI, usable, isUsableOpenAIChatModel, RankOpenAIModel)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // listClaudeModels uses Anthropic's Models API when available; otherwise returns
@@ -428,56 +397,27 @@ func fetchClaudePage(ctx context.Context, endpoint, apiKey string, cfg ProviderC
 	var result claudeModelsPage
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: claude: %w", err)
-=======
 		return result, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: claude: %w", err)
-=======
 		return result, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: claude HTTP %d", resp.StatusCode)
-=======
 		// Older keys / regional proxies may not support Models API.
 		return result, fmt.Errorf("claude: models endpoint returned HTTP %d", resp.StatusCode)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	return result, err
 }
 
-<<<<<<< HEAD
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("model listing: decode claude catalog: %w", err)
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		available = append(available, m.ID)
-	}
-	return liveModels(available, isUsableClaudeTextModel, RankClaudeModel)
-=======
 func curateClaude(usable []string) []string {
 	return curateFromCatalog(StaticClaude, usable, isUsableClaudeTextModel, RankClaudeModel)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // listOllamaModels fetches installed models from a local Ollama instance.
@@ -569,9 +509,6 @@ func fetchGrokUsable(ctx context.Context, apiKey string, cfg ProviderConfig) ([]
 	}
 	ids, err := fetchDataIDs(ctx, baseURL+"/models", "Bearer "+apiKey, cfg, ProviderGrok)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: grok: %w", err)
-=======
 		return nil, err
 	}
 	return filterIDs(ids, isUsableGrokModel), nil
@@ -590,25 +527,16 @@ func fetchDataIDs(ctx context.Context, endpoint, authorization string, cfg Provi
 	}
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: grok: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: grok HTTP %d", resp.StatusCode)
-=======
 		return nil, fmt.Errorf("%s: models endpoint returned HTTP %d", provider, resp.StatusCode)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 
 	var result struct {
@@ -617,19 +545,10 @@ func fetchDataIDs(ctx context.Context, endpoint, authorization string, cfg Provi
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: decode grok catalog: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-<<<<<<< HEAD
-		available = append(available, m.ID)
-	}
-	return liveModels(available, isUsableGrokModel, RankGrokModel)
-=======
 		ids = append(ids, m.ID)
 	}
 	return ids, nil
@@ -644,7 +563,6 @@ func filterIDs(ids []string, usable func(string) bool) []string {
 		}
 	}
 	return out
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // listOpencodeModels fetches the gateway catalog and curates it. The OpenCode
@@ -682,48 +600,15 @@ func fetchOpencodeUsable(ctx context.Context, gateway, apiKey string, cfg Provid
 	if cfg.BaseURL != "" {
 		baseURL = strings.TrimRight(cfg.BaseURL, "/")
 	}
-<<<<<<< HEAD
-
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
-	if err != nil {
-		return nil, fmt.Errorf("model listing: %s: %w", gateway, err)
-	}
-=======
 	authorization := ""
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	if apiKey != "" {
 		authorization = "Bearer " + apiKey
 	}
 	ids, err := fetchDataIDs(ctx, baseURL+"/models", authorization, cfg, "opencode")
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: %s: %w", gateway, err)
-	}
-	defer closeResponseBody(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("model listing: %s HTTP %d", gateway, resp.StatusCode)
-	}
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("model listing: decode %s catalog: %w", gateway, err)
-	}
-
-	var available []string
-	for _, m := range result.Data {
-		available = append(available, m.ID)
-	}
-	return liveModels(available, isUsableOpencodeModel, RankOpencodeModel)
-=======
 		return nil, err
 	}
 	return filterIDs(ids, isUsableOpencodeModel), nil
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // onlyText reports whether a modality list is exactly ["text"].
@@ -756,11 +641,7 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 
 	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: huggingface: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -768,20 +649,12 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: huggingface: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: huggingface HTTP %d", resp.StatusCode)
-=======
 		return nil, fmt.Errorf("huggingface: models endpoint returned HTTP %d", resp.StatusCode)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 
 	var result struct {
@@ -800,11 +673,7 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-<<<<<<< HEAD
-		return nil, fmt.Errorf("model listing: decode huggingface catalog: %w", err)
-=======
 		return nil, err
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 
 	type scored struct {
@@ -859,16 +728,9 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 	return available, nil
 }
 
-<<<<<<< HEAD
-	if len(available) == 0 {
-		return nil, errors.New("model listing: huggingface catalog listed no models")
-	}
-	return available, nil
-=======
 // curateHuggingFace passes a nil rankFn, which preserves the metadata order.
 func curateHuggingFace(usable []string) []string {
 	return curateFromCatalog(StaticHuggingFace, usable, isUsableHuggingFaceModel, nil)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // kiloCatalogEntry is the subset of Kilo's OpenRouter-shaped catalog entry this
@@ -956,15 +818,8 @@ func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 // Models flagged mayTrainOnYourPrompts are excluded. That is a POLICY decision,
 // not a capability filter — see isUsableKiloModel's comment.
 func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
-<<<<<<< HEAD
-	entries, err := fetchKiloCatalog(ctx, apiKey, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("model listing: kilo: %w", err)
-	}
-=======
 	return recommendedOf(modelCatalogFor(ctx, ProviderKilo, apiKey, cfg))
 }
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 
 // kiloUsable returns the usable Kilo models, cheapest first: input must include
 // text and output must be exactly text (MADR 0009 §1b), tools must be supported,
@@ -1007,16 +862,9 @@ func kiloUsable(entries []kiloCatalogEntry) []string {
 	return available
 }
 
-<<<<<<< HEAD
-	if len(available) == 0 {
-		return nil, errors.New("model listing: kilo catalog listed no models")
-	}
-	return available, nil
-=======
 // curateKilo passes a nil rankFn, which preserves the price ordering.
 func curateKilo(usable []string) []string {
 	return curateFromCatalog(StaticKilo, usable, isUsableKiloModel, nil)
->>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 }
 
 // kiloCurate ranks Kilo's usable models from the listing's own metadata
