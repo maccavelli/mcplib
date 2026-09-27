@@ -564,7 +564,7 @@ This MADR carries several PLANs, one per independent unit of work:
 
 | Plan | Covers |
 |---|---|
-| `0012-PLAN-shared-transport.md` | §1 |
+| `0012-PLAN-shared-transport.md` | §1 (complete, 2026-09-27) |
 | `0012-PLAN-item-fidelity.md` | §2 |
 | `0012-PLAN-gateway-conventions.md` | §3 (after 0009 and 0010) |
 | `0012-PLAN-chatgpt-backend.md` | §4, opening with gate G-C |

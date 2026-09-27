@@ -111,8 +111,10 @@ both use `api.x.ai/v1`; mcplib never sends either credential to the
 Claude and Gemini remain API-key-only.
 
 Registered names: `gemini`, `openai`, `claude`, `grok`, `opencode-zen`,
-`opencode-go`, `huggingface`, `kilo`, `ollama`. Ollama is the only one that
-needs no API key. Gateways that speak Chat Completions share one encoder;
+`opencode-go`, `huggingface`, `kilo`, `ollama`. Ollama needs no API key, and
+Kilo and OpenCode accept an empty one: they then send the service's anonymous
+token, which free models answer and paid ones refuse with a typed error.
+Gateways that speak Chat Completions share one encoder;
 OpenCode still routes some models onto Responses-shaped or Anthropic/Gemini
 wires.
 
@@ -139,18 +141,37 @@ A live listing is bounded at 10 seconds; `Options.DiscoverLimit` can shorten
 that bound but not extend it. When the listing fails, the wizard's notice names
 the cause, and `ModelCatalog.Err` carries it for other callers.
 
-Retries are opt-in (`GenerateWithRetry`). Typed sentinels
-(`ErrRateLimited`, `ErrAuthFailure`, `ErrInvalidRequest`,
-`ErrProviderUnavailable`) classify failures. OAuth sessions make one
-forced-refresh retry after a 401; static-key 401/403 responses and other 4xx
-responses are not retried.
+Retries are opt-in (`GenerateWithRetry`, `GenerateItemsWithRetry`,
+`GenerateThinkingWithRetry`). A failed response is an `*APIError` carrying the
+service's own error type and message (redacted, at most 512 bytes), or a
+`*RateLimitError` for a plain 429. Sentinels classify it: `ErrRateLimited`,
+`ErrAuthFailure`, `ErrInvalidRequest`, `ErrProviderUnavailable`, and
+`ErrQuotaExhausted` (exhausted quota or balance; it also matches
+`ErrRateLimited`) and `ErrNotPermitted` (region, data-policy, entitlement or
+free-tier refusals). Every error still matches the sentinel its status matched
+before. The retry helpers stop at once on a terminal `APIError`, on
+`x-should-retry: false`, and on a server delay longer than 30 seconds, which
+they return so the caller can reschedule. They honour `Retry-After` and
+`retry-after-ms`. OAuth sessions make one forced-refresh retry after a 401.
+
+A truncated answer is an error: a Responses answer marked `incomplete`, or a
+tool call cut by the token limit, returns an `*IncompleteError`. A
+length-truncated text answer keeps its text and sets `Response.FinishReason`.
+The default HTTP client waits up to 300 seconds for response headers and 330
+seconds in all, as the services' own clients do; set a context deadline for
+less. Every request sends `User-Agent: <name>/<version> (<os>; <arch>)
+mcplib/<version>`. `WithClientInfo(name, version)` names the consuming
+application, and `WithSessionID(id)` sets the conversation id that OpenCode
+(`x-opencode-session`) and Kilo (`X-KiloCode-TaskId`) receive.
 
 `WithReasoningEffort` sets the effort for every provider's thinking path.
 Effort APIs send it as given. Claude 4.7 and later use adaptive thinking with
 `output_config.effort`. Older Claude models map `low` to a 1,024-token budget.
 Gemini maps `low` to `thinkingLevel` on Gemini 3 and to a 1,024-token budget on
 Gemini 2.x. `DiscoverModels` on Kilo, OpenCode and Hugging Face ranks with the
-provider's `WithModelProfile` and `WithModelMetadataURL`.
+provider's `WithModelProfile` and `WithModelMetadataURL`. On those gateways,
+and for a ChatGPT session, it returns the curated listing without spending a
+generation on a health probe.
 
 ## Self-update
 

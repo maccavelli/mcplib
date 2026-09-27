@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -416,3 +416,26 @@ depends on T1's `APIError`. There is no data migration.
 | T5 | the T5 commit | On an archive of `03033cf`: the incomplete Responses body decoded as `&{ID:r1 Output:[{Text:}]}/<nil>`, and the length-cut tool call as `{"subject":"fix: tru` with no error | 3 killed: `FinishReason` dropped; a length-cut text answer rejected; `Reason` dropped | PASS |
 | T6 | the T6 commit | On an archive of `0fe0ecb`: all four metered cases probed (`DiscoverModels made 1 generation requests, want 0`, and 6 for others). The API-key OpenAI scope guard passed there | 1 killed: OpenAI never probes (`API-key OpenAI DiscoverModels made no probe`) | PASS. With the OpenCode probes gone, T4's session test now covers the listing only, as the plan anticipated |
 | T7 | the T7 commit | On an archive of `06175aa`: `NewKilo without a key: kilo api key is required`. `TestKeyless_KeyStillWins` passed there | 1 killed: a real key replaced (`Authorization = "Bearer anonymous"`) | PASS. The existing `TestOpencode_ConstructorErrors` asserted "empty key is an error", which §1.7 reverses, so that one assertion now requires success. Live, from a scratch copy with both keys unset: Kilo `kilo-auto/free` answered `ok`. Zen `-free` ids all returned typed errors: two `muse-spark-*-contributor-free` gave `llm: not permitted … HTTP 403 FreeTierError …` (T1's row, confirmed live); `deepseek-v4-flash-free` gave a typed 400 "Model is unavailable"; `jev-1.13-free` gave a typed 500 (the `systemone` family that §3.1 excludes) |
+| T8 | the T8 commit | `liveTransient` is new, so it was proven by a mutant | 1 killed: `ErrInvalidRequest` re-added (`400: liveTransient = true, want false`) | PASS on every `.go` file the plan touched; whole-tree `gofmt` clean. The full live suite had 53 PASS, 0 FAIL, 0 SKIP, and no previously skipped 400 now fails. The README documents `APIError`, the two sentinels, the retry rules, `IncompleteError` and `FinishReason`, the timeouts, `WithClientInfo`, `WithSessionID`, keyless Kilo and OpenCode, and probe-free discovery. The live suite's header comment was corrected for D5 and §1.7 |
+
+**Acceptance (§7).**
+1. The classification table test covers every §1.1 row and the three rows
+   added on 2026-09-27.
+2. A terminal error, and a `Retry-After` above the cap, each make one call.
+   `retry-after-ms: 1500` and `Retry-After: 1.5` both parse to 1.5 s.
+3. Every existing `errors.Is` assertion passes unmodified.
+4. The default client's timeouts are 300 s and 330 s.
+5. The §1.4 headers are pinned, and a mutant proves the forbidden-header test
+   can fail.
+6. Both truncation fixtures return `*IncompleteError`.
+7. Metered `DiscoverModels` makes no generation request.
+8. Every red test failed before its fix, and all 22 mutants were killed
+   (T1 10, T4 6, T5 3, T6 1, T7 1, T8 1).
+9. The live suite had no FAIL.
+
+Three existing tests changed, each because the MADR changes the value they
+pinned:
+* `TestClassifyHTTPStatus`: its call was renamed; its assertions are
+  unchanged.
+* `TestApplyOptions_DefaultTimeout`: 60 s became 330 s.
+* `TestOpencode_ConstructorErrors`: an empty key is now accepted.

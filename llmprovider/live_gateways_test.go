@@ -6,17 +6,18 @@
 //
 // Kilo tests REQUIRE KILO_API_KEY: since 2026-09-26 Kilo answers a placeholder
 // bearer with 401, even on free models (0010 PLAN deviation). The free-model
-// tests are rate-limited upstream, so 429 and 400 SKIP rather than fail —
-// these assert wire-format correctness, not gateway availability. The 0010
-// reasoning gate (TestLive_KiloReasoningShapes) uses a paid model and treats a
-// 400 as DRIFT.
+// tests are rate-limited upstream, so rate limits, outages, quota and
+// not-permitted refusals SKIP rather than fail; a 400 FAILS, since a wire
+// regression answers with one (skipIfTransient; 0013 D5, MADR 0012 §1.1). These
+// assert wire-format correctness, not gateway availability. The 0010 reasoning
+// gate (TestLive_KiloReasoningShapes) uses a paid model and treats a 400 as
+// DRIFT.
 //
-// OpenCode tests REQUIRE OPENCODE_API_KEY (plan deviation D3). Its free models
-// answer 200 with NO Authorization header but 401 with a bogus one, and
-// NewOpencode requires a non-empty key and always sends it — so a placeholder
-// is strictly worse than none there. The generation tests use paid OpenCode Go
-// models: Zen's free tier refuses clients other than OpenCode (403
-// FreeTierError, measured 2026-09-26/27; MADR 0013 D1).
+// OpenCode tests REQUIRE OPENCODE_API_KEY (plan deviation D3): a bogus key is
+// answered 401. Without a key, NewOpencode sends the gateway's "public" token
+// (MADR 0012 §1.7). The generation tests use paid OpenCode Go models: Zen's
+// free tier refuses clients other than OpenCode (403 FreeTierError, typed as
+// ErrNotPermitted; measured 2026-09-26/27; MADR 0013 D1).
 //
 // The Hugging Face test REQUIRES HF_TOKEN: HF reports is_free:false for all
 // provider offerings, so no credential-free path exists (verified 2026-08-29).
@@ -41,16 +42,21 @@ import (
 	"time"
 )
 
-// skipIfTransient converts upstream rate limiting and temporary model
-// unavailability into a skip: these assert wire shapes, not uptime.
+// skipIfTransient converts upstream rate limiting, outages and account-state
+// refusals into a skip: these assert wire shapes, not uptime or quota. A 400
+// (ErrInvalidRequest) is a failure, since a wire regression answers with one
+// (MADR 0012 amendment, 0013 D5).
 func skipIfTransient(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		return
+	if liveTransient(err) {
+		t.Skipf("gateway transient (rate limit / outage / quota / not permitted): %v", err)
 	}
-	if errors.Is(err, ErrRateLimited) || errors.Is(err, ErrInvalidRequest) {
-		t.Skipf("gateway transient (free tier limits / model unavailable): %v", err)
-	}
+}
+
+// liveTransient reports whether err is a class the live suite skips on.
+func liveTransient(err error) bool {
+	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrProviderUnavailable) ||
+		errors.Is(err, ErrQuotaExhausted) || errors.Is(err, ErrNotPermitted)
 }
 
 // kiloKey returns a real Kilo credential or skips: Kilo rejects a placeholder
