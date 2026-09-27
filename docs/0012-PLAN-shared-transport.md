@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -8,7 +8,7 @@ decision-makers: mcplib maintainers
 # Implement 0012 §1 — Shared Transport
 
 Associated MADR: [0012-MADR-conform-providers-to-reference-clients.md](0012-MADR-conform-providers-to-reference-clients.md)
-(proposed, revision 2, 2026-09-27). This is the first of that MADR's six
+(accepted 2026-09-27, revision 2). This is the first of that MADR's six
 plans (§8); §9 orders it first because §1.1's typed errors carry the terminal
 conditions of §3–§5.
 
