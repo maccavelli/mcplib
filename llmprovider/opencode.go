@@ -14,10 +14,11 @@ import (
 // OpencodeProvider implements Provider against the OpenCode Zen and OpenCode Go
 // AI gateways. Both are multi-protocol: the gateway dispatches each model to one
 // of four upstream wire formats and does NOT normalize them, so this provider
-// selects the request shape, path and decoder per model via resolveOpencodeRoute.
+// selects the request shape, path and decoder per request via requestRoute:
+// the model's provider.npm in the model metadata, else the built-in table.
 // Sending a model to the wrong route fails with an opaque HTTP 500, which
 // classifies as the retryable ErrProviderUnavailable — use WithOpencodeRoute to
-// override the table when the gateway adds a model.
+// pin a route.
 //
 // OpencodeProvider does NOT implement Continuer. The gateway rejects
 // previous_response_id with HTTP 400 "referenced response not found or expired"
@@ -37,6 +38,8 @@ type OpencodeProvider struct {
 	modelProfile    ModelProfile
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
+	// routePinned is set by WithOpencodeRoute: route is used as given.
+	routePinned bool
 }
 
 // opencodeSessionHeader carries a stable conversation id. OpenCode Go rejects
@@ -50,7 +53,8 @@ const opencodePublicToken = "public"
 
 // NewOpencode creates an OpenCode gateway provider. gateway must be
 // ProviderOpencodeZen or ProviderOpencodeGo. The wire format is resolved once,
-// here, so a misroute is a construction-time fact rather than a per-call surprise.
+// here from WithOpencodeRoute or the table; each request then prefers the
+// model metadata's route unless WithOpencodeRoute pinned one (MADR 0012 §3.1).
 // An empty apiKey uses the gateway's public token.
 func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*OpencodeProvider, error) {
 	defaultBase, err := opencodeBaseURL(gateway)
@@ -79,6 +83,7 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 		thinkingBudget:  cfg.ThinkingBudget,
 		reasoningEffort: cfg.ReasoningEffort,
 		route:           route,
+		routePinned:     cfg.OpencodeRoute != "",
 		metadataURL:     cfg.ModelMetadataURL,
 		modelProfile:    cfg.ModelProfile,
 		identity:        identityOf(cfg),
@@ -88,7 +93,10 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 // Name returns the gateway identifier this provider was constructed for.
 func (p *OpencodeProvider) Name() string { return p.gateway }
 
-// Route reports the wire format resolved for this provider's model.
+// Route reports the wire format resolved at construction: the
+// WithOpencodeRoute override, else the built-in table, else the prefix
+// heuristic. Without an override, a request uses the model's provider.npm
+// route from the model metadata when that is available (MADR 0012 §3.1).
 func (p *OpencodeProvider) Route() OpencodeRoute { return p.route }
 
 // Generate sends a prompt to the gateway and returns the generated text.
@@ -289,9 +297,29 @@ func isAssistantTurn(item Item) bool {
 	return false
 }
 
+// requestRoute returns one request's wire format: the pinned route, else the
+// model's provider.npm route in the metadata, else the construction-time
+// route (MADR 0012 §3.1). The lookup waits at most metadataLookupTimeout.
+func (p *OpencodeProvider) requestRoute(ctx context.Context) OpencodeRoute {
+	if p.routePinned {
+		return p.route
+	}
+	ctx, cancel := context.WithTimeout(ctx, metadataLookupTimeout)
+	defer cancel()
+	doc, err := loadModelMetadata(ctx, ProviderConfig{HTTPClient: p.client, ModelMetadataURL: p.metadataURL})
+	if err != nil {
+		return p.route
+	}
+	if r, ok := doc.opencodeRoute(p.gateway, p.model); ok {
+		return r
+	}
+	return p.route
+}
+
 func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool) (*Response, error) {
+	route := p.requestRoute(ctx)
 	var body map[string]any
-	switch p.route {
+	switch route {
 	case OpencodeRouteResponses:
 		body = p.responsesBody(input, tool, thinking)
 	case OpencodeRouteMessages:
@@ -309,7 +337,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 		return nil, fmt.Errorf("opencode: marshal request: %w", err)
 	}
 
-	url := p.baseURL + p.route.path(p.model)
+	url := p.baseURL + route.path(p.model)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
@@ -318,7 +346,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	p.identity.setUserAgent(req)
 	// Each route reads the key from its vendor's header (MADR 0009 §1c); the
 	// key stays in a header, never the URL.
-	name, value := opencodeKeyHeader(p.route, p.apiKey)
+	name, value := opencodeKeyHeader(route, p.apiKey)
 	req.Header.Set(name, value)
 	// x-opencode-session is fixed for the provider's lifetime (MADR 0012 §1.4).
 	req.Header.Set(opencodeSessionHeader, p.identity.session)
@@ -333,11 +361,11 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	// response bodies are also bounded.
 	limitedBody := io.LimitReader(resp.Body, 1<<20)
 
-	if err := classifyHTTPError(p.gateway+"/"+string(p.route), resp); err != nil {
+	if err := classifyHTTPError(p.gateway+"/"+string(route), resp); err != nil {
 		return nil, err
 	}
 
-	switch p.route {
+	switch route {
 	case OpencodeRouteResponses:
 		return decodeResponsesAPIOutput(limitedBody)
 	case OpencodeRouteMessages:

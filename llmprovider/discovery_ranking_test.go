@@ -283,7 +283,8 @@ func TestListModelCatalog_Snapshot20260926(t *testing.T) {
 				"google/gemini-3.6-flash", "meta/muse-spark-1.2", "thinkingmachines/inkling"},
 			[]string{"openai/gpt-6-astra", "anthropic/claude-fable-5.1", "openai/gpt-5.6-sol",
 				"deepseek/deepseek-v4.1-flash", "google/gemini-3.8-flash", "x-ai/grok-4.6"}},
-		{ProviderOpencodeZen, "zen.json", 80,
+		// 78: the listing's jev-1.13 and jev-1.13-free are not usable (MADR 0012 §3.1).
+		{ProviderOpencodeZen, "zen.json", 78,
 			[]string{opencodeDeepSeekV41Flash, "qwen3.8-flash", "glm-5.3-flash", opencodeDeepSeekV4Flash,
 				"gemini-3.5-flash-lite", "gemini-3.8-flash"},
 			[]string{"claude-opus-5-5", "gpt-6-sol", "gpt-6-luna", "grok-4.7", "gpt-6-astra", "muse-spark-1.3"}},

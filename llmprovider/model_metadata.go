@@ -57,6 +57,12 @@ type modelMetadata struct {
 	// Interleaved is {"field": name} when the provider expects prior reasoning
 	// replayed on assistant messages under that field, or true/absent.
 	Interleaved json.RawMessage `json:"interleaved"`
+	// Provider.NPM names the AI SDK package OpenCode's client uses for the
+	// model, which fixes its route on the Zen and Go gateways (MADR 0012
+	// §3.1). Unset means the section's openai-compatible package.
+	Provider struct {
+		NPM string `json:"npm"`
+	} `json:"provider"`
 }
 
 // modelReasoningOption is one models.dev reasoning_options entry.
@@ -95,6 +101,16 @@ func (d modelMetadataDoc) interleavedField(provider, model string) string {
 		return ""
 	}
 	return declared.Field
+}
+
+// opencodeRoute returns the route a Zen or Go model's provider.npm selects,
+// and false when the document does not list the model (MADR 0012 §3.1).
+func (d modelMetadataDoc) opencodeRoute(gateway, model string) (OpencodeRoute, bool) {
+	m, ok := d[modelMetadataKey(gateway)][model]
+	if !ok {
+		return "", false
+	}
+	return opencodeRouteForNPM(m.Provider.NPM), true
 }
 
 // modelMetadataKey returns the document key for a provider, or "".

@@ -56,7 +56,7 @@ func TestOpencodeRoute_Heuristic(t *testing.T) {
 		model   string
 		want    OpencodeRoute
 	}{
-		{ProviderOpencodeZen, "claude-sonnet-4", OpencodeRouteMessages},
+		{ProviderOpencodeZen, "claude-sonnet-9", OpencodeRouteMessages},
 		{ProviderOpencodeZen, "deepseek-v4-flash-free", OpencodeRouteChatCompletions},
 		{ProviderOpencodeZen, "laguna-s-2.1-free", OpencodeRouteChatCompletions},
 		{ProviderOpencodeGo, "kimi-k2.5", OpencodeRouteChatCompletions},

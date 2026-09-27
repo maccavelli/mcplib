@@ -203,7 +203,9 @@ var opencodeDenySubstrings = []string{
 // deliberately aggregate many vendors under bare IDs.
 func isUsableOpencodeModel(id string) bool {
 	sm := strings.ToLower(strings.TrimSpace(id))
-	if sm == "" {
+	// jev-* models use OpenCode's "systemone" route, which this package has
+	// no encoder for (MADR 0012 §3.1).
+	if sm == "" || strings.HasPrefix(sm, "jev-") {
 		return false
 	}
 	for _, deny := range opencodeDenySubstrings {

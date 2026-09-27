@@ -23,7 +23,7 @@ const (
 // nothing warns when it goes stale — unlike a local engine, which can report a
 // version on boot (see magic-cli-remote/internal/provider/opencode/version.go).
 // Re-validate with: go test -tags live_gateways ./llmprovider/ -run Live
-const wireShapesProbedOnOpencode = "2026-08-28"
+const wireShapesProbedOnOpencode = "2026-09-27"
 
 // OpencodeRoute identifies which wire format the OpenCode gateway expects for a
 // given model. OpenCode Zen and Go are multi-protocol gateways: they do not
@@ -79,94 +79,144 @@ func opencodeBaseURL(gateway string) (string, error) {
 	}
 }
 
-// opencodeRouteTable maps gateway -> model id -> wire format, transcribed from the
-// published endpoint tables at https://opencode.ai/docs/zen/ and
-// https://opencode.ai/docs/go/ (retrieved 2026-08-28).
+// opencodeRouteTable maps gateway -> model id -> wire format. It is the
+// fallback for a request whose metadata is unavailable (MADR 0012 §3.1), and
+// it is generated from the same document: every model in the "opencode" and
+// "opencode-go" sections of models.opencode.ai/api.json (retrieved
+// 2026-09-27) whose status is not "deprecated", routed by its provider.npm
+// (opencodeRouteForNPM). TestOpencodeRouteTable_MatchesMetadataSnapshot pins
+// it to testdata/opencode-routes.json.
 //
 // Routing is per-gateway, not per-model: the minimax-* family takes
-// chat_completions on Zen and messages on Go. Reconcile this table against both
-// docs pages when either gateway announces new models.
+// chat_completions on Zen and messages on Go.
 //
 //nolint:goconst // model IDs are intentionally repeated across gateways and tests
 var opencodeRouteTable = map[string]map[string]OpencodeRoute{
 	ProviderOpencodeZen: {
 		// responses (@ai-sdk/openai)
-		"gpt-5.6-sol": OpencodeRouteResponses, "gpt-5.6-terra": OpencodeRouteResponses,
-		"gpt-5.6-luna": OpencodeRouteResponses, "gpt-5.5": OpencodeRouteResponses,
-		"gpt-5.5-pro": OpencodeRouteResponses, "gpt-5.4": OpencodeRouteResponses,
-		"gpt-5.4-pro": OpencodeRouteResponses, "gpt-5.4-mini": OpencodeRouteResponses,
-		"gpt-5.4-nano": OpencodeRouteResponses, "gpt-5.3-codex": OpencodeRouteResponses,
-		"gpt-5.3-codex-spark": OpencodeRouteResponses, "gpt-5.2": OpencodeRouteResponses,
-		"gpt-5.2-codex": OpencodeRouteResponses, "gpt-5.1": OpencodeRouteResponses,
-		"gpt-5.1-codex": OpencodeRouteResponses, "gpt-5.1-codex-max": OpencodeRouteResponses,
-		"gpt-5.1-codex-mini": OpencodeRouteResponses, "gpt-5": OpencodeRouteResponses,
-		"gpt-5-codex": OpencodeRouteResponses, "gpt-5-nano": OpencodeRouteResponses,
-		"grok-4.6": OpencodeRouteResponses, "grok-4.5": OpencodeRouteResponses,
-		"grok-build-0.1": OpencodeRouteResponses, "muse-spark-1.2": OpencodeRouteResponses,
-		"muse-spark-1.2-contributor-free": OpencodeRouteResponses,
+		"gpt-5":                           OpencodeRouteResponses,
+		"gpt-5-codex":                     OpencodeRouteResponses,
+		"gpt-5-nano":                      OpencodeRouteResponses,
+		"gpt-5.1":                         OpencodeRouteResponses,
+		"gpt-5.1-codex":                   OpencodeRouteResponses,
+		"gpt-5.1-codex-max":               OpencodeRouteResponses,
+		"gpt-5.1-codex-mini":              OpencodeRouteResponses,
+		"gpt-5.2":                         OpencodeRouteResponses,
+		"gpt-5.2-codex":                   OpencodeRouteResponses,
+		"gpt-5.3-codex":                   OpencodeRouteResponses,
+		"gpt-5.3-codex-spark":             OpencodeRouteResponses,
+		"gpt-5.4":                         OpencodeRouteResponses,
+		"gpt-5.4-mini":                    OpencodeRouteResponses,
+		"gpt-5.4-nano":                    OpencodeRouteResponses,
+		"gpt-5.4-pro":                     OpencodeRouteResponses,
+		"gpt-5.5":                         OpencodeRouteResponses,
+		"gpt-5.5-pro":                     OpencodeRouteResponses,
+		"gpt-5.6-luna":                    OpencodeRouteResponses,
+		"gpt-5.6-sol":                     OpencodeRouteResponses,
+		"gpt-5.6-terra":                   OpencodeRouteResponses,
+		"gpt-6-astra":                     OpencodeRouteResponses,
+		"gpt-6-luna":                      OpencodeRouteResponses,
+		"gpt-6-sol":                       OpencodeRouteResponses,
+		"grok-4.5":                        OpencodeRouteResponses,
+		"grok-4.6":                        OpencodeRouteResponses,
+		"grok-4.7":                        OpencodeRouteResponses,
+		"grok-build-0.1":                  OpencodeRouteResponses,
+		"muse-spark-1.2":                  OpencodeRouteResponses,
+		"muse-spark-1.3":                  OpencodeRouteResponses,
+		"muse-spark-1.3-contributor-free": OpencodeRouteResponses,
 
 		// messages (@ai-sdk/anthropic)
-		"claude-fable-5": OpencodeRouteMessages, "claude-opus-5": OpencodeRouteMessages,
-		"claude-opus-4-8": OpencodeRouteMessages, "claude-opus-4-7": OpencodeRouteMessages,
-		"claude-opus-4-6": OpencodeRouteMessages, "claude-opus-4-5": OpencodeRouteMessages,
-		"claude-sonnet-5": OpencodeRouteMessages, "claude-sonnet-4-6": OpencodeRouteMessages,
-		"claude-sonnet-4-5": OpencodeRouteMessages, "claude-haiku-4-5": OpencodeRouteMessages,
-		"qwen3.7-max": OpencodeRouteMessages, "qwen3.7-plus": OpencodeRouteMessages,
-		"qwen3.6-plus": OpencodeRouteMessages, "qwen3.5-plus": OpencodeRouteMessages,
+		"claude-fable-5":    OpencodeRouteMessages,
+		"claude-fable-5-1":  OpencodeRouteMessages,
+		"claude-haiku-4-5":  OpencodeRouteMessages,
+		"claude-opus-4-5":   OpencodeRouteMessages,
+		"claude-opus-4-6":   OpencodeRouteMessages,
+		"claude-opus-4-7":   OpencodeRouteMessages,
+		"claude-opus-4-8":   OpencodeRouteMessages,
+		"claude-opus-5":     OpencodeRouteMessages,
+		"claude-opus-5-5":   OpencodeRouteMessages,
+		"claude-sonnet-4":   OpencodeRouteMessages,
+		"claude-sonnet-4-5": OpencodeRouteMessages,
+		"claude-sonnet-4-6": OpencodeRouteMessages,
+		"claude-sonnet-5":   OpencodeRouteMessages,
+		"qwen3.5-plus":      OpencodeRouteMessages,
+		"qwen3.6-plus":      OpencodeRouteMessages,
+		"qwen3.8-flash":     OpencodeRouteMessages,
 
 		// google (@ai-sdk/google)
-		"gemini-3.7-flash": OpencodeRouteGoogle, "gemini-3.6-flash": OpencodeRouteGoogle,
-		"gemini-3.5-flash": OpencodeRouteGoogle, "gemini-3.5-flash-lite": OpencodeRouteGoogle,
-		"gemini-3.1-pro": OpencodeRouteGoogle, "gemini-3-flash": OpencodeRouteGoogle,
+		"gemini-3-flash":        OpencodeRouteGoogle,
+		"gemini-3.1-pro":        OpencodeRouteGoogle,
+		"gemini-3.5-flash":      OpencodeRouteGoogle,
+		"gemini-3.5-flash-lite": OpencodeRouteGoogle,
+		"gemini-3.6-flash":      OpencodeRouteGoogle,
+		"gemini-3.7-flash":      OpencodeRouteGoogle,
+		"gemini-3.8-flash":      OpencodeRouteGoogle,
 
-		// chat_completions (@ai-sdk/openai-compatible)
-		"deepseek-v4-pro":   OpencodeRouteChatCompletions,
-		"deepseek-v4-flash": OpencodeRouteChatCompletions,
-		"minimax-m3":        OpencodeRouteChatCompletions,
-		"minimax-m2.7":      OpencodeRouteChatCompletions,
-		"minimax-m2.5":      OpencodeRouteChatCompletions,
-		"glm-5.2":           OpencodeRouteChatCompletions,
-		"glm-5.1":           OpencodeRouteChatCompletions,
-		"glm-5":             OpencodeRouteChatCompletions,
-		"kimi-k2.5":         OpencodeRouteChatCompletions,
-		"kimi-k2.6":         OpencodeRouteChatCompletions,
-		"kimi-k2.7-code":    OpencodeRouteChatCompletions,
-		"kimi-k3":           OpencodeRouteChatCompletions,
-		"big-pickle":        OpencodeRouteChatCompletions,
-		"mimo-v2.5-free":    OpencodeRouteChatCompletions,
-		"hy3-free":          OpencodeRouteChatCompletions,
-
-		"ling-3.0-flash-fin-free":     OpencodeRouteChatCompletions,
-		"nemotron-3-ultra-free":       OpencodeRouteChatCompletions,
-		"nemotron-3.5-lightning-free": OpencodeRouteChatCompletions,
+		// chat_completions (any other npm, or unset)
+		"big-pickle":                   OpencodeRouteChatCompletions,
+		"deepseek-v4-flash":            OpencodeRouteChatCompletions,
+		"deepseek-v4-flash-vision-exp": OpencodeRouteChatCompletions,
+		"deepseek-v4-pro":              OpencodeRouteChatCompletions,
+		"deepseek-v4.1-flash":          OpencodeRouteChatCompletions,
+		"glm-5":                        OpencodeRouteChatCompletions,
+		"glm-5.1":                      OpencodeRouteChatCompletions,
+		"glm-5.2":                      OpencodeRouteChatCompletions,
+		"glm-5.3":                      OpencodeRouteChatCompletions,
+		"glm-5.3-flash":                OpencodeRouteChatCompletions,
+		"kimi-k2.5":                    OpencodeRouteChatCompletions,
+		"kimi-k2.6":                    OpencodeRouteChatCompletions,
+		"kimi-k2.7-code":               OpencodeRouteChatCompletions,
+		"kimi-k3":                      OpencodeRouteChatCompletions,
+		"ling-3.0-flash-fin-free":      OpencodeRouteChatCompletions,
+		"longcat-2.5-preview-free":     OpencodeRouteChatCompletions,
+		"mimo-v2.6-flash-free":         OpencodeRouteChatCompletions,
+		"minimax-m2.5":                 OpencodeRouteChatCompletions,
+		"minimax-m2.7":                 OpencodeRouteChatCompletions,
+		"minimax-m3":                   OpencodeRouteChatCompletions,
+		"nemotron-3-ultra-free":        OpencodeRouteChatCompletions,
+		"nemotron-3.5-lightning-free":  OpencodeRouteChatCompletions,
+		"qwen3.8-max":                  OpencodeRouteChatCompletions,
+		"space-bunny-free":             OpencodeRouteChatCompletions,
 	},
 	ProviderOpencodeGo: {
 		// responses (@ai-sdk/openai)
-		"grok-4.6": OpencodeRouteResponses, "gpt-5.6-luna": OpencodeRouteResponses,
+		"gpt-5.6-luna":               OpencodeRouteResponses,
+		"gpt-6-luna":                 OpencodeRouteResponses,
+		"grok-4.6":                   OpencodeRouteResponses,
+		"grok-4.7":                   OpencodeRouteResponses,
 		"muse-spark-1.2-contributor": OpencodeRouteResponses,
+		"muse-spark-1.3-contributor": OpencodeRouteResponses,
 
-		// messages (@ai-sdk/anthropic) — note minimax-* differs from Zen
-		"minimax-m3": OpencodeRouteMessages, "minimax-m2.7": OpencodeRouteMessages,
-		"minimax-m2.5": OpencodeRouteMessages, "qwen3.8-max": OpencodeRouteMessages,
-		"qwen3.8-flash": OpencodeRouteMessages, "qwen3.7-max": OpencodeRouteMessages,
-		"qwen3.7-plus": OpencodeRouteMessages, "qwen3.6-plus": OpencodeRouteMessages,
+		// messages (@ai-sdk/anthropic)
+		"minimax-m2.7":  OpencodeRouteMessages,
+		"minimax-m3":    OpencodeRouteMessages,
+		"qwen3.8-flash": OpencodeRouteMessages,
 
-		// chat_completions (@ai-sdk/openai-compatible)
-		"glm-5.3-flash":                OpencodeRouteChatCompletions,
-		"glm-5.3":                      OpencodeRouteChatCompletions,
-		"glm-5.2":                      OpencodeRouteChatCompletions,
-		"glm-5.1":                      OpencodeRouteChatCompletions,
-		"kimi-k3":                      OpencodeRouteChatCompletions,
-		"kimi-k2.7-code":               OpencodeRouteChatCompletions,
-		"kimi-k2.6":                    OpencodeRouteChatCompletions,
-		"longcat-2.0":                  OpencodeRouteChatCompletions,
-		"deepseek-v4-pro":              OpencodeRouteChatCompletions,
+		// chat_completions (any other npm, or unset)
 		"deepseek-v4-flash":            OpencodeRouteChatCompletions,
 		"deepseek-v4-flash-vision-exp": OpencodeRouteChatCompletions,
+		"deepseek-v4-pro":              OpencodeRouteChatCompletions,
+		"deepseek-v4.1-flash":          OpencodeRouteChatCompletions,
+		"glm-5.1":                      OpencodeRouteChatCompletions,
+		"glm-5.2":                      OpencodeRouteChatCompletions,
+		"glm-5.3":                      OpencodeRouteChatCompletions,
+		"glm-5.3-flash":                OpencodeRouteChatCompletions,
+		"hy3":                          OpencodeRouteChatCompletions,
+		"hy4-preview":                  OpencodeRouteChatCompletions,
+		"kimi-k2.6":                    OpencodeRouteChatCompletions,
+		"kimi-k2.7-code":               OpencodeRouteChatCompletions,
+		"kimi-k3":                      OpencodeRouteChatCompletions,
+		"longcat-2.0":                  OpencodeRouteChatCompletions,
+		"longcat-2.5-preview-free":     OpencodeRouteChatCompletions,
 		"mimo-v2.5":                    OpencodeRouteChatCompletions,
 		"mimo-v2.5-pro":                OpencodeRouteChatCompletions,
-		"hy4-preview":                  OpencodeRouteChatCompletions,
-		"hy3":                          OpencodeRouteChatCompletions,
+		"mimo-v2.6-flash":              OpencodeRouteChatCompletions,
+		"mimo-v2.6-pro":                OpencodeRouteChatCompletions,
+		"qwen3.6-plus":                 OpencodeRouteChatCompletions,
+		"qwen3.7-max":                  OpencodeRouteChatCompletions,
+		"qwen3.7-plus":                 OpencodeRouteChatCompletions,
+		"qwen3.8-max":                  OpencodeRouteChatCompletions,
+		"space-bunny-free":             OpencodeRouteChatCompletions,
 	},
 }
 
@@ -198,6 +248,22 @@ func opencodeHeuristicRoute(gateway, model string) OpencodeRoute {
 	}
 
 	return OpencodeRouteChatCompletions
+}
+
+// opencodeRouteForNPM maps a model's provider.npm to its route, as OpenCode's
+// client picks an AI SDK package (provider.ts:1274-1278); any other package,
+// or none, is the openai-compatible chat route.
+func opencodeRouteForNPM(npm string) OpencodeRoute {
+	switch npm {
+	case "@ai-sdk/openai":
+		return OpencodeRouteResponses
+	case "@ai-sdk/anthropic":
+		return OpencodeRouteMessages
+	case "@ai-sdk/google":
+		return OpencodeRouteGoogle
+	default:
+		return OpencodeRouteChatCompletions
+	}
 }
 
 // resolveOpencodeRoute picks the wire format for (gateway, model), honouring an
