@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -178,8 +178,16 @@ None yet.
 
 ## 10. Execution record
 
-Not executed. The proof in Appendix A was made in scratch copies before
-execution.
+Executed on `main`, 2026-09-27, after `0012-PLAN-circuit-breaker-test.md`
+(`05a1fcf`). Each phase applied Appendix B with `git apply`, taken from this
+document, and checked equal to the proven diff.
+
+* **K1**, commit `ddae325`: 2 red tests failed as required; 1 base guards passed; gate passed; 2/2 mutants killed.
+* **K2**, commit `1362920`: 3 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
+* **K3**, commit `8db54ac`: 2 red tests failed as required; 0 base guards passed; gate passed; 3/3 mutants killed.
+
+**Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 8 passed, 1 skipped, 0 failed.
+* Skip: ok  	github.com/maccavelli/mcplib/llmprovider	12.608s
 
 ## Appendix A — Proof record (2026-09-27)
 
