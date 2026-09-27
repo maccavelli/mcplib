@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
