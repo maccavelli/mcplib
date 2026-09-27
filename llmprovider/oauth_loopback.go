@@ -528,7 +528,7 @@ func oauthSessionFromResponse(config oauthFlowConfig, tokenURL string, payload o
 		Provider:   config.provider,
 		Access:     payload.AccessToken,
 		Refresh:    payload.RefreshToken,
-		Expiry:     config.now().Add(time.Duration(expiresIn) * time.Second),
+		Expiry:     tokenExpiry(payload.AccessToken, expiresIn, config.now()),
 		Issuer:     config.issuer,
 		ClientID:   config.clientID,
 		AccountID:  chatGPTAccountID(payload.IDToken),

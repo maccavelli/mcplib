@@ -249,7 +249,7 @@ func TestOAuthSession_SingleFlight(t *testing.T) {
 	}
 }
 
-func TestOAuthSession_SkewsTwoMinutes(t *testing.T) {
+func TestOAuthSession_SkewsFiveMinutes(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -278,7 +278,7 @@ func TestOAuthSession_SkewsTwoMinutes(t *testing.T) {
 		t.Errorf("zero expiry token = %q, calls = %d; want current-access, 0", tok.Value, calls.Load())
 	}
 
-	session.Expiry = time.Now().Add(3 * time.Minute)
+	session.Expiry = time.Now().Add(6 * time.Minute)
 	tok, err = session.Token(context.Background())
 	if err != nil {
 		t.Fatalf("Token outside skew: %v", err)

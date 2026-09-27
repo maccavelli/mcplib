@@ -1,6 +1,7 @@
 package llmprovider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,12 +17,28 @@ import (
 )
 
 const (
-	oauthRefreshSkew         = 2 * time.Minute
+	// oauthRefreshSkew refreshes an access token this long before it
+	// expires: five minutes, as Codex (login/src/auth/manager.rs:203-216) and
+	// the Grok CLI (xai-grok-login/src/model.rs:9) do.
+	oauthRefreshSkew         = 5 * time.Minute
 	oauthAuthorizationHeader = "Authorization"
 	// oauthErrorBodyLimit caps how much of a failed token response an error
 	// carries (MADR 0009 D8).
 	oauthErrorBodyLimit = 2048
+	// oauthRefreshAttempts and oauthRefreshBackoff retry a refresh that
+	// failed in transport, with 429 or with 5xx, as the Grok CLI does
+	// (xai-grok-login/src/oidc/protocol.rs:430-438).
+	oauthRefreshAttempts = 3
+	oauthRefreshBackoff  = 200 * time.Millisecond
 )
+
+// oauthTerminalRefreshCodes mean the refresh token is dead: Codex's permanent
+// failures (login/src/auth/manager.rs:1657-1690) and the Grok CLI's
+// (xai-grok-login/src/oidc/refresh.rs:21-27).
+var oauthTerminalRefreshCodes = []string{
+	"invalid_grant", "invalid_client",
+	"refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated",
+}
 
 // chatGPTAccessFixture is the stub access token a consumer test once wrote into
 // a live token store (MADR 0009 F3, F8).
@@ -98,10 +116,7 @@ func (s *OAuthSession) Token(ctx context.Context) (Token, error) {
 	state := s.refreshState()
 	s.mu.Unlock()
 
-	next, token, err := refreshOAuthSession(ctx, state)
-	if err == nil && state.store != nil {
-		err = state.store.Save(ctx, state.provider, next)
-	}
+	next, token, err := reloadOrRefresh(ctx, state)
 
 	s.mu.Lock()
 	if err == nil {
@@ -179,33 +194,40 @@ func (s *OAuthSession) adopt(next *OAuthSession) {
 }
 
 func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSession, Token, error) {
-	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {state.refresh},
-		"client_id":     {state.clientID},
+	var lastErr error
+	for attempt := range oauthRefreshAttempts {
+		if attempt > 0 {
+			if err := sleepWithContext(ctx, oauthRefreshBackoff<<(attempt-1)); err != nil {
+				return nil, Token{}, err
+			}
+		}
+		next, token, retry, err := refreshOAuthSessionOnce(ctx, state)
+		if !retry {
+			return next, token, err
+		}
+		lastErr = err
 	}
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		refreshTokenURL(state),
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return nil, Token{}, fmt.Errorf("oauth: create refresh request: %w", err)
-	}
-	identityOf(ProviderConfig{}).setUserAgent(req)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return nil, Token{}, lastErr
+}
 
+// refreshOAuthSessionOnce makes one refresh request. retry reports a
+// transport error, 429 or 5xx.
+func refreshOAuthSessionOnce(ctx context.Context, state oauthSessionState) (next *OAuthSession, token Token, retry bool, err error) {
+	req, err := newRefreshRequest(ctx, state)
+	if err != nil {
+		return nil, Token{}, false, err
+	}
 	client := state.httpClient
 	if client == nil {
 		client = defaultHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, Token{}, fmt.Errorf("oauth: refresh request: %w", err)
+		return nil, Token{}, true, fmt.Errorf("oauth: refresh request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, Token{}, oauthHTTPStatusError("refresh", resp)
+		retry = resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
+		return nil, Token{}, retry, refreshFailure(resp)
 	}
 
 	var payload oauthRefreshResponse
@@ -216,29 +238,24 @@ func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSe
 		if closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("oauth: close refresh response: %w", closeErr))
 		}
-		return nil, Token{}, err
+		return nil, Token{}, false, err
 	}
 	if closeErr != nil {
-		return nil, Token{}, fmt.Errorf("oauth: close refresh response: %w", closeErr)
+		return nil, Token{}, false, fmt.Errorf("oauth: close refresh response: %w", closeErr)
 	}
 	if payload.AccessToken == "" {
-		return nil, Token{}, errors.New("oauth: refresh response missing access token")
+		return nil, Token{}, false, errors.New("oauth: refresh response missing access token")
 	}
 
 	refresh := payload.RefreshToken
 	if refresh == "" {
 		refresh = state.refresh
 	}
-	expiresIn := payload.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 3600
-	}
-	expiry := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	next := &OAuthSession{
+	next = &OAuthSession{
 		Provider:   state.provider,
 		Access:     payload.AccessToken,
 		Refresh:    refresh,
-		Expiry:     expiry,
+		Expiry:     tokenExpiry(payload.AccessToken, payload.ExpiresIn, time.Now()),
 		Issuer:     state.issuer,
 		ClientID:   state.clientID,
 		AccountID:  state.accountID,
@@ -252,7 +269,114 @@ func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSe
 		Type:   TokenBearer,
 		Expiry: next.Expiry,
 		Header: oauthAuthorizationHeader,
-	}, nil
+	}, false, nil
+}
+
+// newRefreshRequest builds the refresh request: JSON for the OpenAI issuer,
+// as Codex sends it (login/src/oauth/client.rs:80-110), form-encoded
+// otherwise, as the Grok CLI sends it (xai-grok-login/src/oidc/protocol.rs:492-507).
+func newRefreshRequest(ctx context.Context, state oauthSessionState) (*http.Request, error) {
+	params := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": state.refresh,
+		"client_id":     state.clientID,
+	}
+	contentType := "application/x-www-form-urlencoded"
+	var body io.Reader
+	if strings.TrimRight(state.issuer, "/") == DefaultOpenAIIssuer {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("oauth: encode refresh request: %w", err)
+		}
+		contentType, body = "application/json", bytes.NewReader(raw)
+	} else {
+		form := url.Values{}
+		for k, v := range params {
+			form.Set(k, v)
+		}
+		body = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshTokenURL(state), body)
+	if err != nil {
+		return nil, fmt.Errorf("oauth: create refresh request: %w", err)
+	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
+	req.Header.Set("Content-Type", contentType)
+	return req, nil
+}
+
+// refreshFailure reports a failed refresh response, closing its body. A 401
+// or a terminal error code wraps ErrAuthFailure: the refresh token is dead
+// and the user must sign in again.
+func refreshFailure(resp *http.Response) error {
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, oauthErrorBodyLimit))
+	ignoreOAuthError(resp.Body.Close())
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	err := oauthHTTPStatusError("refresh", resp)
+	if readErr != nil {
+		err = errors.Join(err, fmt.Errorf("oauth: read refresh response: %w", readErr))
+	}
+	if resp.StatusCode == http.StatusUnauthorized || slices.Contains(oauthTerminalRefreshCodes, refreshErrorCode(body)) {
+		return fmt.Errorf("%w: %w", ErrAuthFailure, err)
+	}
+	return err
+}
+
+// refreshErrorCode reads an OAuth error code: {"error": "code"},
+// {"error": {"code": "code"}} or {"code": "code"}, lower-cased.
+func refreshErrorCode(body []byte) string {
+	var top struct {
+		Error json.RawMessage `json:"error"`
+		Code  string          `json:"code"`
+	}
+	if json.Unmarshal(body, &top) != nil {
+		return ""
+	}
+	if code := jsonString(top.Error); code != "" {
+		return strings.ToLower(code)
+	}
+	var inner struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(top.Error, &inner) == nil && inner.Code != "" {
+		return strings.ToLower(inner.Code)
+	}
+	return strings.ToLower(top.Code)
+}
+
+// tokenExpiry is the access token's JWT exp when it has one, else now plus
+// expires_in (3600 s when absent), as Codex reads it (MADR 0012 §5.2).
+func tokenExpiry(access string, expiresIn int64, now time.Time) time.Time {
+	if exp := jwtExpiry(access); !exp.IsZero() {
+		return exp
+	}
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	return now.Add(time.Duration(expiresIn) * time.Second)
+}
+
+// reloadOrRefresh re-reads the session from its store before refreshing:
+// another process sharing the store may already have rotated the refresh
+// token, and sending the old one again trips the issuer's reuse detection.
+// A stored session with a different refresh token is adopted, and refreshed
+// only if its own access token is due (MADR 0012 §5.2).
+func reloadOrRefresh(ctx context.Context, state oauthSessionState) (*OAuthSession, Token, error) {
+	if state.store != nil {
+		stored, err := state.store.Load(ctx, state.provider)
+		if err == nil && stored != nil && stored.Refresh != "" && stored.Refresh != state.refresh {
+			stored.Store, stored.HTTPClient = state.store, state.httpClient
+			if token, ok := stored.currentToken(); ok {
+				return stored, token, nil
+			}
+			state = stored.refreshState()
+		}
+	}
+	next, token, err := refreshOAuthSession(ctx, state)
+	if err == nil && state.store != nil {
+		err = state.store.Save(ctx, state.provider, next)
+	}
+	return next, token, err
 }
 
 func refreshTokenURL(state oauthSessionState) string {

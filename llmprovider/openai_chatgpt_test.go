@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -226,16 +225,17 @@ func TestOpenAI_OAuth401RetriesOnceAfterRefresh(t *testing.T) {
 			return openAITestHTTPResponse(request, http.StatusOK, openAITestResponse), nil
 		case "auth.test":
 			refreshCalls++
-			if err := request.ParseForm(); err != nil {
-				t.Errorf("parse refresh form: %v", err)
+			var got map[string]string
+			if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
+				t.Errorf("decode refresh body: %v", err)
 			}
-			want := url.Values{
-				"client_id":     {DefaultOpenAIClientID},
-				"grant_type":    {"refresh_token"},
-				"refresh_token": {"old-refresh"},
+			want := map[string]string{
+				"client_id":     DefaultOpenAIClientID,
+				"grant_type":    "refresh_token",
+				"refresh_token": "old-refresh",
 			}
-			if !reflect.DeepEqual(request.PostForm, want) {
-				t.Errorf("refresh form = %v, want %v", request.PostForm, want)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("refresh body = %v, want the JSON grant %v (MADR 0012 §5.2)", got, want)
 			}
 			return openAITestHTTPResponse(request, http.StatusOK, `{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`), nil
 		default:
