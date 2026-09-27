@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/maccavelli/mcplib/llmprovider"
@@ -12,8 +13,9 @@ import (
 )
 
 // defaultDiscoverLimit bounds a live model listing so a slow or unreachable
-// provider cannot stall a wizard indefinitely.
-const defaultDiscoverLimit = 20 * time.Second
+// provider cannot stall a wizard indefinitely. It equals the lister's own
+// 10 s bound, which no caller deadline extends (MADR 0013 Q4).
+const defaultDiscoverLimit = 10 * time.Second
 
 // Result is what ConfigureLLM produces. It is deliberately data, not config:
 // each consumer persists it in its own schema. Unifying configuration storage
@@ -51,6 +53,7 @@ type Options struct {
 	// session has no static catalog, so the user is asked for a model id.
 	Discover bool
 	// DiscoverLimit bounds the listing call. Zero uses defaultDiscoverLimit.
+	// The lister caps every listing at 10 s, so a larger value has no effect.
 	DiscoverLimit time.Duration
 	// NeedFallbacks collects additional models after the primary.
 	NeedFallbacks bool
@@ -143,10 +146,11 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 		// Ollama with nothing installed, or a provider whose listing failed
 		// and which has no static catalog. Let the user type an id rather
 		// than dead-ending the wizard.
-		manual, inputErr := p.Input("No models found; enter a model id", o.Existing.Model)
+		manual, inputErr := p.Input("No models found; enter a model id", existingModel(o, d.ID))
 		if inputErr != nil {
 			return Result{}, fmt.Errorf("enter model: %w", inputErr)
 		}
+		manual = strings.TrimSpace(manual)
 		if manual == "" {
 			// Returning Result{Model: ""} would hand the caller a
 			// configuration that cannot generate anything.
@@ -309,7 +313,12 @@ func discoverModels(
 	if len(cat.Recommended) == 0 {
 		return fallback
 	}
-	if !cat.Live && !chatGPT {
+	switch {
+	case cat.Live || chatGPT:
+	case cat.Err != nil:
+		p.Notify(LevelWarn, "live model listing for %s is unavailable (%v); search covers the built-in catalog only",
+			d.Label, cat.Err)
+	default:
 		p.Notify(LevelInfo, "live model listing for %s is unavailable; search covers the built-in catalog only", d.Label)
 	}
 	return cat

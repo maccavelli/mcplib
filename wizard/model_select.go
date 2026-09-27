@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/maccavelli/mcplib/llmprovider"
@@ -57,7 +58,7 @@ func selectModel(p Prompter, d llmprovider.ProviderDescriptor, cat llmprovider.M
 		case idx == len(shown):
 			continue
 		default:
-			return enterModelID(p, o)
+			return enterModelID(p, d.ID, o)
 		}
 	}
 }
@@ -90,20 +91,31 @@ func selectRecommended(p Prompter, d llmprovider.ProviderDescriptor, models []st
 	case current != "" && idx == len(models):
 		return current, nil
 	default:
-		return enterModelID(p, o)
+		return enterModelID(p, d.ID, o)
 	}
 }
 
-// enterModelID is the Other escape hatch: the user types a model id.
-func enterModelID(p Prompter, o Options) (string, error) {
-	manual, err := p.Input("Model id", o.Existing.Model)
+// enterModelID is the Other escape hatch: the user types a model id. The
+// saved model is the default only for its own provider (MADR 0009 §4.3), and a
+// blank id is refused (MADR 0013 C4, C7).
+func enterModelID(p Prompter, provider string, o Options) (string, error) {
+	manual, err := p.Input("Model id", existingModel(o, provider))
 	if err != nil {
 		return "", fmt.Errorf("enter model: %w", err)
 	}
+	manual = strings.TrimSpace(manual)
 	if manual == "" {
 		return "", fmt.Errorf("wizard: no model entered")
 	}
 	return manual, nil
+}
+
+// existingModel returns the saved model when it belongs to provider, else "".
+func existingModel(o Options, provider string) string {
+	if o.Existing.Provider == provider {
+		return o.Existing.Model
+	}
+	return ""
 }
 
 // selectFallbacks offers fallback models, never the primary or one already
@@ -156,12 +168,13 @@ func selectFallbacks(p Prompter, d llmprovider.ProviderDescriptor, cat llmprovid
 	}
 }
 
-// excludedIDs is the set a fallback round must not offer.
+// excludedIDs is the set a fallback round must not offer, keyed by lower-case
+// id because SearchModels compares ids case-insensitively (MADR 0013 C6).
 func excludedIDs(primary string, chosen []string) map[string]struct{} {
 	exclude := make(map[string]struct{}, len(chosen)+1)
-	exclude[primary] = struct{}{}
+	exclude[strings.ToLower(primary)] = struct{}{}
 	for _, c := range chosen {
-		exclude[c] = struct{}{}
+		exclude[strings.ToLower(c)] = struct{}{}
 	}
 	return exclude
 }
@@ -170,21 +183,24 @@ func excludedIDs(primary string, chosen []string) map[string]struct{} {
 func without(models []string, exclude map[string]struct{}) []string {
 	out := make([]string, 0, len(models))
 	for _, m := range models {
-		if _, skip := exclude[m]; !skip {
+		if _, skip := exclude[strings.ToLower(m)]; !skip {
 			out = append(out, m)
 		}
 	}
 	return out
 }
 
-// appendPicks appends ids[i] for each valid index. chosen becomes non-nil
-// even when nothing was picked, because a MultiSelect was shown.
+// appendPicks appends ids[i] for each valid index, once each (MADR 0013 C1).
+// chosen becomes non-nil even when nothing was picked, because a MultiSelect
+// was shown.
 func appendPicks(chosen, ids []string, idxs []int) []string {
 	if chosen == nil {
 		chosen = []string{}
 	}
 	for _, i := range idxs {
-		if i >= 0 && i < len(ids) {
+		if i >= 0 && i < len(ids) && !slices.ContainsFunc(chosen, func(c string) bool {
+			return strings.EqualFold(c, ids[i])
+		}) {
 			chosen = append(chosen, ids[i])
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -166,8 +167,9 @@ func (p *TextPrompter) Select(title string, choices []Choice, defaultIdx int) (i
 	}
 }
 
-// MultiSelect implements Prompter. Input is a comma-separated list of indices;
-// an empty line accepts the preselection.
+// MultiSelect implements Prompter. Input is a comma-separated list of indices,
+// a repeated index counting once (MADR 0013 C1); an empty line accepts the
+// preselection.
 func (p *TextPrompter) MultiSelect(title string, choices []Choice, preselected []int) ([]int, error) {
 	if len(choices) == 0 {
 		return nil, nil
@@ -191,7 +193,9 @@ func (p *TextPrompter) MultiSelect(title string, choices []Choice, preselected [
 				ok = false
 				break
 			}
-			out = append(out, n-1)
+			if !slices.Contains(out, n-1) {
+				out = append(out, n-1)
+			}
 		}
 		if ok {
 			return out, p.flushErr()

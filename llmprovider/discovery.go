@@ -44,6 +44,10 @@ type ModelCatalog struct {
 	// Live reports whether Usable came from the provider's listing rather
 	// than the static catalog.
 	Live bool
+	// Err is the listing failure that made Live false. It is nil when Live is
+	// true, and when a listing that succeeded yielded no usable id (MADR 0013
+	// C2).
+	Err error
 }
 
 // ListAvailableModels fetches models from a provider listing API when available,
@@ -111,7 +115,9 @@ func recommendedOf(cat ModelCatalog, err error) ([]string, error) {
 func catalogFrom(usable []string, fetchErr error, static []string, curate func([]string) []string) ModelCatalog {
 	usable = uniqueIDs(usable)
 	if fetchErr != nil || len(usable) == 0 {
-		return staticCatalog(static)
+		cat := staticCatalog(static)
+		cat.Err = fetchErr
+		return cat
 	}
 	recommended := curate(usable)
 	if len(recommended) == 0 {
