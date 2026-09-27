@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-27
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -340,10 +340,11 @@ document, and checked equal to the proven diff.
 * **O3**, commit `46bd8c7`: 4 red tests failed as required; 2 base guards passed; gate passed; 3/3 mutants killed.
 * **O4**, commit `45fabc0`: nothing red (see Appendix A); 0 base guards passed; gate passed; 4/4 mutants killed.
 * **O5**, commit `85e20ab`: 1 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
+* **O6**, commit `a5f2460`: 1 red tests failed as required; 1 base guards passed; gate passed; 1/1 mutants killed.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 4 passed, 0 skipped, 0 failed.
 
-**O6 has not run.** It is gated on the owner's live ChatGPT browser login (`TestLive_ChatGPTBrowserLogin`); this plan stays `in-progress` until it passes and O6 lands.
+**O6 gate** (owner, 2026-09-27): `TestLive_ChatGPTBrowserLogin`, run from O6's tree (O5 plus Appendix B.O6), passed in 78.65 s: the owner signed in through `http://127.0.0.1:1455/auth/callback`, the new session generated once, and `RevokeOAuthSession` revoked it. O6 then landed as recorded above.
 
 ## Appendix A — Proof record (2026-09-27)
 
