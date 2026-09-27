@@ -83,9 +83,9 @@ func TestConfigureLLM_BlankSearchShowsRecommended(t *testing.T) {
 	if !slices.Contains(f.seenInput, searchModelsPrompt) {
 		t.Errorf("inputs = %v, want the search prompt", f.seenInput)
 	}
-	menu := f.seenSelectItems[1]
-	if len(menu) != 7 || menu[6].Label != otherModelLabel {
-		t.Errorf("model menu = %v, want 6 recommended rows then Other", labels(menu))
+	menu, n := f.seenSelectItems[1], len(llmprovider.StaticClaude)
+	if len(menu) != n+1 || menu[n].Label != otherModelLabel {
+		t.Errorf("model menu = %v, want %d recommended rows then Other", labels(menu), n)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestConfigureLLM_SearchNoMatchReturnsToSearch(t *testing.T) {
 func TestConfigureLLM_SearchAgain(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
-		t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 2, 1},
+		t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 1, 1},
 		inputs: []string{"haiku", ""}, secrets: []string{testKey},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{})
@@ -139,7 +139,6 @@ func TestConfigureLLM_SearchAgain(t *testing.T) {
 	}
 	want := []string{
 		llmprovider.ModelLabel(llmprovider.ProviderClaude, "claude-haiku-4-5"),
-		llmprovider.ModelLabel(llmprovider.ProviderClaude, "claude-3-5-haiku-latest"),
 		searchAgainLabel, otherModelLabel,
 	}
 	if got := labels(f.seenSelectItems[1]); !slices.Equal(got, want) {
@@ -153,7 +152,7 @@ func TestConfigureLLM_SearchAgain(t *testing.T) {
 func TestConfigureLLM_OtherFromSearchResults(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
-		t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 3},
+		t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 2},
 		inputs: []string{"haiku", "my-id"}, secrets: []string{testKey},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{})
@@ -189,7 +188,8 @@ func TestConfigureLLM_SearchResultsCapped(t *testing.T) {
 
 func TestConfigureLLM_CurrentModelListed(t *testing.T) {
 	withEnv(t, nil)
-	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 6}, secrets: []string{testKey}}
+	n := len(llmprovider.StaticClaude)
+	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), n}, secrets: []string{testKey}}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Existing: Result{Provider: llmprovider.ProviderClaude, Model: "claude-opus-5"},
 	})
@@ -197,11 +197,11 @@ func TestConfigureLLM_CurrentModelListed(t *testing.T) {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
 	menu := f.seenSelectItems[1]
-	if len(menu) != 8 || menu[6] != (Choice{Label: "claude-opus-5", Detail: currentModelDetail}) || menu[7].Label != otherModelLabel {
-		t.Errorf("menu = %+v, want 6 recommended rows, the current row, then Other", menu)
+	if len(menu) != n+2 || menu[n] != (Choice{Label: "claude-opus-5", Detail: currentModelDetail}) || menu[n+1].Label != otherModelLabel {
+		t.Errorf("menu = %+v, want %d recommended rows, the current row, then Other", menu, n)
 	}
-	if f.seenSelectDefault[1] != 6 {
-		t.Errorf("default = %d, want 6 (the current row)", f.seenSelectDefault[1])
+	if f.seenSelectDefault[1] != n {
+		t.Errorf("default = %d, want %d (the current row)", f.seenSelectDefault[1], n)
 	}
 	if res.Model != "claude-opus-5" {
 		t.Errorf("Model = %q, want claude-opus-5", res.Model)
@@ -217,8 +217,8 @@ func TestConfigureLLM_CurrentModelOnlyForSameProvider(t *testing.T) {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
 	menu := f.seenSelectItems[1]
-	if len(menu) != 7 {
-		t.Errorf("menu = %+v, want 7 rows (no current row for another provider)", menu)
+	if n := len(llmprovider.StaticClaude) + 1; len(menu) != n {
+		t.Errorf("menu = %+v, want %d rows (no current row for another provider)", menu, n)
 	}
 	for _, c := range menu {
 		if c.Detail == currentModelDetail {

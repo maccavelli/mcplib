@@ -14,7 +14,9 @@
 // OpenCode tests REQUIRE OPENCODE_API_KEY (plan deviation D3). Its free models
 // answer 200 with NO Authorization header but 401 with a bogus one, and
 // NewOpencode requires a non-empty key and always sends it — so a placeholder
-// is strictly worse than none there.
+// is strictly worse than none there. The generation tests use paid OpenCode Go
+// models: Zen's free tier refuses clients other than OpenCode (403
+// FreeTierError, measured 2026-09-26/27; MADR 0013 D1).
 //
 // The Hugging Face test REQUIRES HF_TOKEN: HF reports is_free:false for all
 // provider offerings, so no credential-free path exists (verified 2026-08-29).
@@ -107,7 +109,7 @@ func getJSON(t *testing.T, url string, into any) int {
 func TestLive_OpencodeChatCompletions(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeZen, opencodeKey(t), "hy3-free")
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "hy3")
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestLive_OpencodeChatCompletions(t *testing.T) {
 func TestLive_OpencodeResponses(t *testing.T) {
 	ctx, cancel := liveCtx(t)
 	defer cancel()
-	p, err := NewOpencode(ProviderOpencodeZen, opencodeKey(t), "muse-spark-1.2-contributor-free")
+	p, err := NewOpencode(ProviderOpencodeGo, opencodeKey(t), "gpt-6-luna")
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -151,12 +153,12 @@ func TestLive_OpencodeResponses(t *testing.T) {
 // route table rests on: routes are NOT interchangeable. If this fails, OpenCode
 // has become a translating gateway and the table is no longer necessary.
 func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
-	const model = "muse-spark-1.2-contributor-free"
+	const model = "gpt-6-luna"
 	ctx, cancel := liveCtx(t)
 	defer cancel()
 
 	key := opencodeKey(t)
-	onResponses, err := NewOpencode(ProviderOpencodeZen, key, model)
+	onResponses, err := NewOpencode(ProviderOpencodeGo, key, model)
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)
 	}
@@ -166,7 +168,7 @@ func TestLive_OpencodeRouteStillEnforced(t *testing.T) {
 		t.Fatalf("%s must still succeed on its documented /responses route: %v", model, err)
 	}
 
-	onChat, err := NewOpencode(ProviderOpencodeZen, key, model,
+	onChat, err := NewOpencode(ProviderOpencodeGo, key, model,
 		WithOpencodeRoute(OpencodeRouteChatCompletions))
 	if err != nil {
 		t.Fatalf("NewOpencode: %v", err)

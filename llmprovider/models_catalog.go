@@ -44,14 +44,13 @@ var (
 		"o4-mini",
 	}
 
-	// StaticClaude: current aliases first, then widely available older IDs.
+	// StaticClaude: current aliases, each answering on the Messages API
+	// (verified 2026-09-27, MADR 0013 B10).
 	StaticClaude = []string{
 		"claude-haiku-4-5",
 		"claude-sonnet-5",
 		"claude-sonnet-4-6",
 		"claude-opus-4-8",
-		"claude-3-5-haiku-latest",
-		"claude-sonnet-4-20250514",
 	}
 
 	// StaticOpencodeZen: MADR 0010 §7's utility six, ranked from the
