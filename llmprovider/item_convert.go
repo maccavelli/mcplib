@@ -19,3 +19,15 @@ func toolArguments(arguments string) map[string]any {
 	}
 	return map[string]any{jsonKeyArguments: arguments}
 }
+
+// claudeSystemPrompt joins the system items, in order, for the Messages API's
+// top-level system field; claudeItemsToMessages leaves them out (MADR 0012 §2).
+func claudeSystemPrompt(items []Item) string {
+	var parts []string
+	for _, item := range items {
+		if m, ok := item.(MessageItem); ok && m.Role == jsonRoleSystem && m.Text != "" {
+			parts = append(parts, m.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}

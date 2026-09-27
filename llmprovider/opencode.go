@@ -180,6 +180,9 @@ func (p *OpencodeProvider) messagesBody(input []Item, tool *Tool, thinking bool)
 		jsonKeyModel:    p.model,
 		jsonKeyMessages: claudeItemsToMessages(input),
 	}
+	if system := claudeSystemPrompt(input); system != "" {
+		body[jsonKeySystem] = system
+	}
 	if thinking {
 		maxTokens = addMessagesThinking(body, p.model, p.reasoningEffort, p.thinkingBudget, maxTokens)
 	}
