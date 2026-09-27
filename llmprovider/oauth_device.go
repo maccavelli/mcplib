@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -169,6 +170,9 @@ func loginGrokDevice(ctx context.Context, config oauthFlowConfig) (*OAuthSession
 	if device.DeviceCode == "" || device.UserCode == "" || device.VerificationURI == "" {
 		return nil, errors.New("oauth: Grok device-code response is incomplete")
 	}
+	if err := validateGrokDeviceCode(device); err != nil {
+		return nil, err
+	}
 	verificationURL := device.VerificationURI
 	if device.VerificationURIComplete != "" {
 		verificationURL = device.VerificationURIComplete
@@ -217,6 +221,44 @@ func loginGrokDevice(ctx context.Context, config oauthFlowConfig) (*OAuthSession
 		default:
 			return nil, fmt.Errorf("oauth: Grok device token failed: %s", deviceErr.Code)
 		}
+	}
+}
+
+// validateGrokDeviceCode refuses a device-code response a malicious issuer
+// could use against the user, as the Grok CLI does
+// (xai-grok-login/src/device_code.rs:148-155, :474-487): the user_code must
+// be letters, digits and '-', and each verification URI https, or http to a
+// loopback host, with no control characters.
+func validateGrokDeviceCode(device grokDeviceCode) error {
+	for _, r := range device.UserCode {
+		if r > unicode.MaxASCII || !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' {
+			return errors.New("oauth: Grok device-code response has an invalid user_code")
+		}
+	}
+	for _, uri := range []string{device.VerificationURI, device.VerificationURIComplete} {
+		if uri != "" && !safeVerificationURI(uri) {
+			return errors.New("oauth: Grok device-code response has an invalid verification URI")
+		}
+	}
+	return nil
+}
+
+func safeVerificationURI(uri string) bool {
+	if strings.IndexFunc(uri, unicode.IsControl) >= 0 {
+		return false
+	}
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+	switch parsed.Scheme {
+	case "https":
+		return parsed.Host != ""
+	case "http":
+		host := parsed.Hostname()
+		return host == "localhost" || host == "127.0.0.1"
+	default:
+		return false
 	}
 }
 

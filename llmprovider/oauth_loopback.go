@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -417,7 +418,7 @@ func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult,
 			return
 		}
 		query := request.URL.Query()
-		if query.Get("state") != state {
+		if !callbackStateMatches(query.Get("state"), state) {
 			http.Error(w, "State mismatch", http.StatusBadRequest)
 			select {
 			case result <- oauthCallbackResult{err: errors.New("oauth: callback state mismatch")}:
@@ -425,10 +426,10 @@ func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult,
 			}
 			return
 		}
-		if oauthError := query.Get("error"); oauthError != "" {
+		if authErr := callbackError(query); authErr != nil {
 			http.Error(w, "Authorization failed", http.StatusBadRequest)
 			select {
-			case result <- oauthCallbackResult{err: fmt.Errorf("oauth: authorization failed: %s", oauthError)}:
+			case result <- oauthCallbackResult{err: authErr}:
 			default:
 			}
 			return
@@ -459,6 +460,47 @@ func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult,
 	return mux
 }
 
+// lifeSciencesStateSuffix is the onboarding marker ChatGPT may append to the
+// callback state (codex login/src/callback_params.rs:1).
+const lifeSciencesStateSuffix = ".onboarding_entrypoint=life_sciences"
+
+// callbackStateMatches accepts the expected state, or it followed by exactly
+// lifeSciencesStateSuffix (codex login/src/server.rs:366-374).
+func callbackStateMatches(received, expected string) bool {
+	return received == expected || received == expected+lifeSciencesStateSuffix
+}
+
+// callbackErrorMessageLimit bounds the IdP's error_description.
+const callbackErrorMessageLimit = 300
+
+// callbackError reports an authorize error from the callback query, or nil.
+// It carries error_description, and Codex's explanation for a workspace
+// without Codex (codex login/src/server.rs:934-956).
+func callbackError(query url.Values) error {
+	code := query.Get("error")
+	if code == "" {
+		return nil
+	}
+	description := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, query.Get("error_description"))
+	if len(description) > callbackErrorMessageLimit {
+		description = description[:callbackErrorMessageLimit]
+	}
+	switch {
+	case code == "access_denied" && strings.Contains(strings.ToLower(description), "missing_codex_entitlement"):
+		return fmt.Errorf("oauth: authorization failed (%s): Codex is not enabled for your workspace; "+
+			"ask your workspace administrator for access to Codex", code)
+	case strings.TrimSpace(description) != "":
+		return fmt.Errorf("oauth: authorization failed (%s): %s", code, description)
+	default:
+		return fmt.Errorf("oauth: authorization failed: %s", code)
+	}
+}
+
 func parseOAuthInput(input, expectedState string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -467,11 +509,11 @@ func parseOAuthInput(input, expectedState string) (string, error) {
 	parsed, err := url.Parse(input)
 	if err == nil && parsed.Scheme != "" {
 		query := parsed.Query()
-		if oauthError := query.Get("error"); oauthError != "" {
-			return "", fmt.Errorf("oauth: authorization failed: %s", oauthError)
-		}
-		if receivedState := query.Get("state"); receivedState != "" && receivedState != expectedState {
+		if receivedState := query.Get("state"); receivedState != "" && !callbackStateMatches(receivedState, expectedState) {
 			return "", errors.New("oauth: callback state mismatch")
+		}
+		if authErr := callbackError(query); authErr != nil {
+			return "", authErr
 		}
 		if code := query.Get("code"); code != "" {
 			return code, nil
