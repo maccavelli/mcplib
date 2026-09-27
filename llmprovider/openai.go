@@ -103,8 +103,13 @@ func (p *OpenAIProvider) GenerateItemsWithToolThinking(ctx context.Context, tool
 	return p.doGenerateItems(ctx, input, &tool, true, "")
 }
 
-// Continue sends items to the OpenAI Responses API, chaining from a previous response.
+// Continue sends items to the OpenAI Responses API, chaining from a previous
+// response. A ChatGPT session stores no responses (store:false), so it has
+// nothing to chain from and returns ErrInvalidRequest (MADR 0012 §4.2).
 func (p *OpenAIProvider) Continue(ctx context.Context, previousResponseID string, input ...Item) (*Response, error) {
+	if p.chatGPT {
+		return nil, fmt.Errorf("%w: openai: a ChatGPT session cannot continue a response; replay the items", ErrInvalidRequest)
+	}
 	return p.doGenerateItems(ctx, input, nil, false, previousResponseID)
 }
 
@@ -119,9 +124,19 @@ func (p *OpenAIProvider) doGenerateItems(ctx context.Context, input []Item, tool
 
 func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, tool *Tool, thinking bool, prevResponseID string) (*Response, error) {
 	body := map[string]any{
-		jsonKeyModel:        p.model,
-		jsonKeyInput:        itemsToInput(input),
-		"max_output_tokens": p.maxTokens,
+		jsonKeyModel: p.model,
+		jsonKeyInput: itemsToInput(input),
+	}
+	if p.chatGPT {
+		// The ChatGPT backend takes only Codex's shape: it rejects a
+		// non-streaming request, a missing store:false and max_output_tokens
+		// (gate G-C, 2026-09-27; codex core/src/client.rs:1007-1008).
+		body["stream"] = true
+		body["store"] = false
+		body["include"] = []string{"reasoning.encrypted_content"}
+		body["prompt_cache_key"] = p.identity.session
+	} else {
+		body["max_output_tokens"] = p.maxTokens
 	}
 
 	if tool != nil {
@@ -169,6 +184,8 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 	}
 	req.Header.Set(oauthAuthorizationHeader, "Bearer "+token.Value)
 	if p.chatGPT {
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set(openAISessionHeader, p.identity.session)
 		req.Header.Set(openAIOriginatorHeader, openAIOriginatorValue)
 		if accountID := openAIAccountID(p.src); accountID != "" {
 			req.Header.Set(openAIAccountHeader, accountID)
@@ -188,6 +205,9 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 
 	if err := classifyHTTPError(ProviderOpenAI, resp); err != nil {
 		return nil, err
+	}
+	if p.chatGPT {
+		return readResponsesStream(ProviderOpenAI, resp.Body)
 	}
 
 	return decodeResponsesAPIOutput(limitedBody)

@@ -13,6 +13,9 @@ const (
 	openAIResidencyHeader  = "x-openai-internal-codex-residency"
 	openAIOriginatorHeader = "originator"
 	openAIOriginatorValue  = "mcplib"
+	// openAISessionHeader carries the conversation id, as Codex sends it
+	// (codex-api/src/requests/headers.rs:8).
+	openAISessionHeader = "session-id"
 )
 
 // NewOpenAIWithSource creates an OpenAI provider from a dynamic token source.

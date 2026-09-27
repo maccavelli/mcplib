@@ -49,7 +49,7 @@ const (
 // existing errors.Is check still matches (§7).
 type APIError struct {
 	Provider   string
-	Status     int
+	Status     int           // 0 for a failure reported inside a 200 event stream
 	Type       string        // the service's error type or code, e.g. "FreeUsageLimitError"
 	Message    string        // the service's message, redacted and bounded to 512 bytes
 	RetryAfter time.Duration // from Retry-After, when present
@@ -59,7 +59,11 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%v: %s HTTP %d", e.sentinel, e.Provider, e.Status)
+	if e.Status == 0 {
+		fmt.Fprintf(&b, "%v: %s stream", e.sentinel, e.Provider)
+	} else {
+		fmt.Fprintf(&b, "%v: %s HTTP %d", e.sentinel, e.Provider, e.Status)
+	}
 	if e.Type != "" {
 		fmt.Fprintf(&b, " %s", e.Type)
 	}
@@ -70,8 +74,9 @@ func (e *APIError) Error() string {
 }
 
 // Unwrap returns the classified sentinel and the pre-0012 status sentinel.
+// A stream failure (Status 0) has no status sentinel.
 func (e *APIError) Unwrap() []error {
-	if legacy := statusSentinel(e.Status); !errors.Is(e.sentinel, legacy) {
+	if legacy := statusSentinel(e.Status); e.Status != 0 && !errors.Is(e.sentinel, legacy) {
 		return []error{e.sentinel, legacy}
 	}
 	return []error{e.sentinel}
@@ -122,6 +127,32 @@ func classifyHTTPError(provider string, resp *http.Response) error {
 	}
 	if errors.Is(e.sentinel, ErrRateLimited) && !e.Terminal {
 		return &RateLimitError{RetryAfter: e.RetryAfter, Status: e.Status, Provider: provider, Message: e.Message}
+	}
+	return e
+}
+
+// streamFailure classifies a response.failed event, which arrives inside a 200
+// stream, as Codex's parse_failed_response does
+// (codex-api/src/sse/responses_error.rs): quota and entitlement codes are
+// terminal (§1.1), context_length_exceeded and invalid_prompt are invalid
+// requests, rate_limit_exceeded and slow_down are rate limits, and anything
+// else is retryable. The APIError's Status is 0: there is no HTTP status.
+func streamFailure(provider, code, errType, message string) error {
+	env := apiErrorEnvelope{msg: message}
+	for _, t := range []string{code, errType} {
+		if t != "" && !env.hasType(t) {
+			env.types = append(env.types, t)
+		}
+	}
+	e := &APIError{Provider: provider, Type: env.errType(), Message: boundMessage(logging.RedactString(message))}
+	switch {
+	case env.hasType("rate_limit_exceeded") || env.hasType("slow_down"):
+		return &RateLimitError{Provider: provider, Message: e.Message}
+	case env.hasType("context_length_exceeded") || env.hasType("invalid_prompt"):
+		e.Terminal, e.sentinel = true, ErrInvalidRequest
+	default:
+		// 500 stands in for "no status": the table's codes win, else retryable.
+		e.Terminal, e.sentinel = classifyAPIError(serviceOf(provider), http.StatusInternalServerError, env, nil)
 	}
 	return e
 }

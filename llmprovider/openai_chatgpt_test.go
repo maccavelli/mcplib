@@ -118,10 +118,10 @@ func TestOpenAI_ChatGPTSetsOriginatorHeader(t *testing.T) {
 	}
 }
 
-// TestOpenAI_ChatGPTSendsMaxOutputTokens pins today's ChatGPT request body:
-// max_output_tokens is still sent (MADR 0009 open question 1 decides later
-// whether the Codex backend wants it).
-func TestOpenAI_ChatGPTSendsMaxOutputTokens(t *testing.T) {
+// TestOpenAI_ChatGPTOmitsMaxOutputTokens answers MADR 0009 open question 1:
+// the ChatGPT backend rejects max_output_tokens (400 "Unsupported parameter",
+// gate G-C 2026-09-27), so a ChatGPT session never sends it.
+func TestOpenAI_ChatGPTOmitsMaxOutputTokens(t *testing.T) {
 	t.Parallel()
 
 	var body map[string]any
@@ -144,8 +144,8 @@ func TestOpenAI_ChatGPTSendsMaxOutputTokens(t *testing.T) {
 	if _, err := provider.Generate(context.Background(), "hello"); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
-	if got, ok := body["max_output_tokens"].(float64); !ok || int(got) != 321 {
-		t.Fatalf("max_output_tokens = %v, want 321", body["max_output_tokens"])
+	if got, ok := body["max_output_tokens"]; ok {
+		t.Fatalf("max_output_tokens = %v, want absent", got)
 	}
 }
 
@@ -299,6 +299,9 @@ func (fn openAITestRoundTripFunc) RoundTrip(request *http.Request) (*http.Respon
 }
 
 func openAITestHTTPResponse(request *http.Request, status int, body string) *http.Response {
+	if status == http.StatusOK && request != nil && request.Header.Get("Accept") == "text/event-stream" {
+		body = openAITestStream(body)
+	}
 	return &http.Response{
 		StatusCode: status,
 		Status:     http.StatusText(status),
@@ -316,4 +319,24 @@ func openAITestJWT(t *testing.T, claims map[string]any) string {
 		t.Fatalf("marshal JWT claims: %v", err)
 	}
 	return header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+}
+
+// openAITestStream reframes a Responses JSON body as the event stream a
+// ChatGPT session reads (MADR 0012 §4.1): one output_item.done per output
+// item, then response.completed.
+func openAITestStream(body string) string {
+	var parsed struct {
+		ID     string            `json:"id"`
+		Output []json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		return body
+	}
+	var b strings.Builder
+	for _, item := range parsed.Output {
+		b.WriteString(`data: {"type":"response.output_item.done","item":` + string(item) + "}\n\n")
+	}
+	id, _ := json.Marshal(parsed.ID)
+	b.WriteString(`data: {"type":"response.completed","response":{"id":` + string(id) + "}}\n\n")
+	return b.String()
 }
