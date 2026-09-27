@@ -524,3 +524,46 @@ text:
 The uncommitted `llmprovider/` + `wizard/` diff also removes static
 fallbacks from every `DiscoverModels` and from wizard `Discover: false`.
 That is **out of D11**. D11 is ChatGPT-OAuth listing only.
+
+## Amendment — 2026-09-27: `ba92db1` shipped the working-tree draft; `main` repaired
+
+Commit `ba92db1` ("fix(oauth): repair loopback, paste fallback, and
+ChatGPT session wiring") reached `origin/main` as a fast-forward. It
+contains this pair and the 2026-09-16 working-tree draft that the PLAN's
+C10 says must not be committed as one blob. The draft was applied with
+unresolved conflict markers against `5a1fc70`:
+
+* `llmprovider/discovery.go` holds 20 conflict blocks (60 marker lines,
+  first at line 335). `wizard/configure_test.go` holds one (lines 244–247).
+  At `ba92db1` and at `6e19cdf`, `go build ./...` fails with
+  `llmprovider/discovery.go:335:1: syntax error: unexpected <<, expected }`,
+  and `go test ./...` reports `llmprovider [build failed]` and
+  `wizard [setup failed]`. The parent `ca29b81` has no markers.
+* Each `<<<<<<< HEAD` side is the draft's pre-0009-refactor code. It calls
+  `liveModels`, which no longer exists. Each `>>>>>>> 5a1fc70` side is the
+  current code.
+* The draft removed the static-catalog fallback from `DiscoverModels` in
+  `claude.go`, `gemini.go`, `grok.go`, `huggingface.go`, `kilo.go` and
+  `opencode.go`. It also rewrote the discovery and wizard tests for a wizard
+  with no static menu. D11 and the PLAN's C1 reject both.
+* It deleted `StaticOpenAIChatGPT` but left three references to it:
+  `wizard/configure.go`, `llmprovider/discovery_catalog_test.go` and
+  `wizard/model_select_test.go`.
+* It added `Options.HTTPClient` without passing it to the listing. It also
+  added a second `WithBaseURL` fed from `Existing.BaseURL`, which aims a new
+  provider's listing at the previous provider's endpoint. `resolveBaseURL`
+  already carries a same-provider base URL.
+
+The decision is unchanged, and D11 stands as written. PLAN phase R1 restores
+`main` to D11 and C1:
+
+* Every conflict takes the current side, so `discovery.go` is `ca29b81` plus
+  only the D11 Codex lister.
+* The six `DiscoverModels` files and the rewritten wizard tests return to
+  their `ca29b81` content.
+* The wizard's half of P7 is finished: a ChatGPT session has no static
+  catalog, and `Options.HTTPClient` is wired.
+
+At `ba92db1`, these decisions have landed: D1, D4, D5 (state mismatch and
+missing code), D9 and the `llmprovider` half of D11. D2, D3, D7, D8 and F11
+have not. They remain PLAN work, as do P1's and P4's missing tests.

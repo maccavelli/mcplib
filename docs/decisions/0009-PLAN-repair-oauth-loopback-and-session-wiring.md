@@ -1,6 +1,6 @@
 ---
-status: proposed
-date: 2026-09-16
+status: in-progress
+date: 2026-09-27
 associated-madr: 0009-MADR-repair-oauth-loopback-and-session-wiring.md
 decision-makers: mcplib maintainers
 ---
@@ -772,6 +772,100 @@ as the canary inside the test never wrote it.
 
 Commit in prepare-commit-msg only.
 
+### R1 — Repair the `ba92db1` merge (added 2026-09-27; D11, C1, C10)
+
+`ba92db1` committed the draft this plan's C10 forbids, with conflict
+markers left in place. `main` does not build (see the MADR amendment of
+2026-09-27). Owner approval: "proceed to 1. repair main", 2026-09-27. R1
+runs before any other open phase, because every other phase's gate needs a
+tree that builds.
+
+**Baseline:** `6e19cdf` (`ba92db1` plus the 0013 docs). **Red:** at that
+baseline `go build ./...` exits 1 with
+`llmprovider/discovery.go:335:1: syntax error: unexpected <<, expected }`,
+and `go vet ./...` also reports `wizard/configure_test.go:244:1: expected
+operand, found '<<'`.
+
+**Files:**
+
+* `llmprovider/discovery.go`: resolve all 20 conflict blocks to the
+  `5a1fc70` side. The result must equal `ca29b81` except for the D11 lister
+  (`chatgptModelsClientVersion`, `chatGPTCatalogModel`, `listChatGPTModels`,
+  `chatGPTCatalogModelListed`) and the one changed line in
+  `ListModelCatalogWithSource`.
+* `llmprovider/claude.go`, `gemini.go`, `grok.go`, `huggingface.go`,
+  `kilo.go`, `opencode.go`, `wizard/configure_test.go`,
+  `wizard/import_test.go`: restore their `ca29b81` content (C1).
+  `catalogFrom` already substitutes the static catalog when a listing
+  fails, so the `DiscoverModels` hunks cannot be told apart by any test.
+  They are restored for conformance and so their doc comments are true.
+* `llmprovider/openai.go`: in `DiscoverModels`, a listing failure returns
+  the error for a ChatGPT session and falls back to
+  `StaticModels(ProviderOpenAI)` otherwise (P7's last bullet).
+* `wizard/configure.go`:
+  * `static` is nil for a ChatGPT session.
+  * The listing-failure notice drops "using the built-in catalog" when there
+    is none.
+  * `Options.HTTPClient` is passed with `WithHTTPClient`.
+  * The `Existing.BaseURL` second `WithBaseURL` is removed.
+  * The `Discover` doc comment describes both cases.
+* Tests:
+  * `llmprovider/discovery_test.go` is `ca29b81` with
+    `…_ChatGPTDoesNotHTTP` replaced by `…_ChatGPTListsCodexCatalog` and
+    `…_ChatGPTListingFailureIsError`.
+  * `llmprovider/discovery_catalog_test.go`:
+    `TestListModelCatalogWithSource_ChatGPTDoesNotHTTP` becomes
+    `…_ChatGPTListsCodexCatalog`.
+  * `wizard/model_select_test.go`: `TestConfigureLLM_ChatGPTNoStaticNotice`
+    injects a Codex listing instead of reaching the network.
+  * `wizard/auth_test.go` is `ca29b81` plus the three ChatGPT model-id edits
+    and the new `TestConfigureLLM_ChatGPTListingFailurePromptsForModel`.
+  * `llmprovider/probe_test.go` gains
+    `TestOpenAIProvider_ChatGPTDiscoverModelsListingFailureIsError`.
+  * `llmprovider/models_catalog_test.go` gains
+    `TestStaticModels_OpenAIIsPlatformCatalog`.
+
+**Mutants.** Each mutant puts back one behaviour R1 removes, and its named
+test must fail at runtime:
+
+* A ChatGPT static fallback.
+* A notice that claims a built-in catalog.
+* No static catalog for any provider.
+* A static fallback in ChatGPT `DiscoverModels`.
+* A listing failure that returns an error instead of degrading.
+* Hidden Codex slugs kept.
+* A ChatGPT listing failure that returns `StaticOpenAI`.
+* A silent state mismatch.
+* No originator on generate.
+* ChatGPT `Recommended` and `Usable` sharing an array.
+* The static notice fired for ChatGPT.
+* `StaticModels(openai)` returning the old ChatGPT slice.
+
+**Expected survivor.** An IPv4-only bind is expected to survive
+`TestListenLoopbackBothFamilies_LocalhostDials` on macOS and Linux. Go's
+dialer falls back from `::1` to `127.0.0.1`. That is acceptance criterion
+A1's Windows-only negative case, still owed by P1.
+
+**Verification.** On the repaired tree:
+* `gofmt -l` on every changed file
+* `golint -set_exit_status` per file
+* `go build ./...`
+* `go vet ./...`
+* `go vet -tags live_gateways ./llmprovider`
+* `make lint`
+* `go test -count=1 ./...`
+* `go test -race -count=1 ./llmprovider ./wizard`
+
+No `.go` file may hold a conflict marker, and no file may reference
+`StaticOpenAIChatGPT`. Commit with `git commit --no-edit`. Do not push.
+
+**Not in R1:**
+* P1's four missing tests: `…_IPv4OnlyMissesIPv6Localhost`,
+  `…_OpenURLDoesNotBlockWait`, `…_MissingCodeCompletesWaiter`,
+  `…_IdPErrorCompletesWaiter`.
+* P4's `TestOpenAI_ChatGPTSendsMaxOutputTokens`.
+* P2, P3, P5, P6 and P8.
+
 ## Verification (whole plan)
 
 ### Acceptance criteria (mapped to MADR Confirmation)
@@ -841,7 +935,28 @@ validation in the consumer against a library that lacks
 * **All-provider "no static fallback" wizard.** Explicitly rejected by D11 /
   C1. If wanted later, that is a new MADR.
 
-## Execution record (YYYY-MM-DD)
+## Deviation log
 
-Populate during execution. Columns: phase, status, commit, red-test FAIL
-line, green-test PASS line, what the plan predicted incorrectly.
+* **2026-09-27: phases landed outside the plan.** `ba92db1` combined P0's
+  docs with source and tests in one commit. That breaks the bootstrap
+  exception and C10. The commit carries parts of P1, P4 and P7 with no
+  recorded red runs, the static-fallback removal that C1 forbids, and
+  unresolved conflict markers, so `main` does not build. Resolution chosen
+  by the owner: repair in place (R1), not revert. Reverting would also drop
+  D1, D4, D5 and D9, which do work, and the history is already published.
+  The MADR records this in its 2026-09-27 amendment.
+
+## Execution record (2026-09-27)
+
+Columns: phase, status, commit, red-test FAIL line, green-test PASS line,
+what the plan predicted incorrectly.
+
+| Phase | Status | Commit | Red | Green | Plan vs. actual |
+| --- | --- | --- | --- | --- | --- |
+| P0 | done, out of order | `ba92db1` | n/a (docs) | n/a | Committed together with source (C10) |
+| P1 | partial | `ba92db1` | not recorded | `TestListenLoopbackBothFamilies_LocalhostDials`, `…_SkipsPortWhenIPv4Busy`, `TestOAuthCallback_RejectsStateMismatch`, `TestLoginBrowserOAuth_OpenAICompletesCallbackAndExchange` pass at R1 | 4 of 8 named tests missing; A1's negative case still needs the Windows host |
+| P2, P3, P5, P6 | not started | | | | |
+| P4 | partial | `ba92db1` | not recorded | `TestOpenAI_ChatGPTSetsOriginatorHeader` passes at R1 | `TestOpenAI_ChatGPTSendsMaxOutputTokens` missing |
+| P7 | done by R1 | `ba92db1`, then R1 | see R1 | see R1 | The llmprovider half landed in `ba92db1`; the wizard half and C1 only in R1 |
+| R1 | in progress | | `6e19cdf`: `go build ./...` exit 1, `discovery.go:335:1: syntax error: unexpected <<` | | Added 2026-09-27 |
+| P8 | not started | | | | Blocked on the `v1.5.1` tag |
