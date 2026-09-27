@@ -57,6 +57,7 @@ type oauthEndpoints struct {
 	Authorization string `json:"authorization_endpoint"`
 	Token         string `json:"token_endpoint"`
 	Device        string `json:"device_authorization_endpoint"`
+	Revocation    string `json:"revocation_endpoint"`
 }
 
 type oauthTokenResponse struct {

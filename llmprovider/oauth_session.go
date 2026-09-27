@@ -30,6 +30,8 @@ const (
 	// (xai-grok-login/src/oidc/protocol.rs:430-438).
 	oauthRefreshAttempts = 3
 	oauthRefreshBackoff  = 200 * time.Millisecond
+	// oauthRefreshToken is the refresh grant type, token field and hint.
+	oauthRefreshToken = "refresh_token"
 )
 
 // oauthTerminalRefreshCodes mean the refresh token is dead: Codex's permanent
@@ -277,9 +279,9 @@ func refreshOAuthSessionOnce(ctx context.Context, state oauthSessionState) (next
 // otherwise, as the Grok CLI sends it (xai-grok-login/src/oidc/protocol.rs:492-507).
 func newRefreshRequest(ctx context.Context, state oauthSessionState) (*http.Request, error) {
 	params := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": state.refresh,
-		"client_id":     state.clientID,
+		"grant_type":      oauthRefreshToken,
+		oauthRefreshToken: state.refresh,
+		"client_id":       state.clientID,
 	}
 	contentType := "application/x-www-form-urlencoded"
 	var body io.Reader
