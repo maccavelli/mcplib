@@ -118,6 +118,37 @@ func TestOpenAI_ChatGPTSetsOriginatorHeader(t *testing.T) {
 	}
 }
 
+// TestOpenAI_ChatGPTSendsMaxOutputTokens pins today's ChatGPT request body:
+// max_output_tokens is still sent (MADR 0009 open question 1 decides later
+// whether the Codex backend wants it).
+func TestOpenAI_ChatGPTSendsMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]any
+	client := &http.Client{Transport: openAITestRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		return openAITestHTTPResponse(request, http.StatusOK, openAITestResponse), nil
+	})}
+	session := &OAuthSession{
+		Issuer:  DefaultOpenAIIssuer,
+		Access:  "sess",
+		Refresh: "refresh",
+		Expiry:  time.Now().Add(time.Hour),
+	}
+	provider, err := NewOpenAIWithSource(session, "gpt-5.4-mini", WithHTTPClient(client), WithMaxTokens(321))
+	if err != nil {
+		t.Fatalf("NewOpenAIWithSource() error = %v", err)
+	}
+	if _, err := provider.Generate(context.Background(), "hello"); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if got, ok := body["max_output_tokens"].(float64); !ok || int(got) != 321 {
+		t.Fatalf("max_output_tokens = %v, want 321", body["max_output_tokens"])
+	}
+}
+
 func TestOpenAI_ChatGPTSetsResidencyHeader(t *testing.T) {
 	t.Parallel()
 
