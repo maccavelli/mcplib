@@ -187,7 +187,7 @@ document, and checked equal to the proven diff.
 * **K3**, commit `8db54ac`: 2 red tests failed as required; 0 base guards passed; gate passed; 3/3 mutants killed.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 8 passed, 1 skipped, 0 failed.
-* Skip: ok  	github.com/maccavelli/mcplib/llmprovider	12.608s
+* Skip: `TestLive_ResponsesStoreFalse/openai`: the OpenAI platform key has no credit (429 `credit_balance_exhausted`, typed as `ErrQuotaExhausted`).
 
 ## Appendix A — Proof record (2026-09-27)
 
