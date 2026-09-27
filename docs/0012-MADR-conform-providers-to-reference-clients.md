@@ -1,11 +1,21 @@
 ---
 status: proposed
-date: 2026-09-26
+date: 2026-09-27
 decision-makers: mcplib maintainers
 consulted: mcp-server-magictools, mcp-server-magicdev, prepare-commit-msg
 informed: all mcplib consumers
 ---
 # Conform `llmprovider` to the Reference Clients of Kilo, OpenCode, Grok and Codex
+
+> **Revision 2 (2026-09-27): reconciled with work shipped since `55e4b31`.**
+> The amendment at the end of this record lists what has already shipped
+> under other records, and what that supersedes here. It adds the rows 0013
+> routed to §1.1 and §1.2. It records two owner decisions:
+> * the OpenAI redirect moves to `127.0.0.1` after one live login;
+> * `CODEX_ACCESS_TOKEN` is withdrawn.
+>
+> [0012-PLAN-shared-transport.md](0012-PLAN-shared-transport.md) implements §1.
+> The other five plans of §8 are not written yet.
 
 ## Context and Problem Statement
 
@@ -745,3 +755,80 @@ method of `0009-PLAN-live-catalog-model-search.md` Appendix B):
   * the Grok CLI's `GROK_AUTH_PATH` resolution.
 * **Line citations into other `docs/` records** refer to their text at
   `55e4b31`.
+
+## Amendment — 2026-09-27: reconciled with shipped work
+
+The facts above are as observed at `55e4b31`, and they are kept as made.
+Since then, other records have shipped parts of this decision or decided
+them differently. The plans cite current code, not these line numbers.
+
+### Already shipped elsewhere
+
+| Item here | Shipped by | State |
+|---|---|---|
+| §1.4 OpenCode `x-opencode-session` on generation | 0010 PLAN Phase 6 (`a6bf24f`) | done; listings and probes remain (0013 B7) |
+| §3.2 chat `reasoning_effort` from metadata | 0010 §6 (`446d17a`) | done |
+| §3.2 messages adaptive thinking, Claude 4.7+ | 0013 Phase 5 (`a47c53c`) | done; MiniMax-M3 remains |
+| §3.3 Kilo `reasoning: { effort }` | 0010 §6 (`c4dda15`) | done |
+| §4.3 ChatGPT catalog | [decisions/0009-MADR-repair-oauth-loopback-and-session-wiring.md](decisions/0009-MADR-repair-oauth-loopback-and-session-wiring.md) D11 (`ba92db1`, `e219e11`) | superseded (see below) |
+| §4.4 `originator` on ChatGPT generation | the OAuth MADR's D9 (`ba92db1`) | shipped as `originator: mcplib`; gate G-C item 4 remains its live confirmation |
+| §5.3 loopback reachability | the OAuth MADR's D1 (`ba92db1`, `a879807`) | dual-stack `localhost`; see the decision below |
+| §5.3 authorize error surfaced | the OAuth MADR's D5 | the IdP `error` completes the waiter; `error_description` and the Codex entitlement message remain |
+
+**§4.3 is superseded.** Since D11, a ChatGPT session lists only
+`GET {base}/models?client_version=0.0.0`. It keeps `visibility` `list` (or
+empty) in `priority` order and has no static list. `0.0.0` is a placeholder,
+not a Codex version string, so "never sends a Codex version string" still
+holds. Gate G-C items 6 and 7 are moot.
+
+**§1.6 builds on 0013.** 0013's A4 and A5 bound every `DiscoverModels`
+listing to 10 s and passed each provider's profile. §1.6's removal of the
+probe applies to those listings.
+
+### Decisions (owner, 2026-09-27)
+
+* **§5.3 redirect host.** The OpenAI loopback redirect becomes
+  `http://127.0.0.1:{port}/auth/callback`. Evidence:
+  * Codex, with the same client id (`app_EMoamEEZ73f0CkXaXp7hrann`), made
+    that change on 2026-09-24 (`codex` `4b97832cfb`, #47927; present at
+    `25270df261`, `codex-rs/login/src/server.rs:193`).
+  * That was after the OAuth MADR said the allow-list required `localhost`.
+
+  The switch waits for one owner-run live ChatGPT browser login from
+  `mcplib` that confirms the server accepts it. Until then, the OAuth MADR's
+  dual-stack `localhost` listener stays; it remains harmless afterwards. This
+  amends that record's D1 premise.
+* **§5.4 `CODEX_ACCESS_TOKEN` is withdrawn, as written.** Codex classifies
+  it as a personal access token (`at-`) or an agent-identity JWT
+  (`codex-rs/login/src/auth/access_token.rs` at `25270df261`), not as a
+  ChatGPT OAuth bearer. This amends the OAuth MADR's D7: its access-only
+  path stays for a token pasted on stdin only.
+
+### §1 additions routed by 0013
+
+[0013-MADR-remediate-debugging-pass-findings.md](0013-MADR-remediate-debugging-pass-findings.md)
+§2 routed six findings here. They add these rows and rules to §1.1–§1.3:
+
+| Condition | Sentinel | Terminal | Source |
+|---|---|---|---|
+| OpenCode 403 `FreeTierError` ("free tier can only be used from within OpenCode") | `ErrNotPermitted` | yes | 0013 D1, live 2026-09-27 |
+| 402 on any service, including OpenCode's "Upstream request failed: Insufficient account funds" | `ErrQuotaExhausted` | yes | 0013 B3, D2 |
+| 408 | `ErrProviderUnavailable` | no | 0013 B4 |
+
+* **B3.** Every classified error carries the service's message (bounded and
+  redacted), not only a status.
+* **B6.** `GenerateItemsWithRetry` uses the one shared retry loop.
+* **B5.** A negative `retries` makes one attempt instead of none, and never
+  prints `%!w(<nil>)`.
+* **B7.** OpenCode listings and health probes send the provider's session id.
+* **D5.** The live suite skips only on the retryable and account-state
+  classes: `ErrRateLimited` (non-terminal), `ErrProviderUnavailable`,
+  `ErrQuotaExhausted` and `ErrNotPermitted`. `ErrInvalidRequest` fails.
+* **D6.** It is covered by §1.3's 300 s header timeout.
+
+### No Grok key-validation path exists
+
+§1.6's "for Grok, key validation uses `GET {base}/api-key`" has no site to
+change. Neither `llmprovider` nor `wizard` validates a Grok key today (a
+search of both packages at `1245496` finds none). The item stays in this
+decision for when such a path is added.

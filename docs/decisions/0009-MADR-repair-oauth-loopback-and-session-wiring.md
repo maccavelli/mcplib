@@ -599,3 +599,17 @@ D3 now also requires the wizard to drain that prompt:
   any other prompt.
 
 `Prompter` is unchanged.
+
+## Amendment — 2026-09-27: D1's premise and D7's `CODEX_ACCESS_TOKEN`
+
+Both are decided in
+[0012-MADR-conform-providers-to-reference-clients.md](../0012-MADR-conform-providers-to-reference-clients.md)
+revision 2. The owner decided them on 2026-09-27.
+
+* **D1.** The premise that Hydra requires a `localhost` redirect no longer
+  holds. Codex switched to `http://127.0.0.1:{port}/auth/callback` on
+  2026-09-24, with the same client id. `mcplib` follows it once a live login
+  confirms the switch, and the dual-stack listener stays until then.
+* **D7.** `CODEX_ACCESS_TOKEN` is withdrawn, because Codex treats it as a
+  personal access token or an agent JWT. The access-only ChatGPT path stays
+  for a token pasted on stdin only.
