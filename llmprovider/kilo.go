@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -51,8 +53,83 @@ type KiloProvider struct {
 	caps map[string]struct{}
 	// allowDataCollection omits the data_collection "deny" preference.
 	allowDataCollection bool
+	// org is the organization every request is scoped to, or "".
+	org string
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
+}
+
+// kiloTokenURLRE matches Kilo's URL-prefixed token, "{backend URL}:{secret}"
+// (kilocode auth/token.ts:9). The whole token is still the bearer.
+var kiloTokenURLRE = regexp.MustCompile(`^(https?://[^:]+(?::\d+)?(?:/[^:]*)?):`)
+
+// kiloOrganizationHeader scopes a request to a Kilo organization.
+const kiloOrganizationHeader = "X-KILOCODE-ORGANIZATIONID"
+
+// kiloEndpoints are the URLs and organization one Kilo credential uses
+// (MADR 0012 §3.3).
+type kiloEndpoints struct {
+	gateway string // generation base, {origin}{prefix}/api/gateway by default
+	models  string // listing URL
+	org     string // organization id, or ""
+}
+
+// resolveKiloEndpoints derives the endpoints from the configured base (else
+// kiloBaseURL), the token and an explicit organization. A URL-prefixed token
+// replaces the base with its origin and path prefix, as Kilo's client does
+// (api/url.ts:9-30), and an /api/organizations/{id} path in it names the
+// organization when none is given. An organization lists
+// {origin}{prefix}/api/organizations/{id}/models (api/models.ts:219).
+func resolveKiloEndpoints(baseURL, token, org string) kiloEndpoints {
+	base := kiloBaseURL
+	if baseURL != "" {
+		base = strings.TrimRight(baseURL, "/")
+	}
+	if m := kiloTokenURLRE.FindStringSubmatch(token); m != nil {
+		if u, err := url.Parse(m[1]); err == nil && u.Host != "" {
+			base = kiloRoute(u, "gateway")
+			if org == "" {
+				org = kiloPathOrganization(u)
+			}
+		}
+	}
+	e := kiloEndpoints{gateway: base, models: base + "/models", org: org}
+	if u, err := url.Parse(base); err == nil && org != "" {
+		e.models = kiloRoute(u, "organizations/"+url.PathEscape(org)) + "/models"
+	}
+	return e
+}
+
+// kiloPathSegments splits a URL path into its non-empty segments and returns
+// them with the index of the last "api" segment, or -1.
+func kiloPathSegments(u *url.URL) (parts []string, api int) {
+	parts = strings.FieldsFunc(u.Path, func(r rune) bool { return r == '/' })
+	for api = len(parts) - 1; api >= 0; api-- {
+		if parts[api] == "api" {
+			break
+		}
+	}
+	return parts, api
+}
+
+// kiloRoute is Kilo's route() (api/url.ts:9-18): the path before the last
+// "api" segment, then /api/{name}, without query, fragment or trailing slash.
+func kiloRoute(u *url.URL, name string) string {
+	parts, api := kiloPathSegments(u)
+	if api >= 0 {
+		parts = parts[:api]
+	}
+	return u.Scheme + "://" + u.Host + "/" + strings.Join(append(parts, "api", name), "/")
+}
+
+// kiloPathOrganization returns {id} from a path ending .../api/organizations/{id},
+// or "".
+func kiloPathOrganization(u *url.URL) string {
+	parts, api := kiloPathSegments(u)
+	if api >= 0 && len(parts) == api+3 && parts[api+1] == "organizations" {
+		return parts[api+2]
+	}
+	return ""
 }
 
 // kiloAnonymousToken is the bearer Kilo's own client sends without a login;
@@ -60,16 +137,14 @@ type KiloProvider struct {
 const kiloAnonymousToken = "anonymous"
 
 // NewKilo creates a Kilo Gateway provider. An empty apiKey uses Kilo's
-// anonymous token.
+// anonymous token. A URL-prefixed token ("https://host/prefix:secret") selects
+// that backend (MADR 0012 §3.3).
 func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error) {
 	if apiKey == "" {
 		apiKey = kiloAnonymousToken
 	}
 	cfg := ApplyOptions(opts)
-	baseURL := kiloBaseURL
-	if cfg.BaseURL != "" {
-		baseURL = strings.TrimRight(cfg.BaseURL, "/")
-	}
+	endpoints := resolveKiloEndpoints(cfg.BaseURL, apiKey, cfg.KiloOrganization)
 	var caps map[string]struct{}
 	if len(cfg.KiloCapabilities) > 0 {
 		caps = make(map[string]struct{}, len(cfg.KiloCapabilities))
@@ -80,7 +155,7 @@ func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error
 	return &KiloProvider{
 		apiKey:          apiKey,
 		model:           model,
-		baseURL:         baseURL,
+		baseURL:         endpoints.gateway,
 		client:          cfg.HTTPClient,
 		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
@@ -89,6 +164,7 @@ func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error
 		caps:            caps,
 
 		allowDataCollection: cfg.KiloDataCollection,
+		org:                 endpoints.org,
 	}, nil
 }
 
@@ -215,6 +291,9 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 	req.Header.Set(kiloEditorHeader, p.identity.name)
 	req.Header.Set(kiloTaskHeader, p.identity.session)
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if p.org != "" {
+		req.Header.Set(kiloOrganizationHeader, p.org)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -236,9 +315,10 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 // static catalog. It spends no generation on probes (MADR 0012 §1.6).
 func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listKiloModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
-		HTTPClient:   p.client,
-		BaseURL:      p.baseURL,
-		ModelProfile: p.modelProfile,
+		HTTPClient:       p.client,
+		BaseURL:          p.baseURL,
+		ModelProfile:     p.modelProfile,
+		KiloOrganization: p.org,
 	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderKilo)

@@ -54,6 +54,9 @@ type ProviderConfig struct {
 	// false (the default) sends provider.data_collection "deny"; see
 	// WithKiloDataCollection. Ignored by all other providers.
 	KiloDataCollection bool
+	// KiloOrganization scopes Kilo requests to an organization; see
+	// WithKiloOrganization. Ignored by all other providers.
+	KiloOrganization string
 	// ModelProfile selects how the recommended models of the open catalogs
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
 	// ProfileUtility. Those providers' DiscoverModels ranks with it too.
@@ -147,6 +150,17 @@ func WithKiloCapabilities(params ...string) ProviderOption {
 func WithKiloDataCollection(allow bool) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.KiloDataCollection = allow
+	}
+}
+
+// WithKiloOrganization scopes Kilo generation and listing to an organization:
+// requests carry X-KILOCODE-ORGANIZATIONID and the listing is the
+// organization's /api/organizations/{id}/models, as Kilo's client does
+// (MADR 0012 §3.3). A URL-prefixed token whose path is
+// .../api/organizations/{id} names the organization without this option.
+func WithKiloOrganization(id string) ProviderOption {
+	return func(cfg *ProviderConfig) {
+		cfg.KiloOrganization = id
 	}
 }
 

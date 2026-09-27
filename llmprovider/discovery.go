@@ -826,20 +826,21 @@ func kiloPriceRank(s string) float64 {
 	return v
 }
 
-// fetchKiloCatalog performs the shared GET {base}/models. The endpoint is PUBLIC
-// (200 with no credential, verified 2026-08-29), so apiKey may be empty.
+// fetchKiloCatalog performs the shared GET {base}/models, or an organization's
+// listing (resolveKiloEndpoints). The public endpoint answers with no
+// credential (verified 2026-08-29), so apiKey may be empty.
 func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([]kiloCatalogEntry, error) {
-	baseURL := kiloBaseURL
-	if cfg.BaseURL != "" {
-		baseURL = strings.TrimRight(cfg.BaseURL, "/")
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", http.NoBody)
+	endpoints := resolveKiloEndpoints(cfg.BaseURL, apiKey, cfg.KiloOrganization)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoints.models, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
 	identityOf(cfg).setUserAgent(req)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	if endpoints.org != "" {
+		req.Header.Set(kiloOrganizationHeader, endpoints.org)
 	}
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
