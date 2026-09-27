@@ -21,6 +21,12 @@ const (
 	envModelMetadataURL     = "MCPLIB_MODELS_METADATA_URL"
 	envDisableModelMetadata = "MCPLIB_DISABLE_MODELS_METADATA"
 	modelMetadataTTL        = 10 * time.Minute
+	// modelMetadataRetryAfter is how long a failed fetch is remembered before
+	// the next load tries again (MADR 0013 A6).
+	modelMetadataRetryAfter = time.Minute
+	// metadataLookupTimeout bounds the lookup a generation request makes
+	// (OpenCode's chat route) whatever the caller's context (MADR 0013 A6).
+	metadataLookupTimeout = 5 * time.Second
 
 	metadataKeyZen = "opencode"
 	metadataKeyGo  = "opencode-go"
@@ -88,9 +94,12 @@ func modelMetadataKey(provider string) string {
 	return ""
 }
 
+// modelMetadataCacheEntry is one URL's last good document and last failure.
 type modelMetadataCacheEntry struct {
-	doc     modelMetadataDoc
-	fetched time.Time
+	doc     modelMetadataDoc // nil until a fetch succeeds; kept when a refresh fails
+	fetched time.Time        // when doc was fetched
+	failed  time.Time        // when the last fetch failed; zero after a success
+	err     error            // that failure
 }
 
 var (
@@ -118,26 +127,43 @@ func modelMetadataDisabled() bool {
 }
 
 // loadModelMetadata returns the document, from the in-process cache while it
-// is younger than modelMetadataTTL. A failure is returned, never cached.
+// is younger than modelMetadataTTL. A failure is remembered for
+// modelMetadataRetryAfter, and while it is, loads answer from the cache
+// without fetching: the stale document when there is one, else the failure
+// (MADR 0013 A6).
 func loadModelMetadata(ctx context.Context, cfg ProviderConfig) (modelMetadataDoc, error) {
 	if modelMetadataDisabled() {
 		return nil, errModelMetadataDisabled
 	}
 	url := modelMetadataURL(cfg)
 	modelMetadataMu.Lock()
-	e, ok := modelMetadataCache[url]
+	e := modelMetadataCache[url]
 	modelMetadataMu.Unlock()
-	if ok && time.Since(e.fetched) < modelMetadataTTL {
+	switch {
+	case e.doc != nil && time.Since(e.fetched) < modelMetadataTTL:
 		return e.doc, nil
+	case !e.failed.IsZero() && time.Since(e.failed) < modelMetadataRetryAfter:
+		return e.cached()
 	}
 	doc, err := fetchModelMetadata(ctx, url, cfg.HTTPClient)
-	if err != nil {
-		return nil, err
-	}
 	modelMetadataMu.Lock()
+	defer modelMetadataMu.Unlock()
+	if err != nil {
+		e.failed, e.err = time.Now(), err
+		modelMetadataCache[url] = e
+		return e.cached()
+	}
 	modelMetadataCache[url] = modelMetadataCacheEntry{doc: doc, fetched: time.Now()}
-	modelMetadataMu.Unlock()
 	return doc, nil
+}
+
+// cached answers from a cache entry after a failure: the stale document when
+// there is one, else the failure.
+func (e modelMetadataCacheEntry) cached() (modelMetadataDoc, error) {
+	if e.doc != nil {
+		return e.doc, nil
+	}
+	return nil, e.err
 }
 
 // fetchModelMetadata performs one GET. Go's transport requests gzip itself.

@@ -237,11 +237,15 @@ func (p *OpencodeProvider) googleBody(input []Item, tool *Tool, thinking bool) m
 // chatReasoningEffort returns the reasoning_effort for the chat route: the
 // configured effort, when this is a thinking call and the model's published
 // reasoning_options list it (MADR 0010 §6); otherwise "". Metadata that is
-// unavailable, disabled or silent on the model sends nothing.
+// unavailable, disabled or silent on the model sends nothing. The lookup waits
+// at most metadataLookupTimeout, and a failed fetch is not retried for
+// modelMetadataRetryAfter (MADR 0013 A6).
 func (p *OpencodeProvider) chatReasoningEffort(ctx context.Context, thinking bool) string {
 	if !thinking || p.reasoningEffort == "" {
 		return ""
 	}
+	ctx, cancel := context.WithTimeout(ctx, metadataLookupTimeout)
+	defer cancel()
 	doc, err := loadModelMetadata(ctx, ProviderConfig{HTTPClient: p.client, ModelMetadataURL: p.metadataURL})
 	if err != nil || !slices.Contains(doc.reasoningEfforts(p.gateway, p.model), p.reasoningEffort) {
 		return ""

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // resetModelMetadataCache empties the in-process metadata cache. httptest
@@ -94,7 +95,10 @@ func TestLoadModelMetadata_CachesSuccess(t *testing.T) {
 	}
 }
 
-func TestLoadModelMetadata_FailureNotCached(t *testing.T) {
+// TestLoadModelMetadata_FailureRetriedAfterBackoff pins MADR 0013 A6: once
+// modelMetadataRetryAfter has passed since a failure, the next load fetches.
+// It replaces TestLoadModelMetadata_FailureNotCached (0010 PLAN §1.11 item 3).
+func TestLoadModelMetadata_FailureRetriedAfterBackoff(t *testing.T) {
 	enableModelMetadata(t)
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -109,12 +113,17 @@ func TestLoadModelMetadata_FailureNotCached(t *testing.T) {
 	if _, err := loadModelMetadata(context.Background(), cfg); err == nil {
 		t.Fatal("first load: want an error for HTTP 500")
 	}
+	modelMetadataMu.Lock()
+	e := modelMetadataCache[srv.URL]
+	e.failed = time.Now().Add(-modelMetadataRetryAfter - time.Second)
+	modelMetadataCache[srv.URL] = e
+	modelMetadataMu.Unlock()
 	doc, err := loadModelMetadata(context.Background(), cfg)
 	if err != nil || doc[metadataKeyZen] == nil {
-		t.Fatalf("second load: doc=%v err=%v, want a fresh fetch", doc, err)
+		t.Fatalf("load after the backoff: doc=%v err=%v, want a fresh fetch", doc, err)
 	}
 	if n := hits.Load(); n != 2 {
-		t.Errorf("requests = %d, want 2 (failure not cached)", n)
+		t.Errorf("requests = %d, want 2", n)
 	}
 }
 
