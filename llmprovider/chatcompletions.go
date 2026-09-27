@@ -22,6 +22,9 @@ type chatCompletionsOpts struct {
 	// Reasoning, when non-nil, is sent as the OpenRouter-style reasoning
 	// object Kilo reads: {"effort": …} or {"enabled": true}.
 	Reasoning map[string]any
+	// ReplayReasoningField, when non-empty, replays prior reasoning on every
+	// assistant message under this field (OpenCode interleaved models).
+	ReplayReasoningField string
 }
 
 // itemsToChatMessages converts canonical items to OpenAI Chat Completions
@@ -29,9 +32,20 @@ type chatCompletionsOpts struct {
 // and its result a role:"tool" message keyed by tool_call_id, the Chat
 // Completions equivalent of the Responses API's function_call_output item.
 func itemsToChatMessages(items []Item) []map[string]any {
+	return itemsToChatMessagesReplaying(items, "")
+}
+
+// itemsToChatMessagesReplaying is itemsToChatMessages that, when field is set,
+// puts the reasoning preceding each assistant message into that field, and
+// sets it (possibly "") on every assistant message, as OpenCode's client does
+// for interleaved models (MADR 0012 §2, O5).
+func itemsToChatMessagesReplaying(items []Item, field string) []map[string]any {
 	var messages []map[string]any
+	var pending strings.Builder
 	for _, item := range items {
 		switch v := item.(type) {
+		case ReasoningItem:
+			pending.WriteString(v.Text)
 		case MessageItem:
 			role := v.Role
 			if role == "" {
@@ -72,6 +86,17 @@ func itemsToChatMessages(items []Item) []map[string]any {
 				jsonKeyContent: v.Output,
 			})
 		}
+		if field == "" {
+			continue
+		}
+		// The reasoning belongs to the assistant turn it precedes.
+		if n := len(messages); n > 0 && messages[n-1][jsonKeyRole] == jsonRoleAssistant {
+			if _, isReasoning := item.(ReasoningItem); !isReasoning {
+				prior, _ := messages[n-1][field].(string) //nolint:errcheck // absent is ""
+				messages[n-1][field] = prior + pending.String()
+				pending.Reset()
+			}
+		}
 	}
 	return messages
 }
@@ -81,7 +106,7 @@ func itemsToChatMessages(items []Item) []map[string]any {
 func chatCompletionsBody(model string, maxTokens int, input []Item, o chatCompletionsOpts) map[string]any {
 	body := map[string]any{
 		jsonKeyModel:     model,
-		jsonKeyMessages:  itemsToChatMessages(input),
+		jsonKeyMessages:  itemsToChatMessagesReplaying(input, o.ReplayReasoningField),
 		jsonKeyMaxTokens: maxTokens,
 	}
 	if o.Tool != nil {

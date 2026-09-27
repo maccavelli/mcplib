@@ -253,12 +253,40 @@ func (p *OpencodeProvider) chatReasoningEffort(ctx context.Context, thinking boo
 // the DeepSeek/GLM/Kimi/MiniMax families routed there share no other
 // portable reasoning parameter. Asserted by TestOpencode_Thinking_PerRoute
 // and TestOpencode_ChatReasoningEffort.
-func (p *OpencodeProvider) chatBody(input []Item, tool *Tool, effort string) map[string]any {
+func (p *OpencodeProvider) chatBody(input []Item, tool *Tool, effort, replayField string) map[string]any {
 	return chatCompletionsBody(p.model, p.maxTokens, input, chatCompletionsOpts{
-		Tool:            tool,
-		ForceTool:       tool != nil,
-		ReasoningEffort: effort,
+		Tool:                 tool,
+		ForceTool:            tool != nil,
+		ReasoningEffort:      effort,
+		ReplayReasoningField: replayField,
 	})
+}
+
+// chatReplayField returns the interleaved reasoning field the model's
+// metadata declares, looked up only when input holds an assistant turn to
+// replay onto (MADR 0012 §2, O5). Unavailable metadata replays nothing.
+func (p *OpencodeProvider) chatReplayField(ctx context.Context, input []Item) string {
+	if !slices.ContainsFunc(input, isAssistantTurn) {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, metadataLookupTimeout)
+	defer cancel()
+	doc, err := loadModelMetadata(ctx, ProviderConfig{HTTPClient: p.client, ModelMetadataURL: p.metadataURL})
+	if err != nil {
+		return ""
+	}
+	return doc.interleavedField(p.gateway, p.model)
+}
+
+// isAssistantTurn reports whether an item is part of an assistant turn.
+func isAssistantTurn(item Item) bool {
+	switch v := item.(type) {
+	case FunctionCallItem:
+		return true
+	case MessageItem:
+		return v.Role == jsonRoleAssistant
+	}
+	return false
 }
 
 func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool) (*Response, error) {
@@ -271,7 +299,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	case OpencodeRouteGoogle:
 		body = p.googleBody(input, tool, thinking)
 	case OpencodeRouteChatCompletions:
-		body = p.chatBody(input, tool, p.chatReasoningEffort(ctx, thinking))
+		body = p.chatBody(input, tool, p.chatReasoningEffort(ctx, thinking), p.chatReplayField(ctx, input))
 	default:
 		return nil, fmt.Errorf("%w: unresolved opencode route for model %q", ErrInvalidRequest, p.model)
 	}

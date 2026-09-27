@@ -54,6 +54,9 @@ type modelMetadata struct {
 	ReleaseDate      string                 `json:"release_date"`
 	Status           string                 `json:"status"`
 	ReasoningOptions []modelReasoningOption `json:"reasoning_options"`
+	// Interleaved is {"field": name} when the provider expects prior reasoning
+	// replayed on assistant messages under that field, or true/absent.
+	Interleaved json.RawMessage `json:"interleaved"`
 }
 
 // modelReasoningOption is one models.dev reasoning_options entry.
@@ -79,6 +82,19 @@ func (d modelMetadataDoc) reasoningEfforts(provider, model string) []string {
 		}
 	}
 	return nil
+}
+
+// interleavedField returns the message field a model expects its prior
+// reasoning replayed under ("reasoning_content"), or "" when it declares none
+// (MADR 0012 §2, O5).
+func (d modelMetadataDoc) interleavedField(provider, model string) string {
+	var declared struct {
+		Field string `json:"field"`
+	}
+	if json.Unmarshal(d[modelMetadataKey(provider)][model].Interleaved, &declared) != nil {
+		return ""
+	}
+	return declared.Field
 }
 
 // modelMetadataKey returns the document key for a provider, or "".
