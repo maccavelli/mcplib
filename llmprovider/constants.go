@@ -56,6 +56,13 @@ const (
 	jsonKeyMaxOutputTokens = "max_output_tokens"
 	jsonKeyEffort          = "effort"
 	jsonRoleTool           = "tool"
+	// jsonKeyToolCalls is the Chat Completions assistant message's call list.
+	jsonKeyToolCalls = "tool_calls"
+	// geminiRoleModel is Gemini's assistant role.
+	geminiRoleModel = "model"
+	// geminiSkipThoughtSignature is Gemini's documented placeholder for a
+	// replayed call it did not issue (accepted live, 2026-09-27).
+	geminiSkipThoughtSignature = "skip_thought_signature_validator"
 )
 
 // Reasoning effort level values shared across providers.

@@ -25,9 +25,9 @@ type chatCompletionsOpts struct {
 }
 
 // itemsToChatMessages converts canonical items to OpenAI Chat Completions
-// messages. Tool results become role:"tool" messages keyed by tool_call_id,
-// which is the Chat Completions equivalent of the Responses API's
-// function_call_output item.
+// messages. A function call becomes the assistant turn's tool_calls entry,
+// and its result a role:"tool" message keyed by tool_call_id, the Chat
+// Completions equivalent of the Responses API's function_call_output item.
 func itemsToChatMessages(items []Item) []map[string]any {
 	var messages []map[string]any
 	for _, item := range items {
@@ -40,6 +40,30 @@ func itemsToChatMessages(items []Item) []map[string]any {
 			messages = append(messages, map[string]any{
 				jsonKeyRole:    role,
 				jsonKeyContent: v.Text,
+			})
+		case FunctionCallItem:
+			call := map[string]any{
+				"id":        v.CallID,
+				jsonKeyType: jsonKeyFunction,
+				jsonKeyFunction: map[string]any{
+					jsonKeyName:      v.Name,
+					jsonKeyArguments: v.Arguments,
+				},
+			}
+			// A call joins the assistant turn it follows (its text, or the
+			// calls before it); otherwise it opens one (MADR 0012 §2).
+			if n := len(messages); n > 0 && messages[n-1][jsonKeyRole] == jsonRoleAssistant {
+				calls, ok := messages[n-1][jsonKeyToolCalls].([]map[string]any)
+				if !ok {
+					calls = nil
+				}
+				messages[n-1][jsonKeyToolCalls] = append(calls, call)
+				continue
+			}
+			messages = append(messages, map[string]any{
+				jsonKeyRole:      jsonRoleAssistant,
+				jsonKeyContent:   "",
+				jsonKeyToolCalls: []map[string]any{call},
 			})
 		case FunctionCallOutputItem:
 			messages = append(messages, map[string]any{

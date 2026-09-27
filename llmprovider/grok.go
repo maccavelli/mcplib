@@ -141,6 +141,13 @@ func itemsToInput(items []Item) []map[string]any {
 				jsonKeyRole:    v.Role,
 				jsonKeyContent: v.Text,
 			})
+		case FunctionCallItem:
+			input = append(input, map[string]any{
+				jsonKeyType:      itemTypeFunctionCall,
+				jsonKeyCallID:    v.CallID,
+				jsonKeyName:      v.Name,
+				jsonKeyArguments: v.Arguments,
+			})
 		case FunctionCallOutputItem:
 			input = append(input, map[string]any{
 				jsonKeyType:   itemTypeFunctionCallOutput,

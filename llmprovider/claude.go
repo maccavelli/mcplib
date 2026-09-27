@@ -128,6 +128,25 @@ func (p *ClaudeProvider) GenerateItemsWithToolThinking(ctx context.Context, tool
 
 func claudeItemsToMessages(items []Item) []map[string]any {
 	var messages []map[string]any
+	// appendBlock adds a content block to the previous message when it has the
+	// same role and already holds blocks (or, for the assistant, text), so a
+	// turn's calls and a turn's results each stay in one message (MADR 0012
+	// §2); otherwise it opens a message.
+	appendBlock := func(role string, block map[string]any) {
+		if n := len(messages); n > 0 && messages[n-1][jsonKeyRole] == role {
+			switch content := messages[n-1][jsonKeyContent].(type) {
+			case []map[string]any:
+				messages[n-1][jsonKeyContent] = append(content, block)
+				return
+			case string:
+				if role == jsonRoleAssistant {
+					messages[n-1][jsonKeyContent] = []map[string]any{{jsonKeyType: jsonKeyText, jsonKeyText: content}, block}
+					return
+				}
+			}
+		}
+		messages = append(messages, map[string]any{jsonKeyRole: role, jsonKeyContent: []map[string]any{block}})
+	}
 	for _, item := range items {
 		switch v := item.(type) {
 		case MessageItem:
@@ -141,16 +160,18 @@ func claudeItemsToMessages(items []Item) []map[string]any {
 				jsonKeyRole:    role,
 				jsonKeyContent: v.Text,
 			})
+		case FunctionCallItem:
+			appendBlock(jsonRoleAssistant, map[string]any{
+				jsonKeyType:  "tool_use",
+				"id":         v.CallID,
+				jsonKeyName:  v.Name,
+				jsonKeyInput: toolArguments(v.Arguments),
+			})
 		case FunctionCallOutputItem:
-			messages = append(messages, map[string]any{
-				jsonKeyRole: jsonRoleUser,
-				jsonKeyContent: []map[string]any{
-					{
-						jsonKeyType:    "tool_result",
-						"tool_use_id":  v.CallID,
-						jsonKeyContent: v.Output,
-					},
-				},
+			appendBlock(jsonRoleUser, map[string]any{
+				jsonKeyType:    "tool_result",
+				"tool_use_id":  v.CallID,
+				jsonKeyContent: v.Output,
 			})
 		}
 	}

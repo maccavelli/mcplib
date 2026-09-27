@@ -29,6 +29,10 @@ type FunctionCallItem struct {
 	CallID    string // provider-issued call identifier
 	Name      string // function name
 	Arguments string // JSON-encoded arguments
+	// Signature is an opaque token the provider issued with the call and
+	// requires back when the call is replayed (Gemini's thoughtSignature).
+	// Empty when the provider issues none.
+	Signature string
 }
 
 func (FunctionCallItem) itemKind() string { return itemTypeFunctionCall }

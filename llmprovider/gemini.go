@@ -132,7 +132,25 @@ func (p *GeminiProvider) Continue(ctx context.Context, previousInteractionID str
 }
 
 func geminiItemsToContents(items []Item) []map[string]any {
+	// Gemini pairs a functionResponse with its functionCall by name, so a
+	// result takes the name of the call it answers (MADR 0012 §2).
+	names := map[string]string{}
+	for _, item := range items {
+		if call, ok := item.(FunctionCallItem); ok {
+			names[call.CallID] = call.Name
+		}
+	}
 	var contents []map[string]any
+	lastIsResponses := false
+	appendPart := func(role string, part map[string]any, merge bool) {
+		if n := len(contents); merge && n > 0 && contents[n-1][jsonKeyRole] == role {
+			if parts, ok := contents[n-1]["parts"].([]map[string]any); ok {
+				contents[n-1]["parts"] = append(parts, part)
+				return
+			}
+		}
+		contents = append(contents, map[string]any{jsonKeyRole: role, "parts": []map[string]any{part}})
+	}
 	for _, item := range items {
 		switch v := item.(type) {
 		case MessageItem:
@@ -140,28 +158,36 @@ func geminiItemsToContents(items []Item) []map[string]any {
 			if role == "" || role == jsonRoleUser {
 				role = jsonRoleUser
 			} else {
-				role = "model"
+				role = geminiRoleModel
 			}
-			contents = append(contents, map[string]any{
-				jsonKeyRole: role,
-				"parts": []map[string]string{
-					{jsonKeyText: v.Text},
-				},
-			})
+			appendPart(role, map[string]any{jsonKeyText: v.Text}, false)
+			lastIsResponses = false
+		case FunctionCallItem:
+			// Gemini refuses a replayed call without its thoughtSignature. A call
+			// Gemini did not issue (synthetic, or from another provider) carries
+			// the documented skip value instead.
+			signature := v.Signature
+			if signature == "" {
+				signature = geminiSkipThoughtSignature
+			}
+			appendPart(geminiRoleModel, map[string]any{
+				"functionCall":     map[string]any{jsonKeyName: v.Name, "args": toolArguments(v.Arguments)},
+				"thoughtSignature": signature,
+			}, true)
+			lastIsResponses = false
 		case FunctionCallOutputItem:
-			contents = append(contents, map[string]any{
-				jsonKeyRole: "function",
-				"parts": []map[string]any{
-					{
-						"functionResponse": map[string]any{
-							jsonKeyName: v.CallID,
-							"response": map[string]any{
-								jsonKeyOutput: v.Output,
-							},
-						},
-					},
+			name := names[v.CallID]
+			if name == "" {
+				name = v.CallID
+			}
+			// A turn's results share one user turn, as its calls share one model turn.
+			appendPart(jsonRoleUser, map[string]any{
+				"functionResponse": map[string]any{
+					jsonKeyName: name,
+					"response":  map[string]any{jsonKeyOutput: v.Output},
 				},
-			})
+			}, lastIsResponses)
+			lastIsResponses = true
 		}
 	}
 	return contents
@@ -242,6 +268,7 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 						Name string         `json:"name"`
 						Args map[string]any `json:"args"`
 					} `json:"functionCall"`
+					ThoughtSignature string `json:"thoughtSignature"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -267,8 +294,12 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 		if part.Text != "" {
 			result.Output = append(result.Output, MessageItem{Role: jsonRoleAssistant, Text: part.Text})
 		}
-		if part.FunctionCall != nil && part.FunctionCall.Args != nil {
-			argsBytes, err := json.Marshal(part.FunctionCall.Args)
+		if part.FunctionCall != nil {
+			args := part.FunctionCall.Args
+			if args == nil {
+				args = map[string]any{} // a tool without parameters
+			}
+			argsBytes, err := json.Marshal(args)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal gemini function args: %w", err)
 			}
@@ -276,6 +307,7 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 				CallID:    part.FunctionCall.Name,
 				Name:      part.FunctionCall.Name,
 				Arguments: string(argsBytes),
+				Signature: part.ThoughtSignature,
 			})
 		}
 	}

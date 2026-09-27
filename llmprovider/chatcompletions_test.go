@@ -146,10 +146,13 @@ func TestItemsToChatMessages(t *testing.T) {
 		MessageItem{Text: "no role"},
 		MessageItem{Role: jsonRoleAssistant, Text: "assistant text"},
 		FunctionCallOutputItem{CallID: "call_1", Output: `{"ok":true}`},
-		FunctionCallItem{CallID: "c", Name: "n", Arguments: "{}"}, // unhandled: skipped
+		FunctionCallItem{CallID: "c", Name: "n", Arguments: "{}"}, // its own assistant turn (MADR 0012 §2)
 	})
-	if len(msgs) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(msgs))
+	}
+	if calls, ok := msgs[3][jsonKeyToolCalls].([]map[string]any); !ok || len(calls) != 1 || msgs[3][jsonKeyRole] != jsonRoleAssistant {
+		t.Errorf("function call message = %v, want an assistant turn with one tool call", msgs[3])
 	}
 	if msgs[0][jsonKeyRole] != jsonRoleUser {
 		t.Errorf("empty role should default to user, got %v", msgs[0][jsonKeyRole])
