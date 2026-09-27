@@ -16,12 +16,13 @@ import (
 // permanent limitation of Anthropic's current API design, not a TODO.
 // Callers must replay prior items as messages on every call.
 type ClaudeProvider struct {
-	apiKey         string
-	model          string
-	baseURL        string // For testing
-	client         *http.Client
-	maxTokens      int
-	thinkingBudget int // extended-thinking token budget for the GenerateThinking path
+	apiKey          string
+	model           string
+	baseURL         string // For testing
+	client          *http.Client
+	maxTokens       int
+	thinkingBudget  int    // extended-thinking token budget for the GenerateThinking path
+	reasoningEffort string // effort for the GenerateThinking path (see addMessagesThinking)
 }
 
 // defaultClaudeThinkingBudget is used by GenerateThinking when no budget is configured.
@@ -39,12 +40,13 @@ func NewClaude(apiKey, model string, opts ...ProviderOption) (*ClaudeProvider, e
 		baseURL = cfg.BaseURL
 	}
 	return &ClaudeProvider{
-		apiKey:         apiKey,
-		model:          model,
-		baseURL:        baseURL,
-		client:         cfg.HTTPClient,
-		maxTokens:      cfg.MaxTokens,
-		thinkingBudget: cfg.ThinkingBudget,
+		apiKey:          apiKey,
+		model:           model,
+		baseURL:         baseURL,
+		client:          cfg.HTTPClient,
+		maxTokens:       cfg.MaxTokens,
+		thinkingBudget:  cfg.ThinkingBudget,
+		reasoningEffort: cfg.ReasoningEffort,
 	}, nil
 }
 
@@ -121,20 +123,6 @@ func (p *ClaudeProvider) GenerateItemsWithToolThinking(ctx context.Context, tool
 	return p.doGenerateItems(ctx, input, &tool, true)
 }
 
-// thinkingParams returns the budget and the effective max_tokens for a thinking request.
-// Anthropic requires max_tokens > budget_tokens, so the ceiling is raised when needed.
-func (p *ClaudeProvider) thinkingParams() (budget, maxTokens int) {
-	budget = p.thinkingBudget
-	if budget <= 0 {
-		budget = defaultClaudeThinkingBudget
-	}
-	maxTokens = p.maxTokens
-	if maxTokens <= budget {
-		maxTokens = budget + defaultClaudeThinkingBudget
-	}
-	return budget, maxTokens
-}
-
 func claudeItemsToMessages(items []Item) []map[string]any {
 	var messages []map[string]any
 	for _, item := range items {
@@ -175,9 +163,7 @@ func (p *ClaudeProvider) doGenerateItems(ctx context.Context, input []Item, tool
 	}
 
 	if thinking {
-		budget, effMax := p.thinkingParams()
-		body["max_tokens"] = effMax
-		body["thinking"] = map[string]any{jsonKeyType: jsonKeyEnabled, "budget_tokens": budget}
+		body["max_tokens"] = addMessagesThinking(body, p.model, p.reasoningEffort, p.thinkingBudget, maxTokens)
 	}
 
 	if tool != nil {

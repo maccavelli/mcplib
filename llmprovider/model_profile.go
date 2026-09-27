@@ -13,8 +13,9 @@ const (
 )
 
 // ReasoningEffort is the recommended request effort for the profile: "low"
-// for ProfileUtility, and "" for ProfileCapable, meaning the model's own
-// default. A value outside the two profiles is treated as ProfileUtility.
+// for ProfileUtility, and "" for ProfileCapable, meaning each provider's
+// documented default (see ProviderConfig.ReasoningEffort; MADR 0013 Q2). A
+// value outside the two profiles is treated as ProfileUtility.
 func (p ModelProfile) ReasoningEffort() string {
 	if p == ProfileCapable {
 		return ""

@@ -178,14 +178,7 @@ func (p *OpencodeProvider) messagesBody(input []Item, tool *Tool, thinking bool)
 		jsonKeyMessages: claudeItemsToMessages(input),
 	}
 	if thinking {
-		budget := p.thinkingBudget
-		if budget <= 0 {
-			budget = defaultClaudeThinkingBudget
-		}
-		if maxTokens <= budget {
-			maxTokens = budget + defaultClaudeThinkingBudget
-		}
-		body["thinking"] = map[string]any{jsonKeyType: jsonKeyEnabled, "budget_tokens": budget}
+		maxTokens = addMessagesThinking(body, p.model, p.reasoningEffort, p.thinkingBudget, maxTokens)
 	}
 	body[jsonKeyMaxTokens] = maxTokens
 	if tool != nil {
@@ -208,11 +201,7 @@ func (p *OpencodeProvider) messagesBody(input []Item, tool *Tool, thinking bool)
 func (p *OpencodeProvider) googleBody(input []Item, tool *Tool, thinking bool) map[string]any {
 	genCfg := map[string]any{"maxOutputTokens": p.maxTokens}
 	if thinking {
-		budget := p.thinkingBudget
-		if budget <= 0 {
-			budget = dynamicGeminiThinkingBudget
-		}
-		genCfg["thinkingConfig"] = map[string]any{"thinkingBudget": budget}
+		genCfg["thinkingConfig"] = geminiThinkingConfig(p.model, p.reasoningEffort, p.thinkingBudget)
 	}
 	body := map[string]any{
 		"contents":         geminiItemsToContents(input),

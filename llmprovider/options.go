@@ -30,8 +30,13 @@ type ProviderConfig struct {
 	// (Claude "thinking", Gemini "thinkingConfig"). Zero leaves the per-provider
 	// default in effect.
 	ThinkingBudget int
-	// ReasoningEffort selects OpenAI reasoning effort ("low"|"medium"|"high") for
-	// the GenerateThinking path. Empty leaves the per-provider default in effect.
+	// ReasoningEffort selects the reasoning effort ("low"|"medium"|"high") for
+	// the GenerateThinking path of every provider. Effort APIs send it as is;
+	// Claude 4.7 and later send output_config.effort; older Claude and Gemini
+	// map "low" to a small budget or thinkingLevel (MADR 0013 Q1). Empty leaves
+	// each provider's documented default: medium on the effort APIs, high on
+	// Grok 4.5, the model's own on Kilo and Claude 4.7+, a 4096 budget on older
+	// Claude, and dynamic thinking on Gemini (MADR 0013 Q2).
 	ReasoningEffort string
 	// OpencodeRoute overrides the wire format the OpenCode gateway providers use
 	// for the configured model. Empty means "resolve from the built-in route
@@ -86,8 +91,9 @@ func WithThinkingBudget(n int) ProviderOption {
 	}
 }
 
-// WithReasoningEffort sets the OpenAI reasoning effort ("low"|"medium"|"high") used by
-// the provider's GenerateThinking path. An empty value leaves the default in effect.
+// WithReasoningEffort sets the reasoning effort ("low"|"medium"|"high") used by the
+// provider's GenerateThinking path; see ProviderConfig.ReasoningEffort. An empty value
+// leaves each provider's default in effect.
 func WithReasoningEffort(s string) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.ReasoningEffort = s

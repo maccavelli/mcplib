@@ -191,7 +191,7 @@ func TestOpencode_Thinking_PerRoute(t *testing.T) {
 	t.Run("messages uses thinking.budget_tokens and raises max_tokens", func(t *testing.T) {
 		var body map[string]any
 		srv := captureServer(t, &body, fxOpencodeMessages)
-		p, _ := NewOpencode(ProviderOpencodeZen, "k", "claude-sonnet-5",
+		p, _ := NewOpencode(ProviderOpencodeZen, "k", "claude-haiku-4-5",
 			WithBaseURL(srv.URL), WithMaxTokens(4096), WithThinkingBudget(8000))
 		if _, err := p.GenerateThinking(context.Background(), "hi"); err != nil {
 			t.Fatalf("GenerateThinking: %v", err)

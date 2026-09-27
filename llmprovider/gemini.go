@@ -11,12 +11,13 @@ import (
 
 // GeminiProvider implements Provider using the Google Gemini API via standard http client.
 type GeminiProvider struct {
-	apiKey         string
-	model          string
-	baseURL        string // For testing
-	client         *http.Client
-	maxTokens      int
-	thinkingBudget int // thinkingConfig budget for the GenerateThinking path
+	apiKey          string
+	model           string
+	baseURL         string // For testing
+	client          *http.Client
+	maxTokens       int
+	thinkingBudget  int    // thinkingConfig budget for the GenerateThinking path
+	reasoningEffort string // effort for the GenerateThinking path (see geminiThinkingConfig)
 }
 
 // dynamicGeminiThinkingBudget (-1) lets the model size its own thinking budget.
@@ -31,25 +32,22 @@ func NewGemini(ctx context.Context, apiKey, model string, opts ...ProviderOption
 		baseURL = cfg.BaseURL
 	}
 	return &GeminiProvider{
-		apiKey:         apiKey,
-		model:          model,
-		baseURL:        baseURL,
-		client:         cfg.HTTPClient,
-		maxTokens:      cfg.MaxTokens,
-		thinkingBudget: cfg.ThinkingBudget,
+		apiKey:          apiKey,
+		model:           model,
+		baseURL:         baseURL,
+		client:          cfg.HTTPClient,
+		maxTokens:       cfg.MaxTokens,
+		thinkingBudget:  cfg.ThinkingBudget,
+		reasoningEffort: cfg.ReasoningEffort,
 	}, nil
 }
 
 // genConfig builds the generationConfig map, adding a thinkingConfig when the thinking
-// path is requested. A non-positive configured budget maps to -1 (dynamic thinking).
+// path is requested (see geminiThinkingConfig).
 func (p *GeminiProvider) genConfig(thinking bool) map[string]any {
 	cfg := map[string]any{"maxOutputTokens": p.maxTokens}
 	if thinking {
-		budget := p.thinkingBudget
-		if budget <= 0 {
-			budget = dynamicGeminiThinkingBudget
-		}
-		cfg["thinkingConfig"] = map[string]any{"thinkingBudget": budget}
+		cfg["thinkingConfig"] = geminiThinkingConfig(p.model, p.reasoningEffort, p.thinkingBudget)
 	}
 	return cfg
 }

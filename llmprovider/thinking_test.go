@@ -32,7 +32,7 @@ func TestClaudeThinking_RequestBody(t *testing.T) {
 	srv := captureServer(t, &body, `{"content":[{"type":"text","text":"ok"}]}`)
 
 	// maxTokens (4096) <= budget (8000) must force the ceiling above the budget.
-	p, err := NewClaude("k", "claude-x", WithBaseURL(srv.URL), WithMaxTokens(4096), WithThinkingBudget(8000))
+	p, err := NewClaude("k", "claude-haiku-4-5", WithBaseURL(srv.URL), WithMaxTokens(4096), WithThinkingBudget(8000))
 	if err != nil {
 		t.Fatal(err)
 	}
