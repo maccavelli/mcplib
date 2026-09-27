@@ -16,6 +16,12 @@ informed: all mcplib consumers
 >
 > [0012-PLAN-shared-transport.md](0012-PLAN-shared-transport.md) implements §1.
 > The other five plans of §8 are not written yet.
+>
+> **Revision 3 (2026-09-27): gate results and the five plans.** The second
+> amendment records gates G-C, G-O and G-K, the owner's decisions on §3.3,
+> §3.4 and §5.2, and the facts that proving the five remaining plans
+> established. The `127.0.0.1` redirect still waits for the owner's live
+> browser login.
 
 ## Context and Problem Statement
 
@@ -832,3 +838,252 @@ probe applies to those listings.
 change. Neither `llmprovider` nor `wizard` validates a Grok key today (a
 search of both packages at `1245496` finds none). The item stays in this
 decision for when such a path is added.
+
+## Amendment — 2026-09-27 (revision 3): gate results and the five plans
+
+Revision 3 records gates G-C, G-O and G-K, the owner's two §3.3 decisions,
+and the facts that writing and proving the remaining five plans established.
+Every fact below was observed on 2026-09-27. The plans cite the transcripts
+in their appendices. Earlier revisions are left as written.
+
+It also records the owner's answers on §3.4 (runtime picking stays) and §5.2
+(the principal fields are withdrawn). Everything else either conforms to what
+this record already decided, or corrects an asserted fact without changing the
+decision.
+
+### Plans
+
+| Plan | Covers | Phases |
+|---|---|---|
+| [0012-PLAN-shared-transport.md](0012-PLAN-shared-transport.md) | §1 | complete |
+| [0012-PLAN-item-fidelity.md](0012-PLAN-item-fidelity.md) | §2 | F1–F3 |
+| [0012-PLAN-gateway-conventions.md](0012-PLAN-gateway-conventions.md) | §3 | G1–G5 |
+| [0012-PLAN-chatgpt-backend.md](0012-PLAN-chatgpt-backend.md) | §4 | C1–C3 |
+| [0012-PLAN-oauth-hygiene.md](0012-PLAN-oauth-hygiene.md) | §5 | O1–O6 (O6 gated) |
+| [0012-PLAN-grok.md](0012-PLAN-grok.md) | §6 | K1–K3 |
+
+Each plan was executed in advance in scratch copies of `git archive 7ea0ad4`,
+stacked in the order of the table. Applying the five plans' diffs to a fresh
+archive in that order reproduces the proven tree: 308 files, 0 mismatches.
+The whole live suite on that tree gave 82 passed, 4 skipped, 0 failed. Every
+skip had one of three causes:
+* the owner-gated browser login;
+* the OpenAI platform key, which has no credit;
+* Kilo's free-tier rate limit (429) on `kilo-auto/free`. The same tests
+  passed in the gateway plan's own live run minutes earlier.
+
+### Gate G-C (§4), Codex CLI login, read-only
+
+The gate used the Codex CLI's ChatGPT login on this machine, read-only. Its
+access token was read and never refreshed.
+
+| Item | Result |
+|---|---|
+| 1. Non-streaming request | 400 `{"detail":"Stream must be set to true"}` |
+| 2. Without `store: false` | 400 `{"detail":"Store must be set to false"}` (also for `store: true`) |
+| 3. With `max_output_tokens` | 400 `{"detail":"Unsupported parameter: max_output_tokens"}` |
+| 4. `originator: mcplib` | accepted; also accepted without the header |
+| 5. `localhost` redirect | not testable without a browser; see O6 below |
+| 6. `gpt-5.4`, `gpt-5.4-mini` | moot since D11 (revision 2) |
+| 7. `GET /models?client_version=` | see below |
+
+* **§4.1–§4.2 stand as written.** The event stream has no `Content-Type`,
+  so the reader must not depend on one. An unknown model answers 400
+  `{"detail":"…"}`.
+* **Live proof through `mcplib`.** These are the first live ChatGPT requests
+  `mcplib` has ever made:
+  * a text call, a forced tool call, and a tool round trip replayed with
+    `store: false`, all on `gpt-6-astra`;
+  * `gpt-6-sol` and `gpt-6-luna`.
+* **The OAuth MADR's open question 1 is answered:** a ChatGPT session must not
+  send `max_output_tokens`.
+* **Item 7 reopens §4.3 and supersedes revision 2's `0.0.0`.**
+  * `client_version=0.0.0` hides `gpt-6-sol` and `gpt-6-luna`, whose
+    `minimal_client_version` is `0.155.0`.
+  * The backend accepts only `X.Y.Z` of at most 32 characters.
+    `v1.5.0`, `1.5`, `(devel)` and a Go pseudo-version all answer 400.
+  * **Rule:** the listing sends `mcplib`'s own release as `X.Y.Z`. A
+    pseudo-version sends the release it precedes. A build with no release
+    version sends `0.0.0`. This is never a Codex version string.
+
+### Gate G-O (§3.1)
+
+* On OpenCode Go, `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`,
+  `qwen3.8-max` and `qwen3.8-flash` answer on both `messages` and
+  `chat_completions`.
+* **The metadata route is followed.** On 2026-09-27 it moves four Go qwen
+  models, and Zen `qwen3.8-max`, to `chat_completions`.
+* The table was regenerated from that document: every non-deprecated Zen and
+  Go model.
+* Removing `jev-*` changes the Zen usable count in
+  [0010-MADR-use-case-aware-default-model-ranking.md](0010-MADR-use-case-aware-default-model-ranking.md)
+  §7's 2026-09-26 snapshot from 80 to 78. Its recommended sixes are
+  unchanged.
+
+### Gate G-K (§3.3)
+
+| Model | Without `deny` | With `deny` |
+|---|---|---|
+| `kilo-auto/free` | 200 | 400 `data_collection_required` |
+| `poolside/laguna-xs-2.1:free` | 429 | 400 `data_collection_required` |
+| `nvidia/nemotron-3.5-lightning:free` | 200 | 400 `data_collection_required` |
+| `tencent/hy3:free` | 404 | 400 `data_collection_required` |
+| `openai/gpt-oss-20b` (not training) | 200 | 200 |
+
+* **The default `deny` stands, as §3.3 decided.** §1.1 gains a row:
+
+  | Condition | Sentinel | Terminal | Source |
+  |---|---|---|---|
+  | Kilo `error_type: data_collection_required` | `ErrNotPermitted` | yes | G-K |
+
+* The envelope parser reads Kilo's top-level `error_type`.
+* **Consequence.** On 2026-09-27, every free text model in Kilo's listing was
+  flagged `mayTrainOnYourPrompts`, so keyless Kilo use needs
+  `WithKiloDataCollection(true)`.
+  * This matches the listing's policy, which never offers those models.
+  * Kilo's own client sends `deny` only with `hide_prompt_training_models`
+    (`kilocode` `c267794785`,
+    `packages/opencode/src/kilocode/provider/provider.ts:168-171`,
+    `:217-219`).
+  * `mcplib`'s listing policy is that setting, permanently on.
+
+### Owner decisions (2026-09-27)
+
+* **K3 is dropped (the `max_tokens` clamp).** Kilo accepted `max_tokens`
+  8192 on `cohere/command-r7b-12-2024`, whose listing caps completions at 4000.
+  There is no failure to prevent.
+* **The Kilo `/models` 401 anonymous retry is dropped.** The listing answers
+  200 with a bad key and with none, so the path never triggers.
+
+### Facts corrected while writing the plans
+
+* **§2, Gemini:**
+  * **Thought signature.** Gemini requires a `thoughtSignature` on a
+    replayed `functionCall` part: 400 "missing a thought_signature". Two
+    changes follow:
+    * `FunctionCallItem` gains `Signature`;
+    * a call without one is replayed with the placeholder
+      `skip_thought_signature_validator`, which the live run accepted.
+  * **Function response.** The converter sent the response with the wrong
+    role and name. The fix sends role `user` and names it after the call.
+  * **Two latent defects**, out of §2's scope, are noted here:
+    * the Gemini decoder types `thought` as a string where the API sends a
+      boolean;
+    * a `system` message becomes a model turn.
+* **§2, O5:** `kimi-k2.6` accepts the replayed `reasoning_content` field,
+  but does not require it.
+* **§3.2:**
+  * MiniMax-M3 on Go's `messages` route accepts a budget, adaptive thinking
+    and none, so the change is conformance only. It sends
+    `thinking: {type: adaptive}` with no effort, as OpenCode's client does.
+  * `store: false` is accepted but not required on Go's `gpt-6-luna`.
+* **§3.3, URL tokens:**
+  * Kilo's client lists at the raw token URL (`models.ts:224`).
+  * It sends `X-KILOCODE-ORGANIZATIONID` only for an explicit organization
+    id.
+  * `mcplib` does what §3.3 states. It derives the organization from a
+    token path `…/api/organizations/{id}` as well, and lists at the derived
+    route. This is a deliberate superset of the client.
+  * No organization account was available. These rules are verified against
+    the source only.
+* **§4.4:**
+  * **FedRAMP flag.** The claim is in the id token
+    (`codex` `login/src/token_data.rs`, `AuthClaims`). Carrying it needs
+    `OAuthSession.FedRAMP`, a `fedramp` field in the token file, and
+    `wizard.Result.FedRAMP`.
+  * **Residency header.** It comes from OpenCode's Codex plugin
+    (`packages/opencode/src/plugin/openai/codex.ts:83`, `:426`).
+  * **`response.failed`.** Codes map as Codex's `parse_failed_response`
+    does. The `*APIError` for a failure reported inside a 200 stream has
+    `Status` 0 and no status sentinel.
+* **§5.1:**
+  * The Grok CLI's key `"{issuer}::{client_id}"` and its `GROK_AUTH_PATH` →
+    `$GROK_HOME/auth.json` → `~/.grok/auth.json` rule were confirmed at
+    `grok-build` `f0e3be11`.
+  * The menu labels become "Use the Codex CLI login" and "Use the Grok CLI
+    login".
+* **§5.2:**
+  * **Terminal codes.** Grok treats only `invalid_grant` and
+    `invalid_client` as terminal. The `refresh_token_*` codes are Codex's,
+    and Codex also treats a 401 as permanent. The plan uses the union.
+  * **Retry.** A retry is 3 attempts, 200 ms then 400 ms, on transport
+    errors, 429 and 5xx. That is the Grok CLI's policy.
+  * **Expiry.** Grok takes expiry from `expires_in`, and Codex from the
+    access token's JWT `exp`. `mcplib` uses `exp` when the token has one,
+    else `expires_in`.
+* **§5.3:**
+  * **Entitlement.** The case is `error=access_denied` with a description
+    containing `missing_codex_entitlement`. Codex's message concerns the
+    workspace, not the plan: "Codex is not enabled for your workspace". The
+    plan uses Codex's wording.
+  * **Grok revocation.** xAI's discovery document publishes
+    `revocation_endpoint` `https://auth.x.ai/oauth2/revoke`. The Grok CLI
+    never revokes: its discovery struct omits the field.
+  * **OpenAI revocation.** OpenAI's document lists
+    `https://auth.openai.com/api/accounts/oauth/revoke`. Codex uses
+    `https://auth.openai.com/oauth/revoke` (`manager.rs:213`), and `mcplib`
+    follows Codex.
+* **§6:**
+  * xAI accepts every effort on `grok-4.5`, `grok-4.6` and `grok-3-mini`,
+    so the menus are conformance only.
+  * xAI now lists `grok-4.7`. It is not in the CLI catalog at `f0e3be11`,
+    so it gets no effort.
+  * The live OpenAI API-key `store: false` check was skipped because the
+    platform key had no credit (429 `credit_balance_exhausted`, correctly
+    typed as `ErrQuotaExhausted`).
+
+### Owner answers (2026-09-27)
+
+* **§3.4: runtime picking stays, and covers Kilo as well as OpenCode.** A
+  deterministic declared list was offered and declined. The owner extended
+  the picker to Kilo, whose gateway works like OpenCode's. As implemented
+  (plan phase G5):
+  * each OpenCode and Kilo live call site names ordered candidates that
+    share what its test needs: a route, a thinking shape, or a
+    data-collection policy;
+  * the first candidate models.opencode.ai lists as active is used, from
+    the provider's section (`opencode`, `opencode-go` or `kilo`). The
+    document's `kilo` section held 391 models on 2026-09-27. `mcplib`'s own
+    decoder does not keep that section, so the picker reads the document
+    itself;
+  * an unreachable document keeps the first candidate;
+  * no active candidate skips the test.
+
+  "Free" is applied only where a test needs it:
+  * Kilo's data-collection tests pick among free models that require
+    collection;
+  * the OpenCode tests run on the funded Go key, because OpenCode's free
+    models refuse tool requests.
+
+  Live on 2026-09-27, the picker passed over Go's deprecated `glm-5` for
+  `glm-5.3-flash`. No live test targeted a deprecated model that day.
+* **§5.2: `principal_type` and `principal_id` are withdrawn.** Two facts make
+  them dead code:
+  * no `mcplib` login yields them; they come from the Grok CLI's
+    configured team login;
+  * imported CLI logins are read-through now (§5.1), so `mcplib` never
+    refreshes a team login.
+
+### Gated
+
+* **O6, the `127.0.0.1` redirect.** It still waits for one owner-run live
+  ChatGPT browser login, per revision 2's decision. Plan phase O6 provides
+  the code and `TestLive_ChatGPTBrowserLogin`. That test signs in, generates
+  once, and revokes the session.
+
+### Surface additions beyond §7's list
+
+`FunctionCallItem.Signature`, `OAuthSession.FedRAMP`, `wizard.Result.FedRAMP`,
+`VendorCLISession` (§5.1 named it), `CredVendorCLI`, `Result.VendorAuthPath`,
+`WithKiloDataCollection`, `WithKiloOrganization`, `WithStore` and
+`RevokeOAuthSession`. All are additive; no exported signature changes.
+
+### Observed, out of scope
+
+`TestCircuitBreaker_IgnoresContextCancellation` in the root package hung once,
+for 600 s, in a full `go test ./...` gate run. Its handler blocks forever and
+`srv.Close()` waits for it, so a request that reaches the server before the
+expired context cancels it will hang the test. The root package depends only
+on `logging`, which no 0012 phase touches. The hang did not recur in 1,500 runs
+at `7ea0ad4`, under `-race` and `-cpu 1,2,4`. It is a pre-existing test race,
+recorded here and not fixed.
