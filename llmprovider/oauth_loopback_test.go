@@ -373,6 +373,144 @@ func TestOAuthLogin_RejectsUnsupportedProvider(t *testing.T) {
 	}
 }
 
+// TestListenLoopbackBothFamilies_IPv4OnlyMissesIPv6Localhost locks D1's
+// premise: a browser that resolves localhost to ::1 first cannot reach an
+// IPv4-only listener over IPv6. Go's own "localhost" dial falls back to
+// 127.0.0.1, so the dial names the family explicitly.
+func TestListenLoopbackBothFamilies_IPv4OnlyMissesIPv6Localhost(t *testing.T) {
+	requireIPv6Loopback(t)
+	v4, port := listenOnFreePort(t)
+	defer closeListener(t, v4)
+
+	conn, err := net.DialTimeout("tcp6", net.JoinHostPort("::1", strconv.Itoa(port)), time.Second)
+	if err == nil {
+		closeConn(t, conn)
+		t.Fatalf("tcp6 [::1]:%d reached an IPv4-only listener", port)
+	}
+}
+
+// TestListenLoopbackBothFamilies_AcceptsIPv6Loopback: the OpenAI loopback
+// helper answers a browser that dials ::1 (D1).
+func TestListenLoopbackBothFamilies_AcceptsIPv6Loopback(t *testing.T) {
+	requireIPv6Loopback(t)
+	held, port := listenOnFreePort(t)
+	closeListener(t, held)
+
+	listeners, err := listenLoopbackBothFamilies(port)
+	if err != nil {
+		t.Fatalf("listenLoopbackBothFamilies() error = %v", err)
+	}
+	t.Cleanup(func() {
+		for _, listener := range listeners {
+			closeListener(t, listener)
+		}
+	})
+	conn, err := net.DialTimeout("tcp6", net.JoinHostPort("::1", strconv.Itoa(port)), time.Second)
+	if err != nil {
+		t.Fatalf("dial tcp6 [::1]:%d: %v", port, err)
+	}
+	closeConn(t, conn)
+}
+
+func TestOAuthCallback_MissingCodeCompletesWaiter(t *testing.T) {
+	t.Parallel()
+	assertCallbackCompletesWithError(t, "state=expected-state", "missing authorization code")
+}
+
+func TestOAuthCallback_IdPErrorCompletesWaiter(t *testing.T) {
+	t.Parallel()
+	assertCallbackCompletesWithError(t, "state=expected-state&error=access_denied", "access_denied")
+}
+
+// TestLoginBrowserOAuth_OpenURLDoesNotBlockWait: a browser launcher that
+// never returns must not keep the login from receiving its callback (D4).
+func TestLoginBrowserOAuth_OpenURLDoesNotBlockWait(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(t, w, `{"authorization_endpoint":`+strconv.Quote(srv.URL+"/authorize")+`,"token_endpoint":`+strconv.Quote(srv.URL+"/token")+`}`)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		writeTestJSON(t, w, `{"access_token":"access","refresh_token":"refresh","expires_in":3600}`)
+	})
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	openURL := func(rawURL string) error {
+		authURL, err := url.Parse(rawURL)
+		if err != nil {
+			return err
+		}
+		query := authURL.Query()
+		go func() {
+			callbackURL := query.Get("redirect_uri") + "?code=browser-secret&state=" + url.QueryEscape(query.Get("state"))
+			resp, err := http.Get(callbackURL) //nolint:gosec // Local callback URL created by the code under test.
+			if err == nil {
+				_ = resp.Body.Close()
+			}
+		}()
+		<-release
+		return nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := LoginBrowserOAuth(context.Background(), ProviderGrok, OAuthFlowOptions{
+			HTTPClient: srv.Client(),
+			OpenURL:    openURL,
+			ClientID:   "test-client",
+			Issuer:     srv.URL,
+		})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("LoginBrowserOAuth() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("LoginBrowserOAuth waited on OpenURL instead of the callback")
+	}
+}
+
+func assertCallbackCompletesWithError(t *testing.T, query, want string) {
+	t.Helper()
+	result := make(chan oauthCallbackResult, 1)
+	handler := oauthCallbackHandler("/callback", "expected-state", result)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/callback?"+query, http.NoBody))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("callback status = %d, want 400", recorder.Code)
+	}
+	select {
+	case callback := <-result:
+		if callback.err == nil || !strings.Contains(callback.err.Error(), want) {
+			t.Fatalf("callback result = %#v, want an error containing %q", callback, want)
+		}
+	default:
+		t.Fatal("callback did not complete the waiter")
+	}
+}
+
+func requireIPv6Loopback(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("host has no IPv6 loopback: %v", err)
+	}
+	closeListener(t, listener)
+}
+
+func closeConn(t *testing.T, conn net.Conn) {
+	t.Helper()
+	if err := conn.Close(); err != nil {
+		t.Errorf("close connection: %v", err)
+	}
+}
+
 func listenOnFreePort(t *testing.T) (net.Listener, int) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

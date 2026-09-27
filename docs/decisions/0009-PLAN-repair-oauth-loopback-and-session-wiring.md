@@ -985,7 +985,7 @@ what the plan predicted incorrectly.
 | Phase | Status | Commit | Red | Green | Plan vs. actual |
 | --- | --- | --- | --- | --- | --- |
 | P0 | done, out of order | `ba92db1` | n/a (docs) | n/a | Committed together with source (C10) |
-| P1 | partial | `ba92db1` | not recorded | `TestListenLoopbackBothFamilies_LocalhostDials`, `…_SkipsPortWhenIPv4Busy`, `TestOAuthCallback_RejectsStateMismatch`, `TestLoginBrowserOAuth_OpenAICompletesCallbackAndExchange` pass at R1 | 4 of 8 named tests missing; A1's negative case still needs the Windows host |
+| P1 | done | `ba92db1` (code), then the P1 commit (tests) | The code landed first, so the new tests pass at HEAD. Each was proven by a mutant on a scratch copy: an IPv4-only bind fails `…_AcceptsIPv6Loopback` (`connect: connection refused`); an IPv6 twin fails `…_IPv4OnlyMissesIPv6Localhost` (`reached an IPv4-only listener`); a silent missing code and a silent IdP error each fail their test (`callback did not complete the waiter`); a synchronous OpenURL fails `…_OpenURLDoesNotBlockWait` (`waited on OpenURL instead of the callback`) | All 13 loopback tests pass; the gate passes | Test 3 was rewritten with explicit IPv6 dials (deviation log). The IPv4-only mutant that survived R1 is now caught |
 | P2, P3, P5, P6 | not started | | | | |
 | P4 | partial | `ba92db1` | not recorded | `TestOpenAI_ChatGPTSetsOriginatorHeader` passes at R1 | `TestOpenAI_ChatGPTSendsMaxOutputTokens` missing |
 | P7 | done by R1 | `ba92db1`, then R1 | see R1 | see R1 | The llmprovider half landed in `ba92db1`; the wizard half and C1 only in R1 |
