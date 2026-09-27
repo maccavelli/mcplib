@@ -7,14 +7,15 @@ import (
 )
 
 // TestApplyOptions_DefaultTimeout is the #5 regression: the default client must
-// have a timeout (the old http.DefaultClient had none).
+// have a timeout (the old http.DefaultClient had none). MADR 0012 §1.3 set it
+// to 330 s.
 func TestApplyOptions_DefaultTimeout(t *testing.T) {
 	cfg := ApplyOptions(nil)
 	if cfg.HTTPClient == nil {
 		t.Fatal("default HTTPClient is nil")
 	}
-	if cfg.HTTPClient.Timeout != 60*time.Second {
-		t.Errorf("default timeout: got %v want 60s", cfg.HTTPClient.Timeout)
+	if cfg.HTTPClient.Timeout != 330*time.Second {
+		t.Errorf("default timeout: got %v want 330s", cfg.HTTPClient.Timeout)
 	}
 }
 
