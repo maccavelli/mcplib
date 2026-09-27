@@ -100,13 +100,14 @@ var (
 		"thinkingmachines/inkling",
 	}
 
-	// StaticGrok: fast/flagship models first.
+	// StaticGrok leads with the Grok CLI's defaults, grok-4.6 then grok-4.5
+	// (MADR 0012 §6), then the fast models.
 	StaticGrok = []string{
+		grokModel46,
+		grokModel45,
 		"grok-3-mini-fast",
 		"grok-3-mini",
 		"grok-4",
-		"grok-4.5",
-		"grok-4.6",
 		"grok-4-fast-reasoning",
 	}
 )
@@ -490,8 +491,9 @@ func isUsableGrokModel(id string) bool {
 	if sm == "" || !strings.HasPrefix(sm, "grok") {
 		return false
 	}
-	// Skip non-text specialties if they appear.
-	for _, deny := range []string{"vision", "image", "embed"} {
+	// Skip non-text specialties: xAI lists grok-imagine-video, which "image"
+	// does not match (MADR 0012 §6).
+	for _, deny := range []string{"vision", denyImage, "embed", "imagine", "video", "voice", "stt", "tts"} {
 		if strings.Contains(sm, deny) {
 			return false
 		}
