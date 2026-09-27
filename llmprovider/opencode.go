@@ -161,6 +161,9 @@ func (p *OpencodeProvider) responsesBody(input []Item, tool *Tool, thinking bool
 		jsonKeyModel:           p.model,
 		jsonKeyInput:           itemsToInput(input),
 		jsonKeyMaxOutputTokens: p.maxTokens,
+		// OpenCode's client stores nothing for @ai-sdk/openai models
+		// (transform.ts:1235-1243, MADR 0012 §3.2); items are replayed.
+		"store": false,
 	}
 	if tool != nil {
 		body[jsonKeyTools] = []map[string]any{{

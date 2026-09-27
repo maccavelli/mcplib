@@ -62,6 +62,13 @@ func claudeAdaptiveOnly(model string) bool {
 	return major > 4 || (major == 4 && minor >= 7)
 }
 
+// minimaxAdaptiveThinking reports a MiniMax-M3 id. MiniMax's Anthropic
+// interface takes thinking.type "adaptive" with no budget or effort, as
+// OpenCode's client sends it (transform.ts:1293-1296, MADR 0012 §3.2).
+func minimaxAdaptiveThinking(model string) bool {
+	return strings.Contains(strings.ToLower(model), "minimax-m3")
+}
+
 // addMessagesThinking adds the thinking fields of an Anthropic Messages
 // request to body and returns its max_tokens. Adaptive-only models get
 // thinking.type "adaptive", plus output_config.effort when an effort is set; a
@@ -70,6 +77,10 @@ func claudeAdaptiveOnly(model string) bool {
 // defaultClaudeThinkingBudget, with max_tokens raised above it when needed
 // (Anthropic requires max_tokens > budget_tokens).
 func addMessagesThinking(body map[string]any, model, effort string, budget, maxTokens int) int {
+	if minimaxAdaptiveThinking(model) {
+		body[jsonKeyThinking] = map[string]any{jsonKeyType: "adaptive"}
+		return maxTokens
+	}
 	if claudeAdaptiveOnly(model) {
 		fields := map[string]any{jsonKeyThinking: map[string]any{jsonKeyType: "adaptive"}}
 		if effort != "" {
