@@ -3,7 +3,6 @@ package llmprovider
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,9 +35,8 @@ type OpencodeProvider struct {
 	route           OpencodeRoute
 	metadataURL     string
 	modelProfile    ModelProfile
-	// sessionID is sent as x-opencode-session on every request, fixed for the
-	// provider's lifetime (MADR 0012 §1.4, pulled forward by 0010 Phase 6).
-	sessionID string
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // opencodeSessionHeader carries a stable conversation id. OpenCode Go rejects
@@ -78,7 +76,7 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 		route:           route,
 		metadataURL:     cfg.ModelMetadataURL,
 		modelProfile:    cfg.ModelProfile,
-		sessionID:       rand.Text(),
+		identity:        identityOf(cfg),
 	}, nil
 }
 
@@ -281,11 +279,13 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	// Each route reads the key from its vendor's header (MADR 0009 §1c); the
 	// key stays in a header, never the URL.
 	name, value := opencodeKeyHeader(p.route, p.apiKey)
 	req.Header.Set(name, value)
-	req.Header.Set(opencodeSessionHeader, p.sessionID)
+	// x-opencode-session is fixed for the provider's lifetime (MADR 0012 §1.4).
+	req.Header.Set(opencodeSessionHeader, p.identity.session)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -346,19 +346,19 @@ func firstFunctionCallArgs(resp *Response, provider string) (string, error) {
 // correctly. Cloning p would send every candidate down the first model's wire
 // format and 500 on most of them.
 func (p *OpencodeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listOpencodeModels(ctx, p.gateway, p.apiKey, ProviderConfig{
+	listed, err := listOpencodeModels(ctx, p.gateway, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:       p.client,
 		BaseURL:          p.baseURL,
 		ModelProfile:     p.modelProfile,
 		ModelMetadataURL: p.metadataURL,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(p.gateway)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
 		tp, err := NewOpencode(p.gateway, p.apiKey, modelID,
-			WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+			append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

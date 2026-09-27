@@ -23,6 +23,8 @@ type ClaudeProvider struct {
 	maxTokens       int
 	thinkingBudget  int    // extended-thinking token budget for the GenerateThinking path
 	reasoningEffort string // effort for the GenerateThinking path (see addMessagesThinking)
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // defaultClaudeThinkingBudget is used by GenerateThinking when no budget is configured.
@@ -44,6 +46,7 @@ func NewClaude(apiKey, model string, opts ...ProviderOption) (*ClaudeProvider, e
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		thinkingBudget:  cfg.ThinkingBudget,
 		reasoningEffort: cfg.ReasoningEffort,
@@ -195,6 +198,7 @@ func (p *ClaudeProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
@@ -272,16 +276,16 @@ func decodeClaudeResponse(body io.Reader) (*Response, error) {
 // DiscoverModels returns curated Claude text models (Models API + catalog),
 // with an optional short health probe. Falls back to the static catalog.
 func (p *ClaudeProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listClaudeModels(ctx, p.apiKey, ProviderConfig{
+	listed, err := listClaudeModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderClaude)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewClaude(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewClaude(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

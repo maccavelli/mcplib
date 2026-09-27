@@ -59,6 +59,13 @@ type ProviderConfig struct {
 	// reasoning_options from. Empty uses MCPLIB_MODELS_METADATA_URL, then
 	// https://models.opencode.ai/api.json.
 	ModelMetadataURL string
+	// ClientName and ClientVersion name the consuming application in
+	// User-Agent (MADR 0012 §1.4); see WithClientInfo.
+	ClientName    string
+	ClientVersion string
+	// SessionID is the conversation id OpenCode and Kilo receive; see
+	// WithSessionID.
+	SessionID string
 }
 
 // ProviderOption is a functional option for provider constructors.

@@ -175,6 +175,7 @@ func listChatGPTModels(ctx context.Context, src TokenSource, cfg ProviderConfig)
 	if err != nil {
 		return ModelCatalog{}, fmt.Errorf("model listing: create chatgpt models request: %w", err)
 	}
+	identityOf(cfg).setUserAgent(req)
 	req.Header.Set(oauthAuthorizationHeader, "Bearer "+token.Value)
 	req.Header.Set(openAIOriginatorHeader, openAIOriginatorValue)
 	if accountID := openAIAccountID(src); accountID != "" {
@@ -338,6 +339,7 @@ func fetchGeminiPage(ctx context.Context, endpoint, apiKey string, cfg ProviderC
 	if err != nil {
 		return result, err
 	}
+	identityOf(cfg).setUserAgent(req)
 	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := cfg.HTTPClient.Do(req)
@@ -436,6 +438,7 @@ func fetchClaudePage(ctx context.Context, endpoint, apiKey string, cfg ProviderC
 	if err != nil {
 		return result, err
 	}
+	identityOf(cfg).setUserAgent(req)
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
@@ -490,6 +493,7 @@ func fetchOllamaNames(ctx context.Context, cfg ProviderConfig) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+	identityOf(cfg).setUserAgent(req)
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {
@@ -527,6 +531,7 @@ func ValidateOllamaURL(ctx context.Context, baseURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -563,6 +568,11 @@ func fetchDataIDs(ctx context.Context, endpoint, authorization string, cfg Provi
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
 		return nil, err
+	}
+	id := identityOf(cfg)
+	id.setUserAgent(req)
+	if provider == serviceOpencode {
+		req.Header.Set(opencodeSessionHeader, id.session) // 0013 B7
 	}
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
@@ -686,6 +696,7 @@ func fetchHuggingFaceUsable(ctx context.Context, apiKey string, cfg ProviderConf
 	if err != nil {
 		return nil, err
 	}
+	identityOf(cfg).setUserAgent(req)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -826,6 +837,7 @@ func fetchKiloCatalog(ctx context.Context, apiKey string, cfg ProviderConfig) ([
 	if err != nil {
 		return nil, err
 	}
+	identityOf(cfg).setUserAgent(req)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}

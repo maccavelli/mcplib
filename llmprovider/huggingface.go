@@ -43,6 +43,8 @@ type HuggingFaceProvider struct {
 	reasoningEffort string
 	modelProfile    ModelProfile
 	metadataURL     string
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // NewHuggingFace creates a Hugging Face Inference Providers router client.
@@ -60,6 +62,7 @@ func NewHuggingFace(apiKey, model string, opts ...ProviderOption) (*HuggingFaceP
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 		modelProfile:    cfg.ModelProfile,
@@ -154,6 +157,7 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
 	resp, err := p.client.Do(req)
@@ -175,18 +179,18 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 // DiscoverModels returns curated router models, with a short health probe.
 // Falls back to the static catalog.
 func (p *HuggingFaceProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listHuggingFaceModels(ctx, p.apiKey, ProviderConfig{
+	listed, err := listHuggingFaceModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:       p.client,
 		BaseURL:          p.baseURL,
 		ModelProfile:     p.modelProfile,
 		ModelMetadataURL: p.metadataURL,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderHuggingFace)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewHuggingFace(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewHuggingFace(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

@@ -52,6 +52,8 @@ type OllamaProvider struct {
 	client          *http.Client
 	maxTokens       int
 	reasoningEffort string
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // NewOllama creates a provider for a local Ollama instance. Unlike every other
@@ -68,6 +70,7 @@ func NewOllama(apiKey, model string, opts ...ProviderOption) (*OllamaProvider, e
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 	}, nil
@@ -169,6 +172,7 @@ func (p *OllamaProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	// No Authorization header: Ollama requires no credential and ignores any
 	// that is sent, so sending one would be noise on a local socket.
 
@@ -192,16 +196,16 @@ func (p *OllamaProvider) doGenerateItems(ctx context.Context, input []Item, tool
 // short health probe. There is no static catalog to fall back on: installed
 // models are machine-specific.
 func (p *OllamaProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listOllamaModels(ctx, ProviderConfig{
+	listed, err := listOllamaModels(ctx, p.identity.apply(ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		return nil, err
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewOllama(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewOllama(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

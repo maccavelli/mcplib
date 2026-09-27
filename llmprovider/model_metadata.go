@@ -172,6 +172,7 @@ func fetchModelMetadata(ctx context.Context, url string, client *http.Client) (m
 	if err != nil {
 		return nil, fmt.Errorf("model metadata: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("model metadata: %w", err)

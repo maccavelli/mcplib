@@ -19,6 +19,8 @@ type OpenAIProvider struct {
 	client          *http.Client
 	maxTokens       int
 	reasoningEffort string // reasoning effort for the GenerateThinking path
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // defaultOpenAIReasoningEffort is used by GenerateThinking when none is configured.
@@ -160,6 +162,7 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	token, err := p.src.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("openai: acquire token: %w", err)
@@ -197,8 +200,7 @@ func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		ctx,
 		ProviderOpenAI,
 		p.src,
-		WithHTTPClient(p.client),
-		WithBaseURL(p.baseURL),
+		append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...,
 	)
 	if err != nil || len(listed) == 0 {
 		// A ChatGPT session has no static catalog (MADR 0009 D11).
@@ -209,7 +211,7 @@ func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewOpenAIWithSource(p.src, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewOpenAIWithSource(p.src, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

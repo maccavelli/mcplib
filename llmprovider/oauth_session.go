@@ -190,6 +190,7 @@ func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSe
 	if err != nil {
 		return nil, Token{}, fmt.Errorf("oauth: create refresh request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := state.httpClient

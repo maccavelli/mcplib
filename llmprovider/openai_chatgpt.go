@@ -35,6 +35,7 @@ func NewOpenAIWithSource(src TokenSource, model string, opts ...ProviderOption) 
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 	}, nil

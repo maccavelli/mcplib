@@ -19,6 +19,8 @@ type GrokProvider struct {
 	client          *http.Client
 	maxTokens       int
 	reasoningEffort string // reasoning effort for the GenerateThinking path
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // NewGrok creates a new Grok provider instance.
@@ -47,6 +49,7 @@ func newGrokWithSource(src TokenSource, model string, opts ...ProviderOption) (*
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 	}, nil
@@ -201,6 +204,7 @@ func (p *GrokProvider) doGenerateItemsOnce(ctx context.Context, input []Item, to
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	token, err := p.src.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("grok: acquire token: %w", err)
@@ -231,15 +235,14 @@ func (p *GrokProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		ctx,
 		ProviderGrok,
 		p.src,
-		WithHTTPClient(p.client),
-		WithBaseURL(p.baseURL),
+		append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...,
 	)
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderGrok)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := newGrokWithSource(p.src, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := newGrokWithSource(p.src, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}

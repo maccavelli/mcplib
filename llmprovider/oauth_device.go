@@ -257,6 +257,7 @@ func postOAuthJSON(ctx context.Context, client *http.Client, endpoint string, pa
 	if err != nil {
 		return nil, fmt.Errorf("oauth: create request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -270,6 +271,7 @@ func postOAuthForm(ctx context.Context, client *http.Client, endpoint string, fo
 	if err != nil {
 		return nil, fmt.Errorf("oauth: create request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {

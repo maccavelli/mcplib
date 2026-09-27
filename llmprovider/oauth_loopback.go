@@ -213,6 +213,7 @@ func oauthEndpointsFor(ctx context.Context, config oauthFlowConfig) (oauthEndpoi
 	if err != nil {
 		return oauthEndpoints{}, fmt.Errorf("oauth: create discovery request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	resp, err := config.httpClient.Do(req)
 	if err != nil {
 		return oauthDiscoveryFallback(fallback)
@@ -499,6 +500,7 @@ func exchangeOAuthCode(
 	if err != nil {
 		return nil, fmt.Errorf("oauth: create token request: %w", err)
 	}
+	identityOf(ProviderConfig{}).setUserAgent(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := config.httpClient.Do(req)
 	if err != nil {

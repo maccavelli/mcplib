@@ -18,6 +18,8 @@ type GeminiProvider struct {
 	maxTokens       int
 	thinkingBudget  int    // thinkingConfig budget for the GenerateThinking path
 	reasoningEffort string // effort for the GenerateThinking path (see geminiThinkingConfig)
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // dynamicGeminiThinkingBudget (-1) lets the model size its own thinking budget.
@@ -36,6 +38,7 @@ func NewGemini(ctx context.Context, apiKey, model string, opts ...ProviderOption
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		thinkingBudget:  cfg.ThinkingBudget,
 		reasoningEffort: cfg.ReasoningEffort,
@@ -205,6 +208,7 @@ func (p *GeminiProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
 	// Key in a header (not the URL) so it can't leak via *url.Error in logs.
 	req.Header.Set("x-goog-api-key", p.apiKey)
 
@@ -284,10 +288,10 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 // dumps dozens of TTS/image/Live/preview IDs), then optionally health-probes
 // only that short list. On total probe failure the curated list is still returned.
 func (p *GeminiProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listGeminiModels(ctx, p.apiKey, ProviderConfig{
+	listed, err := listGeminiModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderGemini)
 	}
@@ -295,7 +299,7 @@ func (p *GeminiProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
 		tp := &GeminiProvider{
 			apiKey: p.apiKey, model: modelID, baseURL: p.baseURL,
-			client: p.client, maxTokens: p.maxTokens,
+			client: p.client, maxTokens: p.maxTokens, identity: p.identity,
 		}
 		return tp.Generate(tCtx, "Respond with ONLY the word Hello")
 	})

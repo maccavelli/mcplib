@@ -49,6 +49,8 @@ type KiloProvider struct {
 	// nil means "unknown" — send the standard request rather than guessing a
 	// model lacks a capability.
 	caps map[string]struct{}
+	// identity names the client on every request (MADR 0012 §1.4).
+	identity clientIdentity
 }
 
 // NewKilo creates a Kilo Gateway provider.
@@ -73,6 +75,7 @@ func NewKilo(apiKey, model string, opts ...ProviderOption) (*KiloProvider, error
 		model:           model,
 		baseURL:         baseURL,
 		client:          cfg.HTTPClient,
+		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: cfg.ReasoningEffort,
 		modelProfile:    cfg.ModelProfile,
@@ -194,6 +197,9 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.identity.setUserAgent(req)
+	req.Header.Set(kiloEditorHeader, p.identity.name)
+	req.Header.Set(kiloTaskHeader, p.identity.session)
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
 	resp, err := p.client.Do(req)
@@ -217,17 +223,17 @@ func (p *KiloProvider) doGenerateItems(ctx context.Context, input []Item, tool *
 // candidate, and attaching one model's capabilities to another would be worse
 // than sending everything.
 func (p *KiloProvider) DiscoverModels(ctx context.Context) ([]string, error) {
-	listed, err := listKiloModels(ctx, p.apiKey, ProviderConfig{
+	listed, err := listKiloModels(ctx, p.apiKey, p.identity.apply(ProviderConfig{
 		HTTPClient:   p.client,
 		BaseURL:      p.baseURL,
 		ModelProfile: p.modelProfile,
-	})
+	}))
 	if err != nil || len(listed) == 0 {
 		listed = StaticModels(ProviderKilo)
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {
-		tp, err := NewKilo(p.apiKey, modelID, WithHTTPClient(p.client), WithBaseURL(p.baseURL))
+		tp, err := NewKilo(p.apiKey, modelID, append(p.identity.options(), WithHTTPClient(p.client), WithBaseURL(p.baseURL))...)
 		if err != nil {
 			return "", err
 		}
