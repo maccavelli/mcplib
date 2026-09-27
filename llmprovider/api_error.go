@@ -121,6 +121,12 @@ func classifyHTTPError(provider string, resp *http.Response) error {
 		RetryAfter: retryAfterFrom(resp.Header),
 	}
 	e.Terminal, e.sentinel = classifyAPIError(serviceOf(provider), resp.StatusCode, envelope, body)
+	// A usage limit says when it resets, as Codex reads it (MADR 0012 §4.4).
+	if e.RetryAfter == 0 && envelope.resetsAt > 0 {
+		if d := time.Until(time.Unix(envelope.resetsAt, 0)); d > 0 {
+			e.RetryAfter = d
+		}
+	}
 	// x-should-retry: false is the service saying no retry can succeed (§1.2).
 	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Should-Retry")), "false") {
 		e.Terminal = true
@@ -214,8 +220,9 @@ func classifyAPIError(service string, status int, env apiErrorEnvelope, body []b
 // OpenAI/Codex {error:{type,code,message}},
 // xAI nested or flat {code,error}, Gemini {error:{code,message,status}}.
 type apiErrorEnvelope struct {
-	types []string // candidate classifications, most specific first
-	msg   string
+	types    []string // candidate classifications, most specific first
+	msg      string
+	resetsAt int64 // usage_limit_reached's reset time, Unix seconds, or 0
 }
 
 func (e apiErrorEnvelope) errType() string {
@@ -236,6 +243,7 @@ func parseAPIErrorBody(body []byte) apiErrorEnvelope {
 		ErrorType string          `json:"error_type"`
 		Message   string          `json:"message"`
 		Error     json.RawMessage `json:"error"`
+		Detail    json.RawMessage `json:"detail"`
 	}
 	if json.Unmarshal(body, &top) != nil {
 		return apiErrorEnvelope{msg: strings.TrimSpace(string(body))}
@@ -249,22 +257,28 @@ func parseAPIErrorBody(body []byte) apiErrorEnvelope {
 		}
 	}
 	var inner struct {
-		Type    string          `json:"type"`
-		Code    json.RawMessage `json:"code"`
-		Status  string          `json:"status"`
-		Message string          `json:"message"`
+		Type     string          `json:"type"`
+		Code     json.RawMessage `json:"code"`
+		Status   string          `json:"status"`
+		Message  string          `json:"message"`
+		ResetsAt int64           `json:"resets_at"`
 	}
 	var text string
 	switch {
 	case json.Unmarshal(top.Error, &inner) == nil:
 		add(jsonString(inner.Code), inner.Type, inner.Status)
 		env.msg = inner.Message
+		env.resetsAt = inner.ResetsAt
 	case json.Unmarshal(top.Error, &text) == nil:
 		env.msg = text
 	}
 	add(top.ErrorType, jsonString(top.Code), top.Type)
 	if env.msg == "" {
 		env.msg = top.Message
+	}
+	if env.msg == "" {
+		// The ChatGPT backend's {"detail": ...} (gate G-C, 2026-09-27).
+		env.msg = jsonString(top.Detail)
 	}
 	return env
 }

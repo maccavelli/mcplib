@@ -162,6 +162,7 @@ func keepExistingOAuth(
 		Issuer:    o.Existing.Issuer,
 		ClientID:  o.Existing.ClientID,
 		AccountID: o.Existing.AccountID,
+		FedRAMP:   o.Existing.FedRAMP,
 		Store:     o.TokenStore,
 	}
 	if err := llmprovider.ValidateOAuthSession(session); err != nil {

@@ -21,6 +21,7 @@ type OAuthSession struct {
 	Issuer     string
 	ClientID   string
 	AccountID  string
+	FedRAMP    bool // id-token chatgpt_account_is_fedramp: sends X-OpenAI-Fedramp (MADR 0012 §4.4)
 	TokenURL   string
 	Store      TokenStore
 	HTTPClient *http.Client
@@ -51,6 +52,7 @@ type fileRecord struct {
 	Issuer    string    `json:"issuer"`
 	ClientID  string    `json:"client_id"`
 	AccountID string    `json:"account_id"`
+	FedRAMP   bool      `json:"fedramp,omitempty"`
 	TokenURL  string    `json:"token_url"`
 }
 

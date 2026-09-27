@@ -190,6 +190,9 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 		if accountID := openAIAccountID(p.src); accountID != "" {
 			req.Header.Set(openAIAccountHeader, accountID)
 		}
+		if openAIFedRAMP(p.src) {
+			req.Header.Set(openAIFedRAMPHeader, "true")
+		}
 		if residency := openAIResidency(token.Value); residency != "" {
 			req.Header.Set(openAIResidencyHeader, residency)
 		}

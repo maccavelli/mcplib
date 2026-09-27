@@ -532,6 +532,7 @@ func oauthSessionFromResponse(config oauthFlowConfig, tokenURL string, payload o
 		Issuer:     config.issuer,
 		ClientID:   config.clientID,
 		AccountID:  chatGPTAccountID(payload.IDToken),
+		FedRAMP:    chatGPTFedRAMP(payload.IDToken),
 		TokenURL:   tokenURL,
 		HTTPClient: config.httpClient,
 	}, nil
@@ -559,6 +560,26 @@ func chatGPTAccountID(idToken string) string {
 		return claims.AccountID
 	}
 	return claims.Auth.AccountID
+}
+
+// chatGPTFedRAMP reports the id token's chatgpt_account_is_fedramp claim, as
+// Codex reads it (login/src/token_data.rs AuthClaims). A missing or
+// unreadable claim is false.
+func chatGPTFedRAMP(idToken string) bool {
+	parts := strings.Split(idToken, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Auth struct {
+			FedRAMP bool `json:"chatgpt_account_is_fedramp"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	return json.Unmarshal(payload, &claims) == nil && claims.Auth.FedRAMP
 }
 
 func decodeOAuthResponse(resp *http.Response, target any) error {

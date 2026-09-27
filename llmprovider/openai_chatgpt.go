@@ -16,6 +16,9 @@ const (
 	// openAISessionHeader carries the conversation id, as Codex sends it
 	// (codex-api/src/requests/headers.rs:8).
 	openAISessionHeader = "session-id"
+	// openAIFedRAMPHeader marks a FedRAMP account's requests, as Codex's
+	// bearer auth does (model-provider/src/bearer_auth_provider.rs:43-45).
+	openAIFedRAMPHeader = "X-OpenAI-Fedramp"
 )
 
 // NewOpenAIWithSource creates an OpenAI provider from a dynamic token source.
@@ -59,6 +62,17 @@ func openAIAccountID(src TokenSource) string {
 	return session.AccountID
 }
 
+// openAIFedRAMP reports whether src is a FedRAMP ChatGPT session.
+func openAIFedRAMP(src TokenSource) bool {
+	session, ok := src.(*OAuthSession)
+	if !ok {
+		return false
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	return session.FedRAMP
+}
+
 func expireOpenAISession(src TokenSource) bool {
 	session, ok := src.(*OAuthSession)
 	if !ok {
@@ -70,6 +84,9 @@ func expireOpenAISession(src TokenSource) bool {
 	return true
 }
 
+// openAIResidency reads chatgpt_compute_residency from the access token for
+// the residency header. Its source is OpenCode's Codex plugin
+// (plugin/openai/codex.ts:83, :426), not Codex (MADR 0012 §4.4).
 func openAIResidency(accessToken string) string {
 	parts := strings.Split(accessToken, ".")
 	if len(parts) != 3 {

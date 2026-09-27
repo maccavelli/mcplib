@@ -54,6 +54,7 @@ func (fs *FileTokenStore) Load(ctx context.Context, provider string) (*OAuthSess
 		Issuer:    rec.Issuer,
 		ClientID:  rec.ClientID,
 		AccountID: rec.AccountID,
+		FedRAMP:   rec.FedRAMP,
 		TokenURL:  rec.TokenURL,
 	}
 	s.Store = fs
@@ -76,6 +77,7 @@ func (fs *FileTokenStore) Save(ctx context.Context, provider string, s *OAuthSes
 		Issuer:    s.Issuer,
 		ClientID:  s.ClientID,
 		AccountID: s.AccountID,
+		FedRAMP:   s.FedRAMP,
 		TokenURL:  s.TokenURL,
 	}
 	data, err := json.MarshalIndent(rec, "", "  ")

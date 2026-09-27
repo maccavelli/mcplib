@@ -30,6 +30,7 @@ type Result struct {
 	Issuer       string
 	ClientID     string
 	AccountID    string
+	FedRAMP      bool
 	Model        string
 	BaseURL      string
 	Fallbacks    []string
@@ -139,6 +140,7 @@ func ConfigureLLM(ctx context.Context, p Prompter, o Options) (Result, error) {
 		res.Issuer = credential.session.Issuer
 		res.ClientID = credential.session.ClientID
 		res.AccountID = credential.session.AccountID
+		res.FedRAMP = credential.session.FedRAMP
 	}
 
 	cat := discoverModels(ctx, p, d, res, credential.source, o)

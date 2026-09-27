@@ -200,6 +200,9 @@ func listChatGPTModels(ctx context.Context, src TokenSource, cfg ProviderConfig)
 	if accountID := openAIAccountID(src); accountID != "" {
 		req.Header.Set(openAIAccountHeader, accountID)
 	}
+	if openAIFedRAMP(src) {
+		req.Header.Set(openAIFedRAMPHeader, "true")
+	}
 
 	resp, err := cfg.HTTPClient.Do(req)
 	if err != nil {

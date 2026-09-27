@@ -144,6 +144,7 @@ type oauthSessionState struct {
 	issuer     string
 	clientID   string
 	accountID  string
+	fedramp    bool
 	tokenURL   string
 	store      TokenStore
 	httpClient *http.Client
@@ -156,6 +157,7 @@ func (s *OAuthSession) refreshState() oauthSessionState {
 		issuer:     s.Issuer,
 		clientID:   s.ClientID,
 		accountID:  s.AccountID,
+		fedramp:    s.FedRAMP,
 		tokenURL:   s.TokenURL,
 		store:      s.Store,
 		httpClient: s.HTTPClient,
@@ -170,6 +172,7 @@ func (s *OAuthSession) adopt(next *OAuthSession) {
 	s.Issuer = next.Issuer
 	s.ClientID = next.ClientID
 	s.AccountID = next.AccountID
+	s.FedRAMP = next.FedRAMP
 	s.TokenURL = next.TokenURL
 	s.Store = next.Store
 	s.HTTPClient = next.HTTPClient
@@ -239,6 +242,7 @@ func refreshOAuthSession(ctx context.Context, state oauthSessionState) (*OAuthSe
 		Issuer:     state.issuer,
 		ClientID:   state.clientID,
 		AccountID:  state.accountID,
+		FedRAMP:    state.fedramp,
 		TokenURL:   state.tokenURL,
 		Store:      state.store,
 		HTTPClient: state.httpClient,
