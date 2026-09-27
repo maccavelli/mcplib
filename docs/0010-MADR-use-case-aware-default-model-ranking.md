@@ -615,6 +615,22 @@ which is the documented degradation (`models_catalog.go:638-640`).
     configured and the model's `reasoning_options` lists that value, and send
     nothing otherwise. This is gated on a live check per model family, as for
     Kilo.
+
+    > **Amendment (2026-09-26, during PLAN Phase 6).** Neither gateway could
+    > host the live check as planned:
+    >
+    > * **Zen** answered every model and route with `402 "Upstream request
+    >   failed: Insufficient account funds"`, cause unresolved.
+    > * **OpenCode Go** rejected every `mcplib` request with `400
+    >   MissingSessionID` because the `x-opencode-session` header was missing.
+    >
+    > The maintainer pulled that header forward from
+    > [0012-MADR-conform-providers-to-reference-clients.md](0012-MADR-conform-providers-to-reference-clients.md)
+    > §1.4. Every OpenCode generation request now sends a random session id,
+    > fixed per provider instance. The check runs on Go against the two
+    > chat-routed utility models whose `reasoning_options` list `low`:
+    > `glm-5.3-flash` (`glm-flash`) and `hy3` (`Hy`). The DeepSeek family is
+    > region-gated on Go, so its check waits for Zen.
 * **Consumer adoption.** prepare-commit-msg adopts the recipe on its next
   `mcplib` bump. That change is in that repository, not here.
 

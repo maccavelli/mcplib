@@ -295,6 +295,52 @@ func TestOpencode_ChatReasoningEffort(t *testing.T) {
 	}
 }
 
+// TestOpencode_SessionHeader pins the x-opencode-session header pulled forward
+// from MADR 0012 §1.4: OpenCode Go rejects requests without it (400
+// MissingSessionID, 2026-09-26). Every generation request carries one id,
+// fixed per provider instance, on both gateways and every route.
+func TestOpencode_SessionHeader(t *testing.T) {
+	var seen []string
+	serve := func(fixture string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen = append(seen, r.Header.Get("x-opencode-session"))
+			_, _ = w.Write([]byte(fixture))
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+	for _, tc := range []struct{ gateway, model, fixture string }{
+		{ProviderOpencodeGo, "glm-5.3-flash", fxOpencodeChat},
+		{ProviderOpencodeZen, opencodeDeepSeekV4Pro, fxOpencodeChat},
+		{ProviderOpencodeZen, "claude-sonnet-5", fxOpencodeMessages},
+	} {
+		seen = nil
+		srv := serve(tc.fixture)
+		first, err := NewOpencode(tc.gateway, "k", tc.model, WithBaseURL(srv.URL))
+		if err != nil {
+			t.Fatalf("NewOpencode: %v", err)
+		}
+		second, err := NewOpencode(tc.gateway, "k", tc.model, WithBaseURL(srv.URL))
+		if err != nil {
+			t.Fatalf("NewOpencode: %v", err)
+		}
+		for _, p := range []*OpencodeProvider{first, first, second} {
+			if _, err := p.Generate(context.Background(), "hi"); err != nil {
+				t.Fatalf("%s %s: Generate: %v", tc.gateway, tc.model, err)
+			}
+		}
+		if len(seen) != 3 || seen[0] == "" {
+			t.Fatalf("%s %s: sessions = %q, want 3 non-empty", tc.gateway, tc.model, seen)
+		}
+		if seen[0] != seen[1] {
+			t.Errorf("%s %s: one provider sent two sessions %q and %q", tc.gateway, tc.model, seen[0], seen[1])
+		}
+		if seen[0] == seen[2] {
+			t.Errorf("%s %s: two providers share session %q", tc.gateway, tc.model, seen[0])
+		}
+	}
+}
+
 func TestOpencode_ErrorClassification(t *testing.T) {
 	tests := []struct {
 		status  int

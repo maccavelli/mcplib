@@ -3,6 +3,7 @@ package llmprovider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,7 +35,15 @@ type OpencodeProvider struct {
 	reasoningEffort string
 	route           OpencodeRoute
 	metadataURL     string
+	// sessionID is sent as x-opencode-session on every request, fixed for the
+	// provider's lifetime (MADR 0012 §1.4, pulled forward by 0010 Phase 6).
+	sessionID string
 }
+
+// opencodeSessionHeader carries a stable conversation id. OpenCode Go rejects
+// requests without it (400 MissingSessionID, measured 2026-09-26), and both
+// gateways use it for routing and prompt caching.
+const opencodeSessionHeader = "x-opencode-session"
 
 // NewOpencode creates an OpenCode gateway provider. gateway must be
 // ProviderOpencodeZen or ProviderOpencodeGo. The wire format is resolved once,
@@ -67,6 +76,7 @@ func NewOpencode(gateway, apiKey, model string, opts ...ProviderOption) (*Openco
 		reasoningEffort: cfg.ReasoningEffort,
 		route:           route,
 		metadataURL:     cfg.ModelMetadataURL,
+		sessionID:       rand.Text(),
 	}, nil
 }
 
@@ -280,6 +290,7 @@ func (p *OpencodeProvider) doGenerateItems(ctx context.Context, input []Item, to
 	// key stays in a header, never the URL.
 	name, value := opencodeKeyHeader(p.route, p.apiKey)
 	req.Header.Set(name, value)
+	req.Header.Set(opencodeSessionHeader, p.sessionID)
 
 	resp, err := p.client.Do(req)
 	if err != nil {

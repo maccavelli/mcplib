@@ -474,13 +474,15 @@ func TestLive_ModelMetadataDocument(t *testing.T) {
 	}
 }
 
-// TestLive_OpencodeChatReasoningEffort is MADR 0010 §6's OpenCode gate: for
-// one chat-routed model per utility family, the published reasoning_options
-// list "low" and the gateway accepts reasoning_effort "low".
+// TestLive_OpencodeChatReasoningEffort is MADR 0010 §6's OpenCode gate (as
+// amended 2026-09-26): on OpenCode Go, for each chat-routed utility model whose
+// reasoning_options list "low" (glm-flash and Hy families), the gateway accepts
+// reasoning_effort "low". It also proves the x-opencode-session header: Go
+// answers 400 MissingSessionID without it.
 func TestLive_OpencodeChatReasoningEffort(t *testing.T) {
 	key := opencodeKey(t)
 	enableModelMetadata(t)
-	for _, model := range []string{opencodeDeepSeekV41Flash, "glm-5.3-flash"} {
+	for _, model := range []string{"glm-5.3-flash", "hy3"} {
 		t.Run(model, func(t *testing.T) {
 			ctx, cancel := liveCtx(t)
 			defer cancel()
@@ -488,10 +490,10 @@ func TestLive_OpencodeChatReasoningEffort(t *testing.T) {
 			if err != nil {
 				t.Skipf("metadata unreachable: %v", err)
 			}
-			if !slices.Contains(doc.reasoningEfforts(ProviderOpencodeZen, model), effortLow) {
+			if !slices.Contains(doc.reasoningEfforts(ProviderOpencodeGo, model), effortLow) {
 				t.Fatalf("DRIFT: %s reasoning_options no longer list %q", model, effortLow)
 			}
-			p, err := NewOpencode(ProviderOpencodeZen, key, model, WithReasoningEffort(effortLow), WithMaxTokens(400))
+			p, err := NewOpencode(ProviderOpencodeGo, key, model, WithReasoningEffort(effortLow), WithMaxTokens(400))
 			if err != nil {
 				t.Fatalf("NewOpencode: %v", err)
 			}

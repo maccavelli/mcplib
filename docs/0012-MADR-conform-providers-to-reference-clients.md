@@ -286,6 +286,16 @@ overrides everything.
   provider instance.
 * Per service:
   * **OpenCode:** `x-opencode-session: <id>`.
+
+    > **Amendment (2026-09-26).** Part of this item shipped early, in
+    > [0010-PLAN-use-case-aware-default-model-ranking.md](0010-PLAN-use-case-aware-default-model-ranking.md)
+    > Phase 6. OpenCode Go began rejecting every request without the header:
+    > `400 MissingSessionID`, measured 2026-09-26. The pulled-forward part:
+    > every OpenCode generation request sends `x-opencode-session`, a random
+    > id fixed per provider instance. `WithSessionID`, `WithClientInfo`, the
+    > `User-Agent` format and the other services remain in this decision. A
+    > probe showed Go accepts the session header with Go's default
+    > `User-Agent`.
   * **Kilo:** `X-KILOCODE-EDITORNAME: <name>` and `X-KiloCode-TaskId: <id>`.
   * **ChatGPT:** `session-id: <id>` and `originator: <name>`, subject to gate
     G-C.
