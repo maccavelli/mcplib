@@ -17,6 +17,10 @@ informed: all mcplib consumers
 > [0012-PLAN-shared-transport.md](0012-PLAN-shared-transport.md) implements §1.
 > The other five plans of §8 are not written yet.
 >
+> **Revision 4 (2026-09-27): the circuit-breaker test race.** The third
+> amendment brings the hang revision 3 recorded into scope, gives its root
+> cause, and adds `0012-PLAN-circuit-breaker-test.md`.
+>
 > **Revision 3 (2026-09-27): gate results and the five plans.** The second
 > amendment records gates G-C, G-O and G-K, the owner's decisions on §3.3,
 > §3.4 and §5.2, and the facts that proving the five remaining plans
@@ -1087,3 +1091,70 @@ expired context cancels it will hang the test. The root package depends only
 on `logging`, which no 0012 phase touches. The hang did not recur in 1,500 runs
 at `7ea0ad4`, under `-race` and `-cpu 1,2,4`. It is a pre-existing test race,
 recorded here and not fixed.
+
+## Amendment — 2026-09-27 (revision 4): the circuit-breaker test race
+
+Revision 3 recorded that `TestCircuitBreaker_IgnoresContextCancellation`
+(`backplane_test.go`) hung once, and left it out of scope. The owner has
+brought it into scope, so that an intermittent hang cannot stall the gate
+while the five plans run. This revision records its root cause and adds the
+plan that fixes it.
+
+### Root cause
+
+Three facts combine:
+1. **The handler never returns.** It is `select {}`
+   (`backplane_test.go:254`).
+2. **`srv.Close()` waits for running handlers.** `httptest.Server.Close`
+   waits until every outstanding request has completed, so one request that
+   reaches that handler blocks the test's deferred `srv.Close()` forever.
+3. **The test only assumes no request arrives.** Each iteration makes a 1 ms
+   context, sleeps 2 ms, and then calls `Generate`. The context is cancelled
+   by a timer callback, not by the clock. On a loaded machine the callback
+   can run after the sleep, and the request is then sent. `go test ./...`
+   runs every package's tests at once, which loads the machine.
+
+**The recorded hang matches.** It shows the handler's goroutine in
+`select (no cases)` at `backplane_test.go:254`, and the test goroutine at
+the end of the test function, line 283, where the deferred `srv.Close()`
+runs.
+
+**A deterministic reproduction** was run in a scratch copy of `5d05cf5`,
+with a deadline that fires after the request is sent, standing in for the
+late timer:
+
+| Handler | Result |
+|---|---|
+| `select {}` (today's) | `srv.Close()` still blocked after 5 s |
+| `<-r.Context().Done()` alone | still blocked after 5 s |
+| read the body, then `<-r.Context().Done()` | returns in 0.05 s |
+| `select` on `r.Context().Done()` or a channel closed before `srv.Close()` | returns in 0.05 s |
+
+The second row is why the obvious fix is not enough. In the reproduction,
+while the POST body was unread, Go's HTTP server did not cancel the request
+context when the client gave up. It did cancel it once the handler had read
+the body (row 3).
+
+The client code is not at fault. `doRequest` counts a failure only when the
+caller's context is still live, which is what the test checks.
+
+### Decision
+
+Fix the test, not `backplane.go`:
+* **Release the handler.** It returns on `r.Context().Done()` or on a
+  `release` channel. The test closes that channel in a deferred call that
+  runs before the deferred `srv.Close()`.
+* **Remove the timer race.** The five iterations use an already-cancelled
+  context, so `http.Client.Do` fails before sending anything.
+* **Cover the in-flight case safely.** One more iteration's deadline fires
+  while the server holds the request, which is the real-world case: a
+  caller's timeout on a hung backplane.
+
+No other test in the repository has a handler that blocks without bound.
+`selfupdate/github_test.go` sleeps a bounded 300 ms.
+
+### Plans
+
+| Plan | Covers |
+|---|---|
+| [0012-PLAN-circuit-breaker-test.md](0012-PLAN-circuit-breaker-test.md) | this revision; runs before the five plans |
