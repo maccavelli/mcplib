@@ -249,11 +249,20 @@ func TestCircuitBreaker_TripsAfter3(t *testing.T) {
 }
 
 func TestCircuitBreaker_IgnoresContextCancellation(t *testing.T) {
-	// Server that always hangs (never responds).
+	// Server that holds every request until the client gives up or the test
+	// ends. It must return: srv.Close waits for running handlers, and with the
+	// body unread the server does not cancel r.Context() when the client
+	// leaves, so release is closed (deferred, before srv.Close) as well (MADR
+	// 0012 revision 4).
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {} // block forever
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
 	}))
 	defer srv.Close()
+	defer close(release)
 
 	c := &BackplaneClient{
 		addr:       srv.Listener.Addr().String(),
@@ -264,13 +273,16 @@ func TestCircuitBreaker_IgnoresContextCancellation(t *testing.T) {
 	}
 	c.available.Store(true)
 
-	// Cancel context immediately — error is context cancellation, not network.
+	// An already-cancelled context fails before anything is sent.
 	for range 5 {
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-		time.Sleep(2 * time.Millisecond) // ensure context expires
-		_, _ = c.Generate(ctx, "hello")
+		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
+		_, _ = c.Generate(ctx, "hello")
 	}
+	// A deadline that fires while the server holds the request.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	_, _ = c.Generate(ctx, "hello")
+	cancel()
 
 	// Circuit breaker should NOT have tripped — context cancellation
 	// errors are not counted toward consecutive failures.
