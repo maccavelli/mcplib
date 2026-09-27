@@ -8,7 +8,17 @@ decision-makers: mcplib maintainers
 # Implement Remediation of the Post-0010 Debugging-Pass Defects
 
 Associated MADR: [0013-MADR-remediate-debugging-pass-findings.md](0013-MADR-remediate-debugging-pass-findings.md)
-(proposed, revision 2, 2026-09-27).
+(accepted, revision 3, 2026-09-27).
+
+> **Revision 2 of this plan (2026-09-27): rebased onto `e219e11`.** `ba92db1`
+> left `main` unbuildable; the OAuth pair's phase R1 repaired it as
+> `e219e11`. Every red run, gate, mutant, live run and diff below was
+> repeated on that base. The rebase changed three things:
+> * one import anchor in Phase 4's fix;
+> * one Phase 4 mutant, retargeted to the branch its test reaches;
+> * two Phase 4 coverage tests, added for the listing branches the
+>   repair split.
+> The owner's answers to Q1–Q4 are recorded (§0.1).
 
 This plan executes that MADR and nothing else. If execution finds a fact that
 contradicts the MADR or this plan, **stop and prompt**. Record a dated entry
@@ -18,16 +28,17 @@ then continue. Do not absorb a deviation silently, and do not widen scope.
 ## How this plan was proven
 
 Every phase below was executed on 2026-09-27, in scratch copies of the tree
-made from `git archive ca29b81`, outside the repository:
+made from `git archive e219e11`, outside the repository. The same proof
+was first made on `ca29b81` and repeated in full after the repair:
 * **Red.** Each phase's test diff was applied, and each named test was seen to
   fail on the unfixed code. Appendix A quotes each failure message.
 * **Green.** The fix diff was applied, and the full gate passed (§0.3).
-* **Mutants.** A test that cannot fail on `ca29b81` (new API, coverage or a
+* **Mutants.** A test that cannot fail on `e219e11` (new API, coverage or a
   relocated live test) was seen to fail on a named mutant instead.
 * **Live.** The live suite ran on the final tree.
 * **Diffs.** Appendix B's diffs were generated mechanically from that proof.
-  Applying them in order to a fresh `ca29b81` archive with `git apply`
-  reproduces the proven tree byte for byte: 222 files, 0 mismatches.
+  Applying them in order to a fresh `e219e11` archive with `git apply`
+  reproduces the proven tree byte for byte: 229 files, 0 mismatches.
 
 Executing this plan therefore repeats a proven sequence. It does not design
 anything.
@@ -75,13 +86,13 @@ that has been seen to fail. Specifically:
 
 ## 0. Preconditions and conventions
 
-### 0.1 Decisions this plan assumes
+### 0.1 Decisions (accepted 2026-09-27)
 
-The plan implements the MADR's recommended answers. Phase 0 records the
-reviewer's answers. **If any answer differs, stop before the phase it
-governs,** amend this plan, and have it re-approved.
+The owner accepted the MADR's recommended answers (MADR revision 3). A
+later change to any answer means stopping before the phase it governs,
+amending this plan, and having it re-approved.
 
-| Question | Assumed answer | Governs |
+| Question | Answer | Governs |
 |---|---|---|
 | Q1 | (c) per-model wire shapes | Phase 5, the `low` mappings. B9's adaptive shape is needed under every answer. |
 | Q2 | (a) `""` is each provider's documented default | Phase 5 (doc comments), Phase 7 (0010 §1 note) |
@@ -90,9 +101,12 @@ governs,** amend this plan, and have it re-approved.
 
 ### 0.2 Baseline
 
-* **Branch and base.** `main` at `ca29b81`, with this plan and its MADR as the
-  only uncommitted files. Every diff in Appendix B is against the state left
-  by the phase before it.
+* **Branch and base.** `main` at `e219e11`, or a descendant whose only
+  changes since `e219e11` are under `docs/`. Confirm that
+  `git diff --stat e219e11 HEAD -- . ':!docs'` prints nothing and the
+  working tree is clean. `ba92db1` and `6e19cdf` do not build; never start
+  from them. Every diff in Appendix B is against the state left by the
+  phase before it.
 * **Apply order.** Diffs apply strictly in order: B.1.1, B.1.2, B.2.1, … B.6.2.
   Phase 4's fix edits text that Phase 1 introduced (`catalogFrom`).
 * **Applying a diff.** Save the block to a file outside the repository and run
@@ -110,10 +124,10 @@ by itself; no pipeline sits between a check and its status.
 5. `go test -count=1 ./...`.
 6. `go test -race -count=1 ./llmprovider ./wizard`.
 
-### 0.4 Tests that cannot be red on `ca29b81`
+### 0.4 Tests that cannot be red on `e219e11`
 
 A test of new API (`ModelCatalog.Err`, the metadata cache's `failed` field)
-does not compile on `ca29b81`. A coverage test, a guard on a shape that
+does not compile on `e219e11`. A coverage test, a guard on a shape that
 already works, or a relocated live test passes there. Each is proven by a
 named mutant instead. Apply the mutant to a scratch copy of the phase's green
 tree, made from `git archive HEAD` outside the repository, **never to the
@@ -121,7 +135,7 @@ working tree**. The mutant must fail the named test at run time; a build
 failure proves nothing.
 
 One mutant is expected to **survive**: deleting the branch at
-`wizard/configure.go:297-299`. That branch is observably equivalent to
+`wizard/configure.go:309-311`. That branch is observably equivalent to
 falling through, so no test can pin it. The survival is the evidence, and is
 recorded, not treated as a defect.
 
@@ -144,14 +158,12 @@ is re-run once, and both runs are recorded (MADR D6).
   writes the message. No `-m`, no `--amend`.
 * **No push.** Nothing is pushed or tagged unless asked in the same turn.
 
-## Phase 0 — Record acceptance
+## Phase 0 — Start execution
 
-1. In the MADR, set `status: accepted`, update `date`, and record the
-   reviewer's answers to Q1–Q4 under "### 3. Four questions".
+The MADR already records the answers and `status: accepted` (revision 3).
+1. Check §0.2's base.
 2. In this plan, set `status: in-progress` and update `date`.
-3. If an answer differs from §0.1, stop: amend the governed phases, and have
-   them re-approved before executing them.
-4. Commit the two documents only (the bootstrap exception).
+3. Commit this plan only.
 
 ## Phase 1 — Ranking correctness (A1–A3)
 
@@ -255,8 +267,12 @@ is re-run once, and both runs are recorded (MADR D6).
 * **C1.** `appendPicks` skips an id already chosen, ignoring case, and the
   TextPrompter's MultiSelect counts a repeated index once.
 * **C6.** `excludedIDs` and `without` compare lower-cased ids.
-* **Coverage.** The MADR's listed gaps get tests. They pass on `ca29b81` and
-  are proven by mutants.
+* **Coverage.** The MADR's listed gaps get tests. They include both arms of
+  `discoverModels`' listing-error branch: a provider with no static catalog
+  (Ollama unreachable), and one that falls back to its static catalog (a
+  kept Grok session that cannot refresh). They also cover the static notice
+  with no cause (a Claude listing with nothing usable). Each passes on
+  `e219e11` and is proven by a mutant.
 
 **Files:**
 * `llmprovider/discovery.go`;
@@ -269,11 +285,11 @@ is re-run once, and both runs are recorded (MADR D6).
 **Steps.**
 1. Apply B.4.1.
 2. Red: `go test -count=1 -run '^(TestConfigureLLM_FallbackPicksDeduped|TestMultiSelect_RepeatedIndexCountsOnce|TestConfigureLLM_StaticCatalogNotice|TestConfigureLLM_OtherDefaultsOnlyToSameProvider|TestConfigureLLM_FallbackExclusionIgnoresCase|TestConfigureLLM_BlankModelIDRefused)$' ./wizard` (A.4). In `OtherDefaultsOnlyToSameProvider`, the "same
-   provider keeps its model" subtest passes on `ca29b81` by design, as a
+   provider keeps its model" subtest passes on `e219e11` by design, as a
    guard.
 3. Apply B.4.2.
 4. Gate.
-5. Mutants: `p4-err-dropped` (kills `TestListModelCatalog_ErrExplainsDegrade`), `p4-err-dropped-wizard` (kills `TestConfigureLLM_StaticCatalogNotice`), `p4-no-listing-warning` (kills `TestConfigureLLM_ListingErrorWarns`), `p4-empty-listing-sentinel` (kills `TestConfigureLLM_OllamaEmptyListing`), `p4-empty-listing-deleted` (must survive `TestConfigureLLM_OllamaEmptyListing`), `p4-default-row` (kills `TestConfigureLLM_DefaultRowIsExistingModel`), `p4-blank-round-nothing-left` (kills `TestConfigureLLM_BlankFallbackRoundWithNothingLeft`), `p4-fallback-no-match-silent` (kills `TestConfigureLLM_FallbackSearchNoMatches`), `p4-glob-question-literal` (kills `TestSearchModels_GlobQuestionMark`), `p4-no-label-tier` (kills `TestSearchModels_LabelSubstringTier`) (A.4).
+5. Mutants: `p4-err-dropped` (kills `TestListModelCatalog_ErrExplainsDegrade`), `p4-err-dropped-wizard` (kills `TestConfigureLLM_StaticCatalogNotice`), `p4-no-listing-warning` (kills `TestConfigureLLM_ListingErrorWarns`), `p4-no-static-listing-warning` (kills `TestConfigureLLM_ListingTokenFailureUsesStaticCatalog`), `p4-unusable-listing-silent` (kills `TestConfigureLLM_UnusableListingNotice`), `p4-empty-listing-sentinel` (kills `TestConfigureLLM_OllamaEmptyListing`), `p4-empty-listing-deleted` (must survive `TestConfigureLLM_OllamaEmptyListing`), `p4-default-row` (kills `TestConfigureLLM_DefaultRowIsExistingModel`), `p4-blank-round-nothing-left` (kills `TestConfigureLLM_BlankFallbackRoundWithNothingLeft`), `p4-fallback-no-match-silent` (kills `TestConfigureLLM_FallbackSearchNoMatches`), `p4-glob-question-literal` (kills `TestSearchModels_GlobQuestionMark`), `p4-no-label-tier` (kills `TestSearchModels_LabelSubstringTier`) (A.4).
 6. Commit.
 
 ## Phase 5 — Thinking shapes on the budget wires (B9; B1 under Q1 (c); B2 under Q2 (a))
@@ -529,7 +545,7 @@ continuing.)*
 *(Filled during execution: per phase, the commit, the red output, the gate
 output, the mutant results and the live results.)*
 
-## Appendix A — Proof record (2026-09-27, scratch copies of `ca29b81`)
+## Appendix A — Proof record (2026-09-27, scratch copies of `e219e11`)
 
 Each table quotes the failure message(s) the named test printed on the
 unfixed code. Mutant rows show the exact anchor, the replacement, and the
@@ -537,7 +553,7 @@ result.
 
 ### A.1 Phase 1 — Ranking correctness
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestListModelCatalog_DuplicateIDs` | 1 | `Recommended lists a/pro 2 times: [a/pro a/pro b/pro]`<br>`Usable lists a/pro 2 times: [a/pro a/pro b/pro]` |
 | `TestRankRecommended_SkipsDuplicateCandidates` | 1 | `ranked = [x/a x/a y/b]` |
@@ -550,7 +566,7 @@ Gate after the fix: gofmt PASS, golint-discovery.go PASS, golint-model_ranking.g
 
 ### A.2 Phase 2 — Discovery wiring
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestDiscoverModels_ListingBounded` | 7 | `GET /v1/models ran without a deadline, want one within 10s`<br>`GET /models ran without a deadline, want one within 10s`<br>`GET /api/tags ran without a deadline, want one within 10s`<br>`GET /models ran without a deadline, want one within 10s`<br>`GET /models ran without a deadline, want one within 10s`<br>`GET /models ran without a deadline, want one within 10s` |
 | `TestDiscoverModels_HonoursRankingOptions` | 4 | `ranked = [b/flash d/mid c/pro a/flash-lite e/mini f/large]`<br>`ranked = [v/no-reason a/large b/mid c/flash d/uncovered]`<br>`DiscoverModels fetched the environment's metadata URL 1 times, want 0`<br>`ranked = [qwen3.8-flash glm-5.3-flash mimo-v2.6-flash gpt-6-luna hy3 kimi-k2.6]`<br>`DiscoverModels fetched the environment's metadata URL 2 times, want 0` |
@@ -559,7 +575,7 @@ Gate after the fix: gofmt PASS, golint-discovery.go PASS, golint-discovery_wirin
 
 ### A.3 Phase 3 — Metadata on the request path
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestChatReasoningEffort_FailureBackoff` | 1 | `3 thinking calls made 3 metadata fetches, want 1` |
 | `TestChatReasoningEffort_LookupHasDeadline` | 1 | `metadata lookup ran without a deadline, want one within 5s` |
@@ -576,7 +592,7 @@ Mutants:
 
 ### A.4 Phase 4 — Wizard and the listing's cause
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestConfigureLLM_FallbackPicksDeduped` | 1 | `Fallbacks = ["claude-sonnet-5" "claude-sonnet-5" "claude-sonnet-4-6"], want ["claude-sonnet-5" "claude-sonnet-4-6"]` |
 | `TestMultiSelect_RepeatedIndexCountsOnce` | 1 | `MultiSelect(1,1,2) = [0 0 1], want [0 1]` |
@@ -593,7 +609,9 @@ Mutants:
 |---|---|---|---|---|
 | `p4-err-dropped` | `llmprovider/discovery.go` | `` \t\tcat.Err = fetchErr\n `` → `` \t\tcat.Err = nil\n `` | `TestListModelCatalog_ErrExplainsDegrade` | killed: `failed listing: Live=false Err=<nil>, want Live false and an HTTP 500 cause` |
 | `p4-err-dropped-wizard` | `llmprovider/discovery.go` | `` \t\tcat.Err = fetchErr\n `` → `` \t\tcat.Err = nil\n `` | `TestConfigureLLM_StaticCatalogNotice` | killed: `static notice seen 0 times, want 1: [live model listing for OpenCode Zen is unavailable; search covers the built-in catalog only]` |
-| `p4-no-listing-warning` | `wizard/configure.go` | `` \t\tp.Notify(LevelWarn, \"could not list models for %s (%v); using the built-in catalog\", d.Label, err)\n `` → `` \t\t_ = err\n `` | `TestConfigureLLM_ListingErrorWarns` | killed: `listing warning seen 0 times, want 1: [cannot reach http://127.0.0.1:<port>: could not reach Ollama at http://127.0.0.1:<port>: Get "http://127.0.0.1:<port>/api` |
+| `p4-no-listing-warning` | `wizard/configure.go` | `` \t\t\tp.Notify(LevelWarn, \"could not list models for %s (%v)\", d.Label, err)\n `` → `` \t\t\t_ = err\n `` | `TestConfigureLLM_ListingErrorWarns` | killed: `listing warning seen 0 times, want 1: [cannot reach http://127.0.0.1:<port>: could not reach Ollama at http://127.0.0.1:<port>: Get "http://127.0.0.1:<port>/api` |
+| `p4-no-static-listing-warning` | `wizard/configure.go` | `` \t\tp.Notify(LevelWarn, \"could not list models for %s (%v); using the built-in catalog\", d.Label, err)\n `` → `` \t\t_ = err\n `` | `TestConfigureLLM_ListingTokenFailureUsesStaticCatalog` | killed: `listing warning seen 0 times, want 1: []` |
+| `p4-unusable-listing-silent` | `wizard/configure.go` | `` \tdefault:\n\t\tp.Notify(LevelInfo, \"live model listing for %s is unavailable; search covers the built-in catalog only\", d.Label)\n `` → `` \tdefault:\n `` | `TestConfigureLLM_UnusableListingNotice` | killed: `notice "live model listing for Claude (Anthropic) is unavailable; search covers the built-in catalog only" seen 0 times, want 1: []` |
 | `p4-empty-listing-sentinel` | `wizard/configure.go` | `` \tif len(cat.Recommended) == 0 {\n\t\treturn fallback\n\t}\n `` → `` \tif len(cat.Recommended) == 0 {\n\t\treturn llmprovider.ModelCatalog{Recommended: []string{\"sentinel\"}}\n\t}\n `` | `TestConfigureLLM_OllamaEmptyListing` | killed: `ConfigureLLM: model="" err=select model: fakePrompter: unexpected Select("Choose a Ollama (local) model:"), want llama3` |
 | `p4-empty-listing-deleted` | `wizard/configure.go` | `` \tif len(cat.Recommended) == 0 {\n\t\treturn fallback\n\t}\n `` → *(deleted)* | `TestConfigureLLM_OllamaEmptyListing` | survived (as required) |
 | `p4-default-row` | `wizard/model_select.go` | `` \t\t\tdefaultIdx, listed = i, true\n `` → `` \t\t\tdefaultIdx, listed = i-i, true\n `` | `TestConfigureLLM_DefaultRowIsExistingModel` | killed: `default = 0, model = "claude-sonnet-4-6"; want 2 and "claude-sonnet-4-6"` |
@@ -604,7 +622,7 @@ Mutants:
 
 ### A.5 Phase 5 — Thinking shapes
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestThinkingWire_Claude` | 6 | `thinking = map[budget_tokens:4096 type:enabled], want map[type:adaptive]`<br>`output_config = <nil>, want map[effort:low]`<br>`thinking = map[budget_tokens:4096 type:enabled], want map[type:adaptive]`<br>`thinking = map[budget_tokens:9000 type:enabled], want map[type:adaptive]`<br>`max_tokens = 13096, want 8192`<br>`thinking = map[budget_tokens:4096 type:enabled], want map[budget_tokens:1024 type:enabled]`<br>`thinking = map[budget_tokens:4096 type:enabled], want map[budget_tokens:1024 type:enabled]` |
 | `TestThinkingWire_Gemini` | 3 | `thinkingConfig = map[thinkingBudget:-1], want map[thinkingLevel:low]`<br>`thinkingConfig = map[thinkingBudget:-1], want map[thinkingBudget:1024]` |
@@ -622,7 +640,7 @@ Mutants:
 
 ### A.6 Phase 6 — Static Claude catalog and live tests
 
-| Test | Failed (with subtests) | Failure on `ca29b81` |
+| Test | Failed (with subtests) | Failure on `e219e11` |
 |---|---|---|
 | `TestLive_StaticClaudeServed` | 3 | `claude-3-5-haiku-latest: llm: invalid request: claude HTTP 404`<br>`claude-sonnet-4-20250514: llm: invalid request: claude HTTP 404` |
 
@@ -639,13 +657,14 @@ Mutants:
 ### A.7 Live runs on the proven tree
 
 * Phase 5 live step: 13 PASS, 0 FAIL, 0 SKIP.
-* Full live suite on the final tree: 47 PASS, 2 FAIL, 3 SKIP; FAIL: `TestLive_OpencodeChatReasoningEffort`, `TestLive_OpencodeChatReasoningEffort/glm-5.3-flash`; SKIP: `TestLive_KiloChatCompletions`, `TestLive_KiloToolCall`, `TestLive_KiloReasoningSpelling`.
-  The two FAIL lines are one subtest and its parent: `http2: timeout awaiting response headers` (MADR D6). Re-run twice on the final tree and twice on `ca29b81`, the test passed all four times. The SKIPs are Kilo 429s (MADR D4).
+* Phase 6 live step: 8 PASS, 0 FAIL, 0 SKIP.
+* Full live suite on the final tree: 51 PASS, 0 FAIL, 1 SKIP; SKIP: `TestLive_KiloChatCompletions`.
+  The SKIP is a Kilo 429 (MADR D4). The one transient failure of the `ca29b81` proof (MADR D6) did not recur.
 
 ### A.8 Coverage and reproduction
 
-* Before the plan, a coverage profile at `ca29b81` (`-coverpkg` over `llmprovider` and `wizard`) showed zero hits on every block the MADR lists under *Coverage gaps*.
-* Applying Appendix B in order to a fresh `ca29b81` archive with `git apply` reproduced the proven tree: 222 files compared, 0 mismatches, 0 extra files.
+* Before the plan, a coverage profile at `e219e11` (`-coverpkg` over `llmprovider` and `wizard`) showed zero hits on every block the MADR lists as uncovered under *Coverage gaps*. On the final tree every one of those blocks is hit, including both arms of the listing-error branch.
+* Applying Appendix B in order to a fresh `e219e11` archive with `git apply` reproduced the proven tree: 229 files compared, 0 mismatches, 0 extra files.
 * A clean end-to-end re-run of red and green for Phases 1–6 on 2026-09-27 ended `FINAL=OK`.
 
 ## Appendix B — Diffs
@@ -775,7 +794,7 @@ new file mode 100644
 diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
 --- a/llmprovider/discovery.go
 +++ b/llmprovider/discovery.go
-@@ -28,8 +28,8 @@
+@@ -33,8 +33,8 @@
  	// Recommended is what ListAvailableModels returns: at most
  	// MaxListedModels ids, curated against the static catalog.
  	Recommended []string
@@ -786,7 +805,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  	Usable []string
  	// Live reports whether Usable came from the provider's listing rather
  	// than the static catalog.
-@@ -91,6 +91,7 @@
+@@ -96,6 +96,7 @@
  // Ollama has always had: a failed fetch, or one that yields no usable id,
  // substitutes the static catalog.
  func catalogFrom(usable []string, fetchErr error, static []string, curate func([]string) []string) ModelCatalog {
@@ -794,7 +813,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  	if fetchErr != nil || len(usable) == 0 {
  		return staticCatalog(static)
  	}
-@@ -99,6 +100,19 @@
+@@ -104,6 +105,19 @@
  		return staticCatalog(static)
  	}
  	return ModelCatalog{Recommended: recommended, Usable: usable, Live: true}
@@ -1054,7 +1073,7 @@ new file mode 100644
 diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
 --- a/llmprovider/discovery.go
 +++ b/llmprovider/discovery.go
-@@ -23,6 +23,11 @@
+@@ -28,6 +28,11 @@
  	claudeListPageLimit = "1000"
  )
  
@@ -1066,7 +1085,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  // ModelCatalog is the result of one model listing, viewed two ways.
  type ModelCatalog struct {
  	// Recommended is what ListAvailableModels returns: at most
-@@ -64,7 +69,7 @@
+@@ -69,7 +74,7 @@
  func ListModelCatalogWithSource(ctx context.Context, providerName string, src TokenSource, opts ...ProviderOption) (ModelCatalog, error) {
  	cfg := ApplyOptions(opts)
  
@@ -1074,8 +1093,8 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
 +	ctx, cancel := context.WithTimeout(ctx, modelListingTimeout)
  	defer cancel()
  	if strings.EqualFold(providerName, ProviderOpenAI) && isChatGPTTokenSource(src) {
- 		return staticCatalog(slices.Clone(StaticOpenAIChatGPT)), nil
-@@ -77,6 +82,14 @@
+ 		return listChatGPTModels(ctx, src, cfg)
+@@ -82,6 +87,14 @@
  		return ModelCatalog{}, fmt.Errorf("model listing: acquire token: %w", err)
  	}
  	return modelCatalogFor(ctx, providerName, token.Value, cfg)
@@ -1090,7 +1109,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // recommendedOf adapts a catalog result to the ListAvailableModels contract.
-@@ -157,7 +170,9 @@
+@@ -262,7 +275,9 @@
  
  // listGeminiModels lists Gemini models and returns a short curated production set.
  func listGeminiModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
@@ -1101,7 +1120,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // geminiModelsPage is one page of Gemini's GET {base}/models.
-@@ -253,7 +268,9 @@
+@@ -358,7 +373,9 @@
  // listClaudeModels uses Anthropic's Models API when available; otherwise returns
  // the curated static catalog (Anthropic historically lacked a public list endpoint).
  func listClaudeModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
@@ -1112,7 +1131,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // claudeModelsPage is one page of Anthropic's GET /v1/models.
-@@ -331,7 +348,9 @@
+@@ -436,7 +453,9 @@
  
  // listOllamaModels fetches installed models from a local Ollama instance.
  func listOllamaModels(ctx context.Context, cfg ProviderConfig) ([]string, error) {
@@ -1123,7 +1142,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // ollamaCatalog lists every installed model. Ollama has no static catalog, so
-@@ -483,7 +502,9 @@
+@@ -588,7 +607,9 @@
  // owned_by "opencode"), so route selection cannot be derived from it; see
  // opencode_route.go.
  func listOpencodeModels(ctx context.Context, gateway, apiKey string, cfg ProviderConfig) ([]string, error) {
@@ -1134,7 +1153,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // opencodeCatalog lists one OpenCode gateway. An unknown gateway is an error,
-@@ -536,7 +557,9 @@
+@@ -641,7 +662,9 @@
  // (tokens/sec) and first_token_latency_ms per provider offering. The sorted
  // order is handed to curateFromCatalog with a nil rankFn, which preserves it.
  func listHuggingFaceModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
@@ -1145,7 +1164,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // fetchHuggingFaceUsable returns the usable router models, fastest first: input
-@@ -727,7 +750,9 @@
+@@ -832,7 +855,9 @@
  // Models flagged mayTrainOnYourPrompts are excluded. That is a POLICY decision,
  // not a capability filter — see isUsableKiloModel's comment.
  func listKiloModels(ctx context.Context, apiKey string, cfg ProviderConfig) ([]string, error) {
@@ -1577,15 +1596,18 @@ diff --git a/wizard/model_select_edge_test.go b/wizard/model_select_edge_test.go
 new file mode 100644
 --- /dev/null
 +++ b/wizard/model_select_edge_test.go
-@@ -0,0 +1,218 @@
+@@ -0,0 +1,273 @@
 +package wizard
 +
 +import (
 +	"context"
++	"io"
 +	"net/http"
 +	"net/http/httptest"
 +	"slices"
++	"strings"
 +	"testing"
++	"time"
 +
 +	"github.com/maccavelli/mcplib/llmprovider"
 +)
@@ -1796,10 +1818,62 @@ new file mode 100644
 +		t.Errorf("no-match warning seen %d times, want 1: %v", n, f.seenNotify)
 +	}
 +}
++
++// TestConfigureLLM_ListingTokenFailureUsesStaticCatalog covers configure.go's
++// listing-error branch for a provider that has a static catalog: a kept Grok
++// session that cannot refresh fails the listing, so the wizard warns and
++// offers the built-in catalog.
++func TestConfigureLLM_ListingTokenFailureUsesStaticCatalog(t *testing.T) {
++	withEnv(t, nil)
++	static := llmprovider.StaticModels(llmprovider.ProviderGrok)
++	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), 1, 0}, confirms: []bool{true}}
++	res, err := ConfigureLLM(context.Background(), f, Options{
++		Existing: Result{
++			Provider:    llmprovider.ProviderGrok,
++			Kind:        CredOAuth,
++			AccessToken: "expired-access-abcd",
++			TokenExpiry: time.Now().Add(-time.Hour),
++		},
++		TokenStore: newMemoryTokenStore(),
++		Discover:   true,
++	})
++	if err != nil {
++		t.Fatalf("ConfigureLLM: %v", err)
++	}
++	if res.Model != static[0] {
++		t.Errorf("Model = %q, want the first built-in model %q", res.Model, static[0])
++	}
++	if n := countContaining(f.seenNotify, "no refresh token); using the built-in catalog"); n != 1 {
++		t.Errorf("listing warning seen %d times, want 1: %v", n, f.seenNotify)
++	}
++}
++
++// TestConfigureLLM_UnusableListingNotice covers the static-catalog notice with
++// no cause: a listing that succeeds but offers no usable model degrades
++// without a ModelCatalog.Err.
++func TestConfigureLLM_UnusableListingNotice(t *testing.T) {
++	withEnv(t, nil)
++	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
++		return &http.Response{
++			StatusCode: http.StatusOK,
++			Header:     make(http.Header),
++			Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"not-a-claude-model"}],"has_more":false}`)),
++			Request:    r,
++		}, nil
++	})}
++	f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderClaude), 0}, secrets: []string{testKey}}
++	if _, err := ConfigureLLM(context.Background(), f, Options{Discover: true, HTTPClient: client}); err != nil {
++		t.Fatalf("ConfigureLLM: %v", err)
++	}
++	want := "live model listing for Claude (Anthropic) is unavailable; search covers the built-in catalog only"
++	if n := countContaining(f.seenNotify, want); n != 1 {
++		t.Errorf("notice %q seen %d times, want 1: %v", want, n, f.seenNotify)
++	}
++}
 diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
 --- a/wizard/model_select_test.go
 +++ b/wizard/model_select_test.go
-@@ -240,7 +240,8 @@
+@@ -241,7 +241,8 @@
  	if err != nil {
  		t.Fatalf("ConfigureLLM: %v", err)
  	}
@@ -1848,7 +1922,7 @@ new file mode 100644
 diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
 --- a/llmprovider/discovery.go
 +++ b/llmprovider/discovery.go
-@@ -39,6 +39,10 @@
+@@ -44,6 +44,10 @@
  	// Live reports whether Usable came from the provider's listing rather
  	// than the static catalog.
  	Live bool
@@ -1859,7 +1933,7 @@ diff --git a/llmprovider/discovery.go b/llmprovider/discovery.go
  }
  
  // ListAvailableModels fetches models from a provider listing API when available,
-@@ -106,7 +110,9 @@
+@@ -111,7 +115,9 @@
  func catalogFrom(usable []string, fetchErr error, static []string, curate func([]string) []string) ModelCatalog {
  	usable = uniqueIDs(usable)
  	if fetchErr != nil || len(usable) == 0 {
@@ -1875,8 +1949,8 @@ diff --git a/wizard/configure.go b/wizard/configure.go
 +++ b/wizard/configure.go
 @@ -5,6 +5,7 @@
  	"fmt"
+ 	"net/http"
  	"os"
- 	"slices"
 +	"strings"
  	"time"
  
@@ -1893,15 +1967,15 @@ diff --git a/wizard/configure.go b/wizard/configure.go
  
  // Result is what ConfigureLLM produces. It is deliberately data, not config:
  // each consumer persists it in its own schema. Unifying configuration storage
-@@ -50,6 +52,7 @@
- 	// the listing fails or is empty, the static catalog is used.
+@@ -51,6 +53,7 @@
+ 	// session has no static catalog, so the user is asked for a model id.
  	Discover bool
  	// DiscoverLimit bounds the listing call. Zero uses defaultDiscoverLimit.
 +	// The lister caps every listing at 10 s, so a larger value has no effect.
  	DiscoverLimit time.Duration
  	// NeedFallbacks collects additional models after the primary.
  	NeedFallbacks bool
-@@ -140,10 +143,11 @@
+@@ -143,10 +146,11 @@
  		// Ollama with nothing installed, or a provider whose listing failed
  		// and which has no static catalog. Let the user type an id rather
  		// than dead-ending the wizard.
@@ -1914,7 +1988,7 @@ diff --git a/wizard/configure.go b/wizard/configure.go
  		if manual == "" {
  			// Returning Result{Model: ""} would hand the caller a
  			// configuration that cannot generate anything.
-@@ -297,7 +301,12 @@
+@@ -309,7 +313,12 @@
  	if len(cat.Recommended) == 0 {
  		return fallback
  	}
@@ -2761,8 +2835,8 @@ new file mode 100644
 diff --git a/llmprovider/models_catalog.go b/llmprovider/models_catalog.go
 --- a/llmprovider/models_catalog.go
 +++ b/llmprovider/models_catalog.go
-@@ -51,14 +51,13 @@
- 		"gpt-5.3-codex",
+@@ -44,14 +44,13 @@
+ 		"o4-mini",
  	}
  
 -	// StaticClaude: current aliases first, then widely available older IDs.
@@ -2781,7 +2855,7 @@ diff --git a/llmprovider/models_catalog.go b/llmprovider/models_catalog.go
 diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
 --- a/wizard/model_select_test.go
 +++ b/wizard/model_select_test.go
-@@ -82,9 +82,9 @@
+@@ -83,9 +83,9 @@
  	if !slices.Contains(f.seenInput, searchModelsPrompt) {
  		t.Errorf("inputs = %v, want the search prompt", f.seenInput)
  	}
@@ -2794,7 +2868,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  	}
  }
  
-@@ -129,7 +129,7 @@
+@@ -130,7 +130,7 @@
  func TestConfigureLLM_SearchAgain(t *testing.T) {
  	withEnv(t, nil)
  	f := &fakePrompter{
@@ -2803,7 +2877,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  		inputs: []string{"haiku", ""}, secrets: []string{testKey},
  	}
  	res, err := ConfigureLLM(context.Background(), f, Options{})
-@@ -138,7 +138,6 @@
+@@ -139,7 +139,6 @@
  	}
  	want := []string{
  		llmprovider.ModelLabel(llmprovider.ProviderClaude, "claude-haiku-4-5"),
@@ -2811,7 +2885,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  		searchAgainLabel, otherModelLabel,
  	}
  	if got := labels(f.seenSelectItems[1]); !slices.Equal(got, want) {
-@@ -152,7 +151,7 @@
+@@ -153,7 +152,7 @@
  func TestConfigureLLM_OtherFromSearchResults(t *testing.T) {
  	withEnv(t, nil)
  	f := &fakePrompter{
@@ -2820,7 +2894,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  		inputs: []string{"haiku", "my-id"}, secrets: []string{testKey},
  	}
  	res, err := ConfigureLLM(context.Background(), f, Options{})
-@@ -188,7 +187,8 @@
+@@ -189,7 +188,8 @@
  
  func TestConfigureLLM_CurrentModelListed(t *testing.T) {
  	withEnv(t, nil)
@@ -2830,7 +2904,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  	res, err := ConfigureLLM(context.Background(), f, Options{
  		Existing: Result{Provider: llmprovider.ProviderClaude, Model: "claude-opus-5"},
  	})
-@@ -196,11 +196,11 @@
+@@ -197,11 +197,11 @@
  		t.Fatalf("ConfigureLLM: %v", err)
  	}
  	menu := f.seenSelectItems[1]
@@ -2847,7 +2921,7 @@ diff --git a/wizard/model_select_test.go b/wizard/model_select_test.go
  	}
  	if res.Model != "claude-opus-5" {
  		t.Errorf("Model = %q, want claude-opus-5", res.Model)
-@@ -216,8 +216,8 @@
+@@ -217,8 +217,8 @@
  		t.Fatalf("ConfigureLLM: %v", err)
  	}
  	menu := f.seenSelectItems[1]
