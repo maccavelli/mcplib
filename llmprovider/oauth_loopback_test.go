@@ -282,7 +282,7 @@ func TestLoginBrowserOAuth_OpenAICompletesCallbackAndExchange(t *testing.T) {
 	if tokenForm.Get("code") != "browser-secret" || tokenForm.Get("code_verifier") == "" {
 		t.Fatalf("token form = %v", tokenForm)
 	}
-	if got := tokenForm.Get("redirect_uri"); !strings.HasPrefix(got, "http://localhost:") || !strings.HasSuffix(got, "/auth/callback") {
+	if got := tokenForm.Get("redirect_uri"); !strings.HasPrefix(got, "http://127.0.0.1:") || !strings.HasSuffix(got, "/auth/callback") {
 		t.Fatalf("redirect_uri = %q, want localhost OpenAI callback", got)
 	}
 }

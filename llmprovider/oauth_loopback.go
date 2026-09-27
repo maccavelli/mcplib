@@ -247,7 +247,9 @@ func browserListener(provider string) ([]net.Listener, string, string, error) {
 		if err != nil {
 			return nil, "", "", err
 		}
-		return listeners, fmt.Sprintf("http://localhost:%d/auth/callback", port), "/auth/callback", nil
+		// 127.0.0.1, as Codex redirects with the same client id since
+		// 4b97832cfb (login/src/server.rs:193); MADR 0012 §5.3.
+		return listeners, fmt.Sprintf("http://127.0.0.1:%d/auth/callback", port), "/auth/callback", nil
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
