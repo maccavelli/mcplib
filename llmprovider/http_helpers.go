@@ -22,7 +22,11 @@ func closeResponseBody(resp *http.Response) {
 // Shared by providers using the Responses API envelope (OpenAI, Grok).
 func decodeResponsesAPIOutput(body io.Reader) (*Response, error) {
 	var raw struct {
-		ID     string `json:"id"`
+		ID                string `json:"id"`
+		Status            string `json:"status"`
+		IncompleteDetails struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
 		Output []struct {
 			Type    string `json:"type"`
 			Content []struct {
@@ -40,6 +44,14 @@ func decodeResponsesAPIOutput(body io.Reader) (*Response, error) {
 	}
 	if err := json.NewDecoder(body).Decode(&raw); err != nil {
 		return nil, err
+	}
+	// A truncated answer is an error, never an empty success (MADR 0012 §1.5).
+	if raw.Status == "incomplete" {
+		reason := raw.IncompleteDetails.Reason
+		if reason == "" {
+			reason = "unspecified"
+		}
+		return nil, &IncompleteError{Reason: reason}
 	}
 
 	result := &Response{ID: raw.ID}

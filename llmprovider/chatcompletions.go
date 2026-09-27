@@ -105,7 +105,8 @@ func decodeChatCompletionsResponse(body io.Reader) (*Response, error) {
 	var raw struct {
 		ID      string `json:"id"`
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Role             string `json:"role"`
 				Content          string `json:"content"`
 				ReasoningContent string `json:"reasoning_content"`
@@ -128,9 +129,14 @@ func decodeChatCompletionsResponse(body io.Reader) (*Response, error) {
 	}
 
 	msg := raw.Choices[0].Message
+	finish := raw.Choices[0].FinishReason
+	// A tool call cut by the token limit has unusable arguments (MADR 0012 §1.5).
+	if finish == finishReasonLength && len(msg.ToolCalls) > 0 {
+		return nil, &IncompleteError{Reason: finishReasonLength}
+	}
 	// The response id is not a resumable conversation handle on any gateway in
 	// this package, so it is carried for logging only.
-	result := &Response{ID: raw.ID}
+	result := &Response{ID: raw.ID, FinishReason: finish}
 
 	reasoning := msg.ReasoningContent
 	if reasoning == "" {

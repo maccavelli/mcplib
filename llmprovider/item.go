@@ -59,6 +59,11 @@ type Response struct {
 
 	// Output contains the typed items returned by the model.
 	Output []Item
+
+	// FinishReason is the Chat Completions finish_reason, e.g. "stop" or
+	// "length"; a length-truncated text answer keeps its text and reports
+	// it here (MADR 0012 §1.5). Empty where the service does not report one.
+	FinishReason string
 }
 
 // OutputText returns the concatenation of all MessageItem texts in Output,
