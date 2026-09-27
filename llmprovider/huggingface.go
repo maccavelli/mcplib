@@ -168,15 +168,14 @@ func (p *HuggingFaceProvider) doGenerateItems(ctx context.Context, input []Item,
 	return decodeChatCompletionsResponse(limitedBody)
 }
 
-// DiscoverModels returns curated router models, with a short health probe.
-// Falls back to the static catalog.
+// DiscoverModels returns live router models with a short health probe.
 func (p *HuggingFaceProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 	listed, err := listHuggingFaceModels(ctx, p.apiKey, ProviderConfig{
 		HTTPClient: p.client,
 		BaseURL:    p.baseURL,
 	})
 	if err != nil || len(listed) == 0 {
-		listed = StaticModels(ProviderHuggingFace)
+		return listed, err
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

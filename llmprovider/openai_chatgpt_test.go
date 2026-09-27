@@ -92,6 +92,32 @@ func TestOpenAI_ChatGPTSetsAccountHeader(t *testing.T) {
 	}
 }
 
+func TestOpenAI_ChatGPTSetsOriginatorHeader(t *testing.T) {
+	t.Parallel()
+
+	var originator string
+	client := &http.Client{Transport: openAITestRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		originator = request.Header.Get(openAIOriginatorHeader)
+		return openAITestHTTPResponse(request, http.StatusOK, openAITestResponse), nil
+	})}
+	session := &OAuthSession{
+		Issuer:  DefaultOpenAIIssuer,
+		Access:  "sess",
+		Refresh: "refresh",
+		Expiry:  time.Now().Add(time.Hour),
+	}
+	provider, err := NewOpenAIWithSource(session, "gpt-5.4-mini", WithHTTPClient(client))
+	if err != nil {
+		t.Fatalf("NewOpenAIWithSource() error = %v", err)
+	}
+	if _, err := provider.Generate(context.Background(), "hello"); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if originator != openAIOriginatorValue {
+		t.Fatalf("originator = %q, want %q", originator, openAIOriginatorValue)
+	}
+}
+
 func TestOpenAI_ChatGPTSetsResidencyHeader(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,6 @@
 package llmprovider
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -207,13 +206,6 @@ func TestStaticModels(t *testing.T) {
 	}
 	if StaticModels("unknown") != nil {
 		t.Errorf("StaticModels('unknown') should return nil")
-	}
-}
-
-func TestStaticOpenAIChatGPTCatalog(t *testing.T) {
-	want := []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"}
-	if !slices.Equal(StaticOpenAIChatGPT, want) {
-		t.Fatalf("StaticOpenAIChatGPT = %v, want %v", StaticOpenAIChatGPT, want)
 	}
 }
 

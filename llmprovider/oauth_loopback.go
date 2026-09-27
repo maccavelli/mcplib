@@ -90,7 +90,7 @@ func LoginBrowserOAuth(ctx context.Context, provider string, opts OAuthFlowOptio
 		return nil, fmt.Errorf("oauth: generate state: %w", err)
 	}
 
-	listener, redirectURI, callbackPath, err := browserListener(config.provider)
+	listeners, redirectURI, callbackPath, err := browserListener(config.provider)
 	if err != nil {
 		return nil, err
 	}
@@ -98,29 +98,18 @@ func LoginBrowserOAuth(ctx context.Context, provider string, opts OAuthFlowOptio
 	defer cancel()
 	result := make(chan oauthCallbackResult, 1)
 	handler := oauthCallbackHandler(callbackPath, state, result)
-	server := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
 	serveErrors := make(chan error, 1)
-	go func() {
-		serveErr := server.Serve(listener)
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			serveErrors <- fmt.Errorf("oauth: callback server: %w", serveErr)
-		}
-	}()
-	defer func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
-		defer shutdownCancel()
-		ignoreOAuthError(server.Shutdown(shutdownCtx))
-	}()
+	shutdown := serveCallbackListeners(handler, listeners, serveErrors)
+	defer shutdown()
 
 	authorizeURL, err := buildAuthorizeURL(config, endpoints.Authorization, redirectURI, pkce.challenge, state)
 	if err != nil {
 		return nil, err
 	}
 	if config.openURL != nil {
-		ignoreOAuthError(config.openURL(authorizeURL))
+		go func() {
+			ignoreOAuthError(config.openURL(authorizeURL))
+		}()
 	}
 
 	inputCancel := func() {}
@@ -249,13 +238,13 @@ func oauthEndpointsFor(ctx context.Context, config oauthFlowConfig) (oauthEndpoi
 	return discovered, nil
 }
 
-func browserListener(provider string) (net.Listener, string, string, error) {
+func browserListener(provider string) ([]net.Listener, string, string, error) {
 	if provider == ProviderOpenAI {
-		listener, port, err := listenFirstAvailable("127.0.0.1", openaiLoopbackPorts)
+		listeners, port, err := listenOpenAILoopback(openaiLoopbackPorts)
 		if err != nil {
 			return nil, "", "", err
 		}
-		return listener, fmt.Sprintf("http://localhost:%d/auth/callback", port), "/auth/callback", nil
+		return listeners, fmt.Sprintf("http://localhost:%d/auth/callback", port), "/auth/callback", nil
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -267,7 +256,47 @@ func browserListener(provider string) (net.Listener, string, string, error) {
 		return nil, "", "", errors.New("oauth: Grok callback listener has an unexpected address type")
 	}
 	port := address.Port
-	return listener, fmt.Sprintf("http://127.0.0.1:%d/callback", port), "/callback", nil
+	return []net.Listener{listener}, fmt.Sprintf("http://127.0.0.1:%d/callback", port), "/callback", nil
+}
+
+func listenOpenAILoopback(ports []int) ([]net.Listener, int, error) {
+	var failures []error
+	for _, port := range ports {
+		listeners, err := listenLoopbackBothFamilies(port)
+		if err == nil {
+			return listeners, port, nil
+		}
+		failures = append(failures, err)
+	}
+	return nil, 0, fmt.Errorf("oauth: registered callback ports unavailable; use device-code login: %w", errors.Join(failures...))
+}
+
+func listenLoopbackBothFamilies(port int) ([]net.Listener, error) {
+	portText := fmt.Sprintf("%d", port)
+	v4, err4 := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", portText))
+	v6, err6 := net.Listen("tcp6", net.JoinHostPort("::1", portText))
+	if err4 != nil && err6 != nil {
+		return nil, errors.Join(err4, err6)
+	}
+	if err4 != nil && isAddrInUse(err4) {
+		closeCallbackListeners(v6)
+		return nil, err4
+	}
+	if err6 != nil && isAddrInUse(err6) {
+		closeCallbackListeners(v4)
+		return nil, err6
+	}
+	listeners := make([]net.Listener, 0, 2)
+	if err4 == nil {
+		listeners = append(listeners, v4)
+	}
+	if err6 == nil {
+		listeners = append(listeners, v6)
+	}
+	if len(listeners) == 0 {
+		return nil, errors.Join(err4, err6)
+	}
+	return listeners, nil
 }
 
 func listenFirstAvailable(host string, ports []int) (net.Listener, int, error) {
@@ -280,6 +309,50 @@ func listenFirstAvailable(host string, ports []int) (net.Listener, int, error) {
 		failures = append(failures, err)
 	}
 	return nil, 0, fmt.Errorf("oauth: registered callback ports unavailable; use device-code login: %w", errors.Join(failures...))
+}
+
+func serveCallbackListeners(handler http.Handler, listeners []net.Listener, serveErrors chan<- error) func() {
+	servers := make([]*http.Server, 0, len(listeners))
+	for _, listener := range listeners {
+		server := &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		servers = append(servers, server)
+		go func(srv *http.Server, ln net.Listener) {
+			serveErr := srv.Serve(ln)
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				select {
+				case serveErrors <- fmt.Errorf("oauth: callback server: %w", serveErr):
+				default:
+				}
+			}
+		}(server, listener)
+	}
+	return func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+		defer shutdownCancel()
+		for _, server := range servers {
+			ignoreOAuthError(server.Shutdown(shutdownCtx))
+		}
+	}
+}
+
+func closeCallbackListeners(listeners ...net.Listener) {
+	for _, listener := range listeners {
+		if listener != nil {
+			ignoreOAuthError(listener.Close())
+		}
+	}
+}
+
+func isAddrInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "only one usage of each socket address")
 }
 
 func buildAuthorizeURL(config oauthFlowConfig, endpoint, redirectURI, challenge, state string) (string, error) {
@@ -298,7 +371,7 @@ func buildAuthorizeURL(config oauthFlowConfig, endpoint, redirectURI, challenge,
 		query.Set("scope", openAIOAuthScopes)
 		query.Set("id_token_add_organizations", "true")
 		query.Set("codex_cli_simplified_flow", "true")
-		query.Set("originator", "mcplib")
+		query.Set(openAIOriginatorHeader, openAIOriginatorValue)
 	} else {
 		nonce, nonceErr := randomBase64URL(32)
 		if nonceErr != nil {
@@ -318,6 +391,10 @@ func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult)
 		query := request.URL.Query()
 		if query.Get("state") != state {
 			http.Error(w, "State mismatch", http.StatusBadRequest)
+			select {
+			case result <- oauthCallbackResult{err: errors.New("oauth: callback state mismatch")}:
+			default:
+			}
 			return
 		}
 		if oauthError := query.Get("error"); oauthError != "" {
@@ -331,6 +408,10 @@ func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult)
 		code := query.Get("code")
 		if code == "" {
 			http.Error(w, "Missing authorization code", http.StatusBadRequest)
+			select {
+			case result <- oauthCallbackResult{err: errors.New("oauth: callback URL missing authorization code")}:
+			default:
+			}
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

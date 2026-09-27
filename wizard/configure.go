@@ -3,6 +3,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"time"
@@ -47,7 +48,7 @@ type Options struct {
 	// variable.
 	AllowEnv bool
 	// Discover queries the provider's live model listing. When false, or when
-	// the listing fails or is empty, the static catalog is used.
+	// the listing fails or is empty, the user is asked to enter a model id.
 	Discover bool
 	// DiscoverLimit bounds the listing call. Zero uses defaultDiscoverLimit.
 	DiscoverLimit time.Duration
@@ -63,6 +64,8 @@ type Options struct {
 	LookupEnv func(string) string
 	// TokenStore persists sessions created by browser, device-code, and import flows.
 	TokenStore llmprovider.TokenStore
+	// HTTPClient is used for live model listing. Nil uses the package default.
+	HTTPClient *http.Client
 	// OpenURL opens an OAuth authorization URL. Nil reports the URL through Prompter.
 	OpenURL func(string) error
 	// Orchestrated overrides process ownership detection when non-nil.
@@ -288,6 +291,13 @@ func discoverModels(
 	opts := []llmprovider.ProviderOption{llmprovider.WithModelProfile(o.Profile)}
 	if res.BaseURL != "" {
 		opts = append(opts, llmprovider.WithBaseURL(res.BaseURL))
+	}
+	baseURL := res.BaseURL
+	if baseURL == "" {
+		baseURL = o.Existing.BaseURL
+	}
+	if baseURL != "" {
+		opts = append(opts, llmprovider.WithBaseURL(baseURL))
 	}
 	cat, err := llmprovider.ListModelCatalogWithSource(dCtx, d.ID, source, opts...)
 	if err != nil {

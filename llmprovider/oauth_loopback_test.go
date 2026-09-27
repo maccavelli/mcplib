@@ -52,8 +52,6 @@ func TestListenFirstAvailable_ErrorsWhenAllBusy(t *testing.T) {
 }
 
 func TestOpenAILoopbackPortsAre1455Then1457(t *testing.T) {
-	t.Parallel()
-
 	want := []int{1455, 1457}
 	if !reflect.DeepEqual(openaiLoopbackPorts, want) {
 		t.Fatalf("openaiLoopbackPorts = %v, want %v", openaiLoopbackPorts, want)
@@ -114,8 +112,53 @@ func TestOAuthCallback_RejectsStateMismatch(t *testing.T) {
 	}
 	select {
 	case callback := <-result:
-		t.Fatalf("mismatched state produced callback result %#v", callback)
+		if callback.err == nil || !strings.Contains(callback.err.Error(), "state mismatch") {
+			t.Fatalf("callback result = %#v, want state-mismatch error", callback)
+		}
 	default:
+		t.Fatal("mismatched state did not complete the waiter")
+	}
+}
+
+func TestListenLoopbackBothFamilies_LocalhostDials(t *testing.T) {
+	held, port := listenOnFreePort(t)
+	closeListener(t, held)
+
+	listeners, err := listenLoopbackBothFamilies(port)
+	if err != nil {
+		t.Fatalf("listenLoopbackBothFamilies() error = %v", err)
+	}
+	t.Cleanup(func() {
+		for _, listener := range listeners {
+			closeListener(t, listener)
+		}
+	})
+	if len(listeners) == 0 {
+		t.Fatal("listenLoopbackBothFamilies() returned no listeners")
+	}
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", strconv.Itoa(port)), time.Second)
+	if err != nil {
+		t.Fatalf("dial localhost:%d: %v", port, err)
+	}
+	if closeErr := conn.Close(); closeErr != nil {
+		t.Errorf("close localhost dial: %v", closeErr)
+	}
+}
+
+func TestListenLoopbackBothFamilies_SkipsPortWhenIPv4Busy(t *testing.T) {
+	held, port := listenOnFreePort(t)
+	defer closeListener(t, held)
+
+	listeners, err := listenLoopbackBothFamilies(port)
+	if err == nil {
+		for _, listener := range listeners {
+			closeListener(t, listener)
+		}
+		t.Fatal("listenLoopbackBothFamilies() succeeded while IPv4 was busy")
+	}
+	if !isAddrInUse(err) && !strings.Contains(strings.ToLower(err.Error()), "bind") {
+		t.Fatalf("error = %v, want address-in-use", err)
 	}
 }
 
@@ -162,6 +205,82 @@ func TestOAuthEndpointsFor_GrokFallsBackAfterDiscoveryFailure(t *testing.T) {
 	if endpoints.Authorization != "https://issuer.example/oauth2/authorize" ||
 		endpoints.Token != defaultGrokOAuthRefreshURL || endpoints.Device != defaultGrokOAuthDeviceURL {
 		t.Fatalf("fallback endpoints = %#v", endpoints)
+	}
+}
+
+func TestLoginBrowserOAuth_OpenAICompletesCallbackAndExchange(t *testing.T) {
+	first, firstPort := listenOnFreePort(t)
+	second, secondPort := listenOnFreePort(t)
+	closeListener(t, first)
+	closeListener(t, second)
+	originalPorts := openaiLoopbackPorts
+	openaiLoopbackPorts = []int{firstPort, secondPort}
+	t.Cleanup(func() { openaiLoopbackPorts = originalPorts })
+
+	var tokenForm url.Values
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse token form: %v", err)
+		}
+		tokenForm = make(url.Values, len(r.PostForm))
+		for key, values := range r.PostForm {
+			tokenForm[key] = append([]string(nil), values...)
+		}
+		writeTestJSON(t, w, `{"access_token":"access","refresh_token":"refresh","expires_in":3600}`)
+	})
+
+	openURL := func(rawURL string) error {
+		authURL, err := url.Parse(rawURL)
+		if err != nil {
+			return err
+		}
+		if authURL.Path != "/oauth/authorize" {
+			return errors.New("unexpected authorization endpoint")
+		}
+		query := authURL.Query()
+		if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" {
+			return errors.New("authorization URL missing S256 PKCE")
+		}
+		callbackURL := query.Get("redirect_uri") + "?code=browser-secret&state=" + url.QueryEscape(query.Get("state"))
+		resp, err := http.Get(callbackURL) //nolint:gosec // Local callback URL created by the code under test.
+		if err != nil {
+			return err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "You can close this window.") {
+			return errors.New("callback did not return the success page")
+		}
+		return nil
+	}
+
+	session, err := LoginBrowserOAuth(context.Background(), ProviderOpenAI, OAuthFlowOptions{
+		HTTPClient: srv.Client(),
+		OpenURL:    openURL,
+		ClientID:   "test-client",
+		Issuer:     srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("LoginBrowserOAuth() error = %v", err)
+	}
+	if session.Access != "access" || session.Refresh != "refresh" || session.Provider != ProviderOpenAI {
+		t.Fatalf("session = %#v", session)
+	}
+	if tokenForm.Get("code") != "browser-secret" || tokenForm.Get("code_verifier") == "" {
+		t.Fatalf("token form = %v", tokenForm)
+	}
+	if got := tokenForm.Get("redirect_uri"); !strings.HasPrefix(got, "http://localhost:") || !strings.HasSuffix(got, "/auth/callback") {
+		t.Fatalf("redirect_uri = %q, want localhost OpenAI callback", got)
 	}
 }
 

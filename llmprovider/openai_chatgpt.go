@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	openAIAccountHeader   = "ChatGPT-Account-Id"
-	openAIResidencyHeader = "x-openai-internal-codex-residency"
+	openAIAccountHeader    = "ChatGPT-Account-Id"
+	openAIResidencyHeader  = "x-openai-internal-codex-residency"
+	openAIOriginatorHeader = "originator"
+	openAIOriginatorValue  = "mcplib"
 )
 
 // NewOpenAIWithSource creates an OpenAI provider from a dynamic token source.

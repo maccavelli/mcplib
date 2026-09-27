@@ -39,9 +39,9 @@ func TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey(t *testing.T) {
 			Issuer:       llmprovider.DefaultOpenAIIssuer,
 			ClientID:     llmprovider.DefaultOpenAIClientID,
 			AccountID:    "acct_test",
+			Model:        "kept-chatgpt-model",
 		},
 		TokenStore: store,
-		Discover:   true,
 	})
 	if err != nil {
 		t.Fatalf("ConfigureLLM() error = %v", err)
@@ -49,7 +49,7 @@ func TestConfigureLLM_ChatGPTResultDoesNotPopulateAPIKey(t *testing.T) {
 	if res.APIKey != "" || res.Kind != CredOAuth {
 		t.Fatalf("APIKey/Kind = %q/%q, want empty/%q", res.APIKey, res.Kind, CredOAuth)
 	}
-	if res.AccessToken != "existing-access-abcd" || res.Model != llmprovider.StaticOpenAIChatGPT[0] {
+	if res.AccessToken != "existing-access-abcd" || res.Model != "kept-chatgpt-model" {
 		t.Fatalf("access/model = %q/%q", res.AccessToken, res.Model)
 	}
 	assertTextMasksSecret(t, f.allText, "existing-access-abcd")
@@ -68,8 +68,7 @@ func TestConfigureLLM_APIKeyKindUnchanged(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			selects := []int{providerIdx(t, test.provider)}
 			selects = append(selects, test.selections...)
-			selects = append(selects, 0)
-			f := &fakePrompter{t: t, selects: selects, secrets: []string{testKey}}
+			f := &fakePrompter{t: t, selects: selects, secrets: []string{testKey}, inputs: []string{"test-model"}}
 			res, err := ConfigureLLM(context.Background(), f, Options{})
 			if err != nil {
 				t.Fatalf("ConfigureLLM() error = %v", err)
@@ -84,14 +83,15 @@ func TestConfigureLLM_APIKeyKindUnchanged(t *testing.T) {
 func TestConfigureLLM_DoesNotOfferClaudeOAuth(t *testing.T) {
 	f := &fakePrompter{
 		t:       t,
-		selects: []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude)},
 		secrets: []string{testKey},
+		inputs:  []string{"test-model"},
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{}); err != nil {
 		t.Fatalf("ConfigureLLM() error = %v", err)
 	}
-	if len(f.seenSelect) != 2 {
-		t.Fatalf("Select calls = %d, want provider and model only", len(f.seenSelect))
+	if len(f.seenSelect) != 1 {
+		t.Fatalf("Select calls = %d, want provider only", len(f.seenSelect))
 	}
 	for _, title := range f.seenSelect {
 		if strings.Contains(strings.ToLower(title), "authentication") {
@@ -153,6 +153,10 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 				t:       t,
 				selects: []int{providerIdx(t, test.provider), 3, 0},
 				secrets: []string{test.secret},
+				inputs:  []string{"test-model"},
+			}
+			if test.wantKind == CredOAuth {
+				f.inputs = []string{"chatgpt-model"}
 			}
 			res, err := ConfigureLLM(context.Background(), f, Options{TokenStore: store})
 			if err != nil {
@@ -160,6 +164,9 @@ func TestConfigureLLM_TokenStdinClassification(t *testing.T) {
 			}
 			if res.Kind != test.wantKind || res.APIKey != test.wantAPIKey || res.AccessToken != test.wantAccess {
 				t.Fatalf("result credential = %q/%q/%q", res.Kind, res.APIKey, res.AccessToken)
+			}
+			if test.wantKind == CredOAuth && res.Model != "chatgpt-model" {
+				t.Fatalf("oauth model = %q, want chatgpt-model", res.Model)
 			}
 			if store.saves != test.wantSaves {
 				t.Fatalf("TokenStore saves = %d, want %d", store.saves, test.wantSaves)
@@ -186,6 +193,7 @@ func TestConfigureLLM_TokenStdinUsesCodexEnvironment(t *testing.T) {
 		t:        t,
 		selects:  []int{providerIdx(t, llmprovider.ProviderOpenAI), 3, 0},
 		confirms: []bool{true},
+		inputs:   []string{"chatgpt-model"},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		AllowEnv:   true,
@@ -243,7 +251,11 @@ func TestConfigureLLM_BrowserAndDevicePersistSessions(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := newMemoryTokenStore()
-			f := &fakePrompter{t: t, selects: []int{providerIdx(t, llmprovider.ProviderGrok), test.authIdx, 0}}
+			f := &fakePrompter{
+				t:       t,
+				selects: []int{providerIdx(t, llmprovider.ProviderGrok), test.authIdx},
+				inputs:  []string{"test-model"},
+			}
 			res, err := ConfigureLLM(context.Background(), f, Options{TokenStore: store})
 			if err != nil {
 				t.Fatalf("ConfigureLLM() error = %v", err)

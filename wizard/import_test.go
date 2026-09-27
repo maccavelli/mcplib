@@ -57,7 +57,8 @@ func TestConfigureLLM_ImportConfirmsAndPersistsSession(t *testing.T) {
 	store := newMemoryTokenStore()
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderGrok), 4, 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderGrok), 4},
+		inputs:   []string{"test-model"},
 		confirms: []bool{true},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{

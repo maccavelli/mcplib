@@ -48,11 +48,8 @@ func TestListAvailableModels_Gemini(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderGemini, "key", WithBaseURL(errSrv.URL))
-	if err != nil {
-		t.Fatalf("fallback error: %v", err)
-	}
-	if len(fallbackModels) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || fallbackModels != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
 	}
 }
 
@@ -87,21 +84,82 @@ func TestListAvailableModels_OpenAI(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderOpenAI, "key", WithBaseURL(errSrv.URL))
-	if err != nil {
-		t.Fatalf("fallback error: %v", err)
-	}
-	if len(fallbackModels) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || fallbackModels != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
 	}
 }
 
-func TestListAvailableModelsWithSource_ChatGPTDoesNotHTTP(t *testing.T) {
-	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		hits++
-		t.Error("ChatGPT model listing made an HTTP request")
+func TestListAvailableModelsWithSource_ChatGPTListsCodexCatalog(t *testing.T) {
+	var captured *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[
+			{"slug":"gpt-5.6-sol","visibility":"list","priority":4,"supported_in_api":true},
+			{"slug":"gpt-reserve","visibility":"hide","priority":3,"supported_in_api":true},
+			{"slug":"gpt-5.6-luna","visibility":"list","priority":8,"supported_in_api":true},
+			{"slug":"gpt-6-astra","visibility":"list","priority":1,"supported_in_api":true},
+			{"slug":"hidden-review","visibility":"hide","priority":43,"supported_in_api":true}
+		]}`))
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+
+	session := &OAuthSession{
+		Issuer:    DefaultOpenAIIssuer,
+		Access:    "session-access",
+		Expiry:    time.Now().Add(time.Hour),
+		AccountID: "acct_live",
+	}
+	models, err := ListAvailableModelsWithSource(
+		context.Background(),
+		ProviderOpenAI,
+		session,
+		WithHTTPClient(srv.Client()),
+		WithBaseURL(srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("ListAvailableModelsWithSource() error = %v", err)
+	}
+	want := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}
+	if !reflect.DeepEqual(models, want) {
+		t.Fatalf("models = %v, want %v", models, want)
+	}
+	if captured == nil {
+		t.Fatal("ChatGPT listing made no HTTP request")
+	}
+	if captured.URL.Path != "/models" || captured.URL.Query().Get("client_version") != chatgptModelsClientVersion {
+		t.Fatalf("request URL = %s", captured.URL.Redacted())
+	}
+	if captured.Header.Get("Authorization") != "Bearer session-access" {
+		t.Fatalf("Authorization = %q", captured.Header.Get("Authorization"))
+	}
+	if captured.Header.Get(openAIOriginatorHeader) != openAIOriginatorValue {
+		t.Fatalf("originator = %q", captured.Header.Get(openAIOriginatorHeader))
+	}
+	if captured.Header.Get(openAIAccountHeader) != "acct_live" {
+		t.Fatalf("ChatGPT-Account-Id = %q", captured.Header.Get(openAIAccountHeader))
+	}
+	models[0] = "mutated"
+	again, err := ListAvailableModelsWithSource(
+		context.Background(),
+		ProviderOpenAI,
+		session,
+		WithHTTPClient(srv.Client()),
+		WithBaseURL(srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("second ListAvailableModelsWithSource() error = %v", err)
+	}
+	if again[0] == "mutated" {
+		t.Fatal("ListAvailableModelsWithSource returned a live slice")
+	}
+}
+
+func TestListAvailableModelsWithSource_ChatGPTListingFailureIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
 
 	session := &OAuthSession{
 		Issuer: DefaultOpenAIIssuer,
@@ -112,21 +170,14 @@ func TestListAvailableModelsWithSource_ChatGPTDoesNotHTTP(t *testing.T) {
 		context.Background(),
 		ProviderOpenAI,
 		session,
+		WithHTTPClient(srv.Client()),
 		WithBaseURL(srv.URL),
 	)
-	if err != nil {
-		t.Fatalf("ListAvailableModelsWithSource() error = %v", err)
+	if err == nil {
+		t.Fatal("ListAvailableModelsWithSource() error = nil, want listing failure")
 	}
-	if !reflect.DeepEqual(models, StaticOpenAIChatGPT) {
-		t.Fatalf("models = %v, want %v", models, StaticOpenAIChatGPT)
-	}
-	models[0] = "mutated"
-	again, err := ListAvailableModelsWithSource(context.Background(), ProviderOpenAI, session)
-	if err != nil {
-		t.Fatalf("second ListAvailableModelsWithSource() error = %v", err)
-	}
-	if hits != 0 || again[0] == "mutated" {
-		t.Fatalf("HTTP hits/second result = %d/%v", hits, again)
+	if models != nil {
+		t.Fatalf("models = %v, want nil on listing failure", models)
 	}
 }
 
@@ -161,11 +212,8 @@ func TestListAvailableModels_Claude(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderClaude, "key", WithBaseURL(errSrv.URL))
-	if err != nil {
-		t.Fatalf("fallback error: %v", err)
-	}
-	if len(fallbackModels) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || fallbackModels != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
 	}
 }
 
@@ -200,11 +248,8 @@ func TestListAvailableModels_Grok(t *testing.T) {
 	defer errSrv.Close()
 
 	fallbackModels, err := ListAvailableModels(context.Background(), ProviderGrok, "key", WithBaseURL(errSrv.URL))
-	if err != nil {
-		t.Fatalf("fallback error: %v", err)
-	}
-	if len(fallbackModels) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || fallbackModels != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", fallbackModels, err)
 	}
 }
 
@@ -346,11 +391,8 @@ func TestListAvailableModels_OpencodeFallback(t *testing.T) {
 	defer srv.Close()
 
 	models, err := ListAvailableModels(context.Background(), ProviderOpencodeZen, "k", WithBaseURL(srv.URL))
-	if err != nil {
-		t.Fatalf("fallback must not error: %v", err)
-	}
-	if len(models) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || models != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", models, err)
 	}
 }
 
@@ -441,11 +483,8 @@ func TestListAvailableModels_HuggingFaceFallback(t *testing.T) {
 	defer srv.Close()
 
 	models, err := ListAvailableModels(context.Background(), ProviderHuggingFace, "k", WithBaseURL(srv.URL))
-	if err != nil {
-		t.Fatalf("fallback must not error: %v", err)
-	}
-	if len(models) == 0 {
-		t.Fatal("expected static catalog fallback")
+	if err == nil || models != nil {
+		t.Fatalf("listing failure models/err = %v/%v, want nil/error", models, err)
 	}
 }
 

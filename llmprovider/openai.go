@@ -166,6 +166,7 @@ func (p *OpenAIProvider) doGenerateItemsOnce(ctx context.Context, input []Item, 
 	}
 	req.Header.Set(oauthAuthorizationHeader, "Bearer "+token.Value)
 	if p.chatGPT {
+		req.Header.Set(openAIOriginatorHeader, openAIOriginatorValue)
 		if accountID := openAIAccountID(p.src); accountID != "" {
 			req.Header.Set(openAIAccountHeader, accountID)
 		}
@@ -209,11 +210,7 @@ func (p *OpenAIProvider) DiscoverModels(ctx context.Context) ([]string, error) {
 		WithBaseURL(p.baseURL),
 	)
 	if err != nil || len(listed) == 0 {
-		if p.chatGPT {
-			listed = append([]string(nil), StaticOpenAIChatGPT...)
-		} else {
-			listed = StaticModels(ProviderOpenAI)
-		}
+		return listed, err
 	}
 
 	healthy := probeGenerateHealth(ctx, listed, func(tCtx context.Context, modelID string) (string, error) {

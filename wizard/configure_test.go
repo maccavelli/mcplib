@@ -2,12 +2,16 @@ package wizard
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/maccavelli/mcplib/llmprovider"
 )
+
+const testModelID = "test-model"
 
 // claudeIdx returns the index of a provider in the canonical descriptor order,
 // so tests script menu positions without hard-coding them.
@@ -35,8 +39,9 @@ func TestConfigureLLM_EnvKeyPrecedence(t *testing.T) {
 	withEnv(t, map[string]string{"CLAUDE_API_KEY": testKey})
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderClaude)},
 		confirms: []bool{true}, // yes, use the env key
+		inputs:   []string{testModelID},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{AllowEnv: true})
 	if err != nil {
@@ -54,8 +59,9 @@ func TestConfigureLLM_KeepExisting(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderClaude)},
 		confirms: []bool{true}, // keep existing
+		inputs:   []string{testModelID},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Existing: Result{Provider: llmprovider.ProviderClaude, APIKey: "existing-key-abcd"},
@@ -75,8 +81,9 @@ func TestConfigureLLM_PromptsWhenNothingAvailable(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
 		t:       t,
-		selects: []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude)},
 		secrets: []string{testKey},
+		inputs:  []string{testModelID},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{AllowEnv: true})
 	if err != nil {
@@ -140,37 +147,50 @@ func TestConfigureLLM_NoModelsAndNoneEnteredErrors(t *testing.T) {
 	}
 }
 
-func TestConfigureLLM_EmptyDiscoveryFallsBackToStatic(t *testing.T) {
+func TestConfigureLLM_EmptyDiscoveryPromptsForModel(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
 		t:       t,
-		selects: []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude)},
 		secrets: []string{testKey},
+		inputs:  []string{"manual-model"},
 	}
-	// Discover against an unreachable base URL: the listing fails, so the
-	// static catalog must be offered instead of the wizard dead-ending.
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Discover:      true,
 		DiscoverLimit: 2 * time.Second,
+		Existing:      Result{BaseURL: "http://127.0.0.1:1"},
+		HTTPClient:    http.DefaultClient,
 	})
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
-	static := llmprovider.StaticModels(llmprovider.ProviderClaude)
-	if len(static) == 0 || res.Model != static[0] {
-		t.Errorf("Model = %q, want the first static model %v", res.Model, static)
+	if res.Model != "manual-model" {
+		t.Errorf("Model = %q, want the manually entered id", res.Model)
 	}
 }
 
 func TestConfigureLLM_Fallbacks(t *testing.T) {
 	withEnv(t, nil)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"claude-a"},{"id":"claude-b"},{"id":"claude-c"}]}`))
+	}))
+	t.Cleanup(srv.Close)
 	f := &fakePrompter{
 		t:            t,
 		selects:      []int{providerIdx(t, llmprovider.ProviderClaude), 0},
 		secrets:      []string{testKey},
 		multiSelects: [][]int{{0, 1}},
 	}
-	res, err := ConfigureLLM(context.Background(), f, Options{NeedFallbacks: true})
+	res, err := ConfigureLLM(context.Background(), f, Options{
+		NeedFallbacks: true,
+		Discover:      true,
+		HTTPClient:    srv.Client(),
+		Existing:      Result{BaseURL: srv.URL},
+	})
 	if err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
 	}
@@ -191,8 +211,9 @@ func TestConfigureLLM_MaskedKeyNeverPrintsSecret(t *testing.T) {
 	withEnv(t, map[string]string{"CLAUDE_API_KEY": testKey})
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderClaude), 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderClaude)},
 		confirms: []bool{true},
+		inputs:   []string{testModelID},
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{AllowEnv: true}); err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
@@ -218,8 +239,12 @@ func TestConfigureLLM_OffersEveryDescriptor(t *testing.T) {
 	withEnv(t, nil)
 	f := &fakePrompter{
 		t:       t,
-		selects: []int{0, 0},
+		selects: []int{0},
 		secrets: []string{testKey},
+<<<<<<< HEAD
+		inputs:  []string{testModelID},
+=======
+>>>>>>> 5a1fc703806af5a7e37878d758f1e4dc36ba53b0
 	}
 	if _, err := ConfigureLLM(context.Background(), f, Options{}); err != nil {
 		t.Fatalf("ConfigureLLM: %v", err)
@@ -236,7 +261,7 @@ func TestConfigureLLM_OffersEveryDescriptor(t *testing.T) {
 
 func TestConfigureLLM_ProviderFilter(t *testing.T) {
 	withEnv(t, nil)
-	f := &fakePrompter{t: t, selects: []int{0, 0, 0}, secrets: []string{testKey}}
+	f := &fakePrompter{t: t, selects: []int{0, 0}, secrets: []string{testKey}, inputs: []string{testModelID}}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		Providers: []string{llmprovider.ProviderGrok},
 	})
@@ -261,11 +286,9 @@ func TestConfigureLLM_ProviderFilter(t *testing.T) {
 // entry. prepare-commit-msg's wizard had this before the migration.
 func TestConfigureLLM_OtherModelEscapeHatch(t *testing.T) {
 	withEnv(t, nil)
-	static := llmprovider.StaticModels(llmprovider.ProviderClaude)
 	f := &fakePrompter{
-		t: t,
-		// provider, then the trailing "Other" entry
-		selects: []int{providerIdx(t, llmprovider.ProviderClaude), len(static)},
+		t:       t,
+		selects: []int{providerIdx(t, llmprovider.ProviderClaude)},
 		secrets: []string{testKey},
 		// a blank search (MADR 0009 §4), then the manual model id
 		inputs: []string{"", "my-custom-model"},
@@ -277,10 +300,6 @@ func TestConfigureLLM_OtherModelEscapeHatch(t *testing.T) {
 	if res.Model != "my-custom-model" {
 		t.Errorf("Model = %q, want the manually entered id", res.Model)
 	}
-	last := f.seenSelectItems[1][len(f.seenSelectItems[1])-1].Label
-	if last != otherModelLabel {
-		t.Errorf("model menu must end with %q, got %q", otherModelLabel, last)
-	}
 }
 
 // TestConfigureLLM_InjectedLookupEnv: consumers drive the env-key branch
@@ -289,8 +308,9 @@ func TestConfigureLLM_InjectedLookupEnv(t *testing.T) {
 	withEnv(t, nil) // the package-level reader returns nothing
 	f := &fakePrompter{
 		t:        t,
-		selects:  []int{providerIdx(t, llmprovider.ProviderGemini), 0},
+		selects:  []int{providerIdx(t, llmprovider.ProviderGemini)},
 		confirms: []bool{true},
+		inputs:   []string{testModelID},
 	}
 	res, err := ConfigureLLM(context.Background(), f, Options{
 		AllowEnv:  true,
