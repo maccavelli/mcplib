@@ -185,7 +185,7 @@ func (p *TextPrompter) MultiSelect(title string, choices []Choice, preselected [
 		}
 		var out []int
 		ok := true
-		for _, part := range strings.Split(line, ",") {
+		for part := range strings.SplitSeq(line, ",") {
 			n, convErr := strconv.Atoi(strings.TrimSpace(part))
 			if convErr != nil || n < 1 || n > len(choices) {
 				ok = false

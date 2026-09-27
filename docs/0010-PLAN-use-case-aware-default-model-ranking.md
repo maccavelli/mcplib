@@ -1970,8 +1970,11 @@ fail.
    and call `GenerateThinkingWithRetry`."
 3. Run `go test -count=1 ./... > "$SCRATCH/p7-full.log" 2>&1` and branch on
    its own exit status.
-4. `git diff --stat 5a1fc70 -- go.mod go.sum llmprovider/probe.go wizard/prompter.go wizard/text_prompter.go llmprovider/opencode_route.go`
-   must be empty (A14).
+4. ~~`git diff --stat 5a1fc70 -- go.mod go.sum llmprovider/probe.go wizard/prompter.go wizard/text_prompter.go llmprovider/opencode_route.go`
+   must be empty (A14).~~ **Amended by the 2026-09-26 `go fix` deviation
+   (§10):** `git diff --stat 5a1fc70 -- go.mod go.sum llmprovider/probe.go wizard/prompter.go llmprovider/opencode_route.go`
+   must be empty (A14). `wizard/text_prompter.go` carries only the `go fix`
+   `strings.SplitSeq` change.
 5. Fill in §11: each phase's red lines, mutation summaries, gate summaries and
    live results, verbatim. Set this plan to `status: complete` only if every
    §5 criterion holds.
@@ -2014,7 +2017,7 @@ echo "mut=$MUT gate=$GATE"
 | A11 | `wizard.Options.Profile` reaches the listing | `TestConfigureLLM_ProfileReachesListing`; `p4-profile-dropped` |
 | A12 | `GenerateThinkingWithRetry` has `GenerateWithRetry`'s behaviour; `ReasoningEffort()` values | Phase 1 tests; `p1-*` |
 | A13 | Kilo's reasoning shapes are correct, and the live gate passes | Phase 5 tests and `p5-live.log` PASS; `p5-*` |
-| A14 | OpenCode chat sends only listed efforts, and the live gate passes; `go.mod`, `go.sum`, probe, `Prompter`, `TextPrompter` and the route table untouched | Phase 6 tests and `p6-live.log` PASS; Phase 7 step 4 diff empty |
+| A14 | OpenCode chat sends only listed efforts, and the live gate passes; `go.mod`, `go.sum`, probe, `Prompter`, the `TextPrompter` contract and the route table untouched (`text_prompter.go` carries only the `go fix` change, §10) | Phase 6 tests and `p6-live.log` PASS; Phase 7 step 4 diff empty |
 | A15 | Every gate green; full module green; README documents the feature | §11; `p7-full.log` exit 0 |
 | A16 | Kilo's utility six never contains a `kilo-auto/*` id, ranked or filled; capable and other providers are unaffected (MADR §3 item 9) | `TestRankRecommended_KiloAutoUtility`, `TestListModelCatalog_KiloRanksByProfile`, the golden snapshot; `p2-kiloauto-*` |
 
@@ -2112,7 +2115,13 @@ changes.
 
 **Must stay untouched** (checked in Phase 7 step 4): `go.mod`, `go.sum`,
 `llmprovider/probe.go`, `llmprovider/opencode_route.go`, `wizard/prompter.go`,
-`wizard/text_prompter.go`.
+~~`wizard/text_prompter.go`~~. `wizard/text_prompter.go` was removed from this
+list by the 2026-09-26 `go fix` deviation (§10). It carries one
+behaviour-neutral `strings.SplitSeq` change, and its `TextPrompter` contract
+is unchanged.
+
+**Also modified outside this plan's scope** (the same deviation):
+`selfupdate/updater_test.go` and `wizard/text_prompter.go`, by `go fix ./...`.
 
 ## 10. Deviation log
 
@@ -2128,6 +2137,7 @@ changes.
 | 2026-09-26 | 6 | The live gate failed with `opencode-zen/chat_completions HTTP 402` on both models. With and without `reasoning_effort` (plain `Generate` too), Zen answers `{"message":"Upstream request failed: Insufficient account funds"}`: an account balance problem, not this change. OpenCode Go is no alternative. Every mcplib request there gets `HTTP 400 MissingSessionID: Request is missing x-opencode-session`, a pre-existing defect already recorded in `0011-REPORT-provider-source-compatibility-audit.md` and scheduled in `0012-MADR-conform-providers-to-reference-clients.md` §1. | Maintainer chose "Top up Zen, re-run". Phase 6 waits, uncommitted, until the maintainer confirms funds, then re-runs the gate on `deepseek-v4.1-flash` and `glm-5.3-flash`. The Go header stays with 0012. No MADR change. | none |
 | 2026-09-26 | 6 | The maintainer directed "stage all, commit and push" while the Phase 6 live gate was still unmet (Zen funds). Offline evidence at that point: `TestOpencode_ChatReasoningEffort` green; mutations 5/5 caught (`p6-unlisted-sent`, `p6-non-thinking`, `p6-chat-ignores`, `p6-wrong-option-type`, control passes); phase gate 9/9. `p6-live-value` and the live gate have **not** run. A gocritic `typeDefFirst` finding was fixed by moving `reasoningEfforts` below `modelMetadataDoc` in the same file. | Phase 6 is committed and pushed **with its live gate outstanding**. The gate and `p6-live-value` must run once the Zen balance is restored, before Phase 7 closes the plan. A gate failure reopens Phase 6 (§10). The plan stays `in-progress`. | none |
 | 2026-09-26 | 6 | The maintainer reports the key is funded for both gateways. Re-probing Zen with plain requests on five models, spanning DeepSeek, Zhipu, Moonshot and OpenAI upstreams and the chat and responses routes, gave the same `402 server_error "Upstream request failed: Insufficient account funds"` on all five. OpenCode's pinned gateway source bills the Go subscription only on the Go endpoint (`handler.ts:895-964`); Zen uses the pay-as-you-go balance (`:972-1009`), and it reports an empty balance as a 401 `CreditsError` (`:974`, `:490-502`), not this 402. The cause is unresolved. A Go probe then showed that `x-opencode-session` alone turns Go's `MissingSessionID` 400 into HTTP 200, with Go's default User-Agent. | Maintainer chose "Fix the go headers and use it to test". Pulled forward from `0012-MADR-conform-providers-to-reference-clients.md` §1.4, OpenCode only: every OpenCode generation request sends `x-opencode-session`, a random id fixed per provider instance. `WithSessionID`, `WithClientInfo` and the User-Agent format stay in 0012. The Phase 6 gate runs on **OpenCode Go** against `glm-5.3-flash` and `hy3`, the two chat-routed Go utility models whose `reasoning_options` list `low`. The DeepSeek family is region-gated on Go, so its live check on Zen stays outstanding until Zen answers. **MADR 0010 §6 and MADR 0012 §1.4 amended.** | none (`opencode.go`, `opencode_test.go`, `live_gateways_test.go` are already Phase 6 files) |
+| 2026-09-26 | between 6 and 7 | The maintainer ran `go fix ./...` (Go 1.26.6). It modernised two files outside this plan. `selfupdate/updater_test.go`: `containsKind`'s loop becomes `slices.Contains`. `wizard/text_prompter.go:188`: `strings.Split` becomes `strings.SplitSeq` in a range loop. Neither changes behaviour. Gate on both files: 6/6 (gofmt, golint, vet, lint, tests of `./selfupdate ./wizard`). `wizard/text_prompter.go` is on §9's "must stay untouched" list, so Phase 7 step 4's diff check would fail. | Maintainer chose "Commit and amend" (option 1). The `go fix` change is committed. `wizard/text_prompter.go` leaves the untouched list and Phase 7 step 4's diff: the list protected the `Prompter`/`TextPrompter` contract, and this change leaves the contract, the signatures and the behaviour unchanged. No MADR change. | `selfupdate/updater_test.go`, `wizard/text_prompter.go` |
 
 ## 11. Execution record
 

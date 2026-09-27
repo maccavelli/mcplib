@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -373,12 +374,7 @@ func (pendingSession) Install(context.Context, InstallRequest) (InstallResult, e
 func (pendingSession) Close() error { return nil }
 
 func containsKind(kinds []EventKind, want EventKind) bool {
-	for _, k := range kinds {
-		if k == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(kinds, want)
 }
 
 func TestStateMachineStopsAfterFailure(t *testing.T) {
