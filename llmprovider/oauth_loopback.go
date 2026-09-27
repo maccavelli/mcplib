@@ -97,7 +97,7 @@ func LoginBrowserOAuth(ctx context.Context, provider string, opts OAuthFlowOptio
 	flowCtx, cancel := context.WithTimeout(ctx, oauthBrowserTimeout)
 	defer cancel()
 	result := make(chan oauthCallbackResult, 1)
-	handler := oauthCallbackHandler(callbackPath, state, result)
+	handler := oauthCallbackHandler(callbackPath, state, result, callbackCORSOrigin(config.provider))
 	serveErrors := make(chan error, 1)
 	shutdown := serveCallbackListeners(handler, listeners, serveErrors)
 	defer shutdown()
@@ -385,9 +385,36 @@ func buildAuthorizeURL(config oauthFlowConfig, endpoint, redirectURI, challenge,
 	return authorizeURL.String(), nil
 }
 
-func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult) http.Handler {
+// grokAccountsAppOrigin is the only browser origin allowed to call the Grok
+// loopback callback. accounts.x.ai delivers the code with a cross-origin,
+// private-network request, as the official CLI's callback router allows
+// (MADR 0009 D2).
+const grokAccountsAppOrigin = "https://accounts.x.ai"
+
+// callbackCORSOrigin names the origin a provider's callback allows; "" allows
+// none.
+func callbackCORSOrigin(provider string) string {
+	if provider == ProviderGrok {
+		return grokAccountsAppOrigin
+	}
+	return ""
+}
+
+// oauthCallbackHandler serves the loopback redirect. A preflight never
+// completes the waiter; CORS headers go only to corsOrigin, never to "*".
+func oauthCallbackHandler(path, state string, result chan<- oauthCallbackResult, corsOrigin string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, request *http.Request) {
+		if corsOrigin != "" && request.Header.Get("Origin") == corsOrigin {
+			header := w.Header()
+			header.Set("Access-Control-Allow-Origin", corsOrigin)
+			header.Set("Access-Control-Allow-Methods", http.MethodGet)
+			header.Set("Access-Control-Allow-Private-Network", "true")
+		}
+		if request.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		query := request.URL.Query()
 		if query.Get("state") != state {
 			http.Error(w, "State mismatch", http.StatusBadRequest)

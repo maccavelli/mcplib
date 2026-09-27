@@ -100,7 +100,7 @@ func TestOAuthCallback_RejectsStateMismatch(t *testing.T) {
 	t.Parallel()
 
 	result := make(chan oauthCallbackResult, 1)
-	handler := oauthCallbackHandler("/callback", "expected-state", result)
+	handler := oauthCallbackHandler("/callback", "expected-state", result, "")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(
 		http.MethodGet,
@@ -318,6 +318,9 @@ func TestLoginBrowserOAuth_GrokCompletesCallbackAndExchange(t *testing.T) {
 		if query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") == "" {
 			return errors.New("authorization URL missing S256 PKCE")
 		}
+		if err := grokPreflight(query.Get("redirect_uri")); err != nil {
+			t.Errorf("preflight: %v", err)
+		}
 		callbackURL := query.Get("redirect_uri") + "?code=browser-secret&state=" + url.QueryEscape(query.Get("state"))
 		resp, err := http.Get(callbackURL) //nolint:gosec // Local callback URL created by the code under test.
 		if err != nil {
@@ -476,10 +479,127 @@ func TestLoginBrowserOAuth_OpenURLDoesNotBlockWait(t *testing.T) {
 	}
 }
 
+func TestOAuthCallback_GrokOptionsReturnsPrivateNetworkCORS(t *testing.T) {
+	t.Parallel()
+
+	result := make(chan oauthCallbackResult, 1)
+	handler := oauthCallbackHandler("/callback", "expected-state", result, callbackCORSOrigin(ProviderGrok))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, preflightRequest("http://127.0.0.1/callback", "https://accounts.x.ai"))
+	if recorder.Code != http.StatusNoContent && recorder.Code != http.StatusOK {
+		t.Fatalf("preflight status = %d, want 204 or 200", recorder.Code)
+	}
+	assertGrokCORS(t, recorder.Header())
+	assertWaiterIdle(t, result)
+}
+
+func TestOAuthCallback_GrokGETIncludesCORS(t *testing.T) {
+	t.Parallel()
+
+	result := make(chan oauthCallbackResult, 1)
+	handler := oauthCallbackHandler("/callback", "expected-state", result, callbackCORSOrigin(ProviderGrok))
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/callback?code=secret&state=expected-state", http.NoBody)
+	request.Header.Set("Origin", "https://accounts.x.ai")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "You can close this window.") {
+		t.Fatalf("callback = %d %q, want the 200 success page", recorder.Code, recorder.Body.String())
+	}
+	assertGrokCORS(t, recorder.Header())
+	select {
+	case callback := <-result:
+		if callback.err != nil || callback.code != "secret" {
+			t.Fatalf("callback result = %#v, want code secret", callback)
+		}
+	default:
+		t.Fatal("callback did not complete the waiter")
+	}
+}
+
+func TestOAuthCallback_GrokDoesNotWildcardOrigin(t *testing.T) {
+	t.Parallel()
+
+	result := make(chan oauthCallbackResult, 1)
+	handler := oauthCallbackHandler("/callback", "expected-state", result, callbackCORSOrigin(ProviderGrok))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, preflightRequest("http://127.0.0.1/callback", "https://evil.example"))
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q for a foreign origin, want none", got)
+	}
+	assertWaiterIdle(t, result)
+}
+
+func TestOAuthCallback_OpenAIHasNoGrokCORS(t *testing.T) {
+	t.Parallel()
+
+	result := make(chan oauthCallbackResult, 1)
+	handler := oauthCallbackHandler("/auth/callback", "expected-state", result, callbackCORSOrigin(ProviderOpenAI))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, preflightRequest("http://localhost/auth/callback", "https://accounts.x.ai"))
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("OpenAI callback advertised Access-Control-Allow-Origin %q", got)
+	}
+	assertWaiterIdle(t, result)
+}
+
+func preflightRequest(target, origin string) *http.Request {
+	request := httptest.NewRequest(http.MethodOptions, target, http.NoBody)
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	request.Header.Set("Access-Control-Request-Private-Network", "true")
+	return request
+}
+
+func assertGrokCORS(t *testing.T, header http.Header) {
+	t.Helper()
+	if got := header.Get("Access-Control-Allow-Origin"); got != "https://accounts.x.ai" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want https://accounts.x.ai", got)
+	}
+	if got := header.Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Errorf("Access-Control-Allow-Private-Network = %q, want true", got)
+	}
+	if got := header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodGet) {
+		t.Errorf("Access-Control-Allow-Methods = %q, want GET", got)
+	}
+}
+
+func assertWaiterIdle(t *testing.T, result <-chan oauthCallbackResult) {
+	t.Helper()
+	select {
+	case callback := <-result:
+		t.Fatalf("preflight completed the waiter: %#v", callback)
+	default:
+	}
+}
+
+// grokPreflight sends the private-network preflight accounts.x.ai sends
+// before its callback GET, and requires the loopback to allow it.
+func grokPreflight(redirectURI string) error {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodOptions, redirectURI, http.NoBody)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Origin", "https://accounts.x.ai")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	request.Header.Set("Access-Control-Request-Private-Network", "true")
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	if err := resp.Body.Close(); err != nil {
+		return err
+	}
+	if resp.Header.Get("Access-Control-Allow-Private-Network") != "true" ||
+		resp.Header.Get("Access-Control-Allow-Origin") != "https://accounts.x.ai" {
+		return errors.New("loopback callback did not allow the accounts.x.ai preflight")
+	}
+	return nil
+}
+
 func assertCallbackCompletesWithError(t *testing.T, query, want string) {
 	t.Helper()
 	result := make(chan oauthCallbackResult, 1)
-	handler := oauthCallbackHandler("/callback", "expected-state", result)
+	handler := oauthCallbackHandler("/callback", "expected-state", result, "")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/callback?"+query, http.NoBody))
 	if recorder.Code != http.StatusBadRequest {
