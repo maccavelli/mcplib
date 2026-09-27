@@ -1,63 +1,61 @@
 package llmprovider
 
-import "strings"
-
-// reasoningSupport enumerates gating tiers for Grok reasoning_effort.
-type reasoningSupport int
-
-const (
-	// reasoningUnsupported: model reasons automatically, sending reasoning_effort
-	// causes a 400 Bad Request. Applies to: grok-3, grok-4, grok-4-fast-reasoning,
-	// grok-code-fast-1.
-	reasoningUnsupported reasoningSupport = iota
-
-	// reasoningLowHigh: model accepts reasoning_effort with only "low" or "high".
-	// Applies to: grok-3-mini, grok-3-mini-fast.
-	reasoningLowHigh
-
-	// reasoningFull: model accepts reasoning_effort with "low"/"medium"/"high"/"xhigh".
-	// Reasoning cannot be disabled. Applies to: grok-4.5, grok-4.6.
-	reasoningFull
+import (
+	"slices"
+	"strings"
 )
 
-// grokReasoningSupport returns the reasoning-effort gating tier for a Grok model.
-// Unknown models default to reasoningUnsupported (safest: omit the parameter).
-func grokReasoningSupport(model string) reasoningSupport {
+// The Grok CLI catalog's models (MADR 0012 §6).
+const (
+	grokModel46 = "grok-4.6"
+	grokModel45 = "grok-4.5"
+)
+
+// grokEffortOrder ranks the efforts, lowest first.
+var grokEffortOrder = []string{effortLow, effortMedium, effortHigh, effortXHigh}
+
+// grokEffortMenu returns the reasoning efforts the Grok CLI offers a model,
+// lowest first, or nil when reasoning_effort must be omitted (MADR 0012 §6).
+// grok-4.6 and grok-4.5 are the CLI catalog's entries (grok-build f0e3be11:
+// xai-grok-models/default_models.json); grok-4.6-build takes low and high
+// (xai-grok-shell/src/agent/config_tests.rs:7958), as does grok-3-mini. Other
+// models reason automatically and may reject the parameter.
+func grokEffortMenu(model string) []string {
 	sm := strings.ToLower(model)
 	switch {
-	// grok-3-mini family: low/high only
-	case strings.HasPrefix(sm, "grok-3-mini"):
-		return reasoningLowHigh
-	// grok-4.5 / grok-4.6 family: full range, always-on reasoning
-	case strings.HasPrefix(sm, "grok-4.5"), strings.HasPrefix(sm, "grok-4.6"):
-		return reasoningFull
-	// grok-3, grok-4, grok-4-fast-reasoning, grok-code-fast-1: unsupported
+	case sm == grokModel46:
+		return []string{effortLow, effortMedium, effortHigh, effortXHigh}
+	case sm == grokModel45:
+		return []string{effortLow, effortMedium, effortHigh}
+	case sm == "grok-4.6-build", strings.HasPrefix(sm, "grok-3-mini"):
+		return []string{effortLow, effortHigh}
 	default:
-		return reasoningUnsupported
+		return nil
 	}
 }
 
 // grokClampReasoningEffort returns the reasoning_effort value to include in the
-// request body, or "" if the parameter must be omitted entirely.
+// request body, or "" if the parameter must be omitted entirely. No effort
+// sends high, every menu's CLI default. An effort off the menu clamps to the
+// nearest lower one on it, else the menu's highest.
 func grokClampReasoningEffort(model, effort string) string {
-	tier := grokReasoningSupport(model)
-	switch tier {
-	case reasoningUnsupported:
-		return "" // must not send
-	case reasoningLowHigh:
-		switch strings.ToLower(effort) {
-		case effortLow:
-			return effortLow
-		default:
-			return effortHigh // clamp everything else to "high"
-		}
-	case reasoningFull:
-		switch strings.ToLower(effort) {
-		case effortLow, effortMedium, effortHigh, effortXHigh:
-			return strings.ToLower(effort)
-		default:
-			return effortHigh // default for full-range models
+	menu := grokEffortMenu(model)
+	if len(menu) == 0 {
+		return ""
+	}
+	want := strings.ToLower(effort)
+	if want == "" {
+		return effortHigh
+	}
+	rank := slices.Index(grokEffortOrder, want)
+	clamped := ""
+	for _, e := range menu {
+		if slices.Index(grokEffortOrder, e) <= rank {
+			clamped = e
 		}
 	}
-	return ""
+	if clamped == "" {
+		return menu[len(menu)-1]
+	}
+	return clamped
 }

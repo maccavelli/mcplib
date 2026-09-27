@@ -138,7 +138,7 @@ func TestGrok_GenerateThinking_ReasoningEffortOmitted(t *testing.T) {
 }
 
 // TestGrok_GenerateThinking_ReasoningEffortClamped verifies grok-3-mini clamps
-// "medium" to "high" (only low/high supported).
+// "medium" to the nearest lower effort on its low/high menu (MADR 0012 §6).
 func TestGrok_GenerateThinking_ReasoningEffortClamped(t *testing.T) {
 	var body map[string]any
 	srv := captureServer(t, &body, `{"id":"r","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)
@@ -148,8 +148,8 @@ func TestGrok_GenerateThinking_ReasoningEffortClamped(t *testing.T) {
 		t.Fatal(err)
 	}
 	reasoning := body["reasoning"].(map[string]any)
-	if reasoning["effort"] != "high" {
-		t.Errorf("reasoning.effort = %v, want high (clamped from medium)", reasoning["effort"])
+	if reasoning["effort"] != "low" {
+		t.Errorf("reasoning.effort = %v, want low (clamped from medium)", reasoning["effort"])
 	}
 }
 
