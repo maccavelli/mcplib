@@ -19,11 +19,11 @@ func TestVendorAuthPath(t *testing.T) {
 		env            map[string]string
 		want           string
 	}{
-		{"codex home", llmprovider.ProviderOpenAI, map[string]string{"CODEX_HOME": "/x/codex"}, "/x/codex/auth.json"},
+		{"codex home", llmprovider.ProviderOpenAI, map[string]string{"CODEX_HOME": "/x/codex"}, filepath.Join("/x/codex", "auth.json")},
 		{"codex default", llmprovider.ProviderOpenAI, nil, filepath.Join(home, ".codex", "auth.json")},
 		{"grok auth path", llmprovider.ProviderGrok,
 			map[string]string{"GROK_AUTH_PATH": "/y/login.json", "GROK_HOME": "/x/grok"}, "/y/login.json"},
-		{"grok home", llmprovider.ProviderGrok, map[string]string{"GROK_HOME": "/x/grok"}, "/x/grok/auth.json"},
+		{"grok home", llmprovider.ProviderGrok, map[string]string{"GROK_HOME": "/x/grok"}, filepath.Join("/x/grok", "auth.json")},
 		{"grok default", llmprovider.ProviderGrok, nil, filepath.Join(home, ".grok", "auth.json")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
