@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-27
 associated-madr: "0014-MADR-gemini-wire-fidelity.md"
 decision-makers: mcplib maintainers
@@ -254,7 +254,15 @@ None yet.
 
 ## 10. Execution record
 
-Not executed yet.
+Executed on `main`, 2026-09-27. M0 committed the approved documents (`85e3a3a`). Each
+phase applied Appendix B with `git apply`, taken from this document and checked
+equal to the proven diff, and ran the gate (§0.2) before its commit. Mutants ran
+on an archive of the phase's commit.
+
+* **M1**, commit `2dee8ac`: 4 red tests failed as required; 2 base guards passed; gate passed (per-file `golint` on 9 files); 2/2 mutants killed.
+* **M2**, commit `a26ac36`: 8 red tests failed as required; 2 base guards passed; gate passed (per-file `golint` on 13 files); 3/3 mutants killed.
+
+**Live** (`-tags live_gateways`, Appendix A.L's tests, on the executed tree): 23 passed, 0 skipped, 0 failed.
 
 ## Appendix A — Proof record (2026-09-27)
 
