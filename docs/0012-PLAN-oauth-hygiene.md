@@ -431,6 +431,11 @@ document, and checked equal to the proven diff.
 * **O4**, commit `45fabc0`: nothing red (see Appendix A); 0 base guards passed; gate passed; 4/4 mutants killed.
 * **O5**, commit `85e20ab`: 1 red test failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
 * **O6**, commit `a5f2460`: 1 red test failed as required; 1 base guard passed; gate passed; 1/1 mutants killed.
+* **O8** (amendment, 2026-09-28): the plan amendment is commit `fd5dd43`, and the fix is commit `bf2d147`.
+  * The fix applied the Phase O8 diff with `git apply`, taken from this document and checked equal to the diff proven on Windows.
+  * On macOS the §0.2 gate passed: `gofmt`, `golint` on `wizard/import_test.go`, `go vet` (both), `make lint`, `go test`, and `-race`.
+  * On Windows (the owner's laptop, Go 1.26.6, in a temporary clone of `a27da70` plus this diff), `TestVendorAuthPath` passed all 5 cases, and `go test ./wizard` passed.
+  * **Pending:** CI's `validate (windows-2025)` job on the pushed commit. The commits are not pushed yet. This plan stays `in-progress` until that job passes.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 4 passed, 0 skipped, 0 failed.
 
