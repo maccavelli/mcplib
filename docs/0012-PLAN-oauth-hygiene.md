@@ -1,6 +1,6 @@
 ---
-status: complete
-date: 2026-09-27
+status: in-progress
+date: 2026-09-28
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
 ---
@@ -297,6 +297,83 @@ Record its output in §10. If it fails, stop and prompt: the redirect stays
    the plan is `in-progress`.
 3. Commit the documents only.
 
+## Phase O8 — Windows path expectations in `TestVendorAuthPath` (amendment, 2026-09-28)
+
+Added after execution; see §9, 2026-09-28.
+
+**Found.** CI's `validate (windows-2025)` job has failed on every push since
+O1 reached `origin` (run `36356998336` on `a3a04af`, through run
+`36429177833` on `a27da70`). The macOS and Linux jobs pass:
+
+```text
+--- FAIL: TestVendorAuthPath/codex_home
+    import_test.go:32: vendorAuthPath = "\\x\\codex\\auth.json", <nil>; want "/x/codex/auth.json"
+--- FAIL: TestVendorAuthPath/grok_home
+    import_test.go:32: vendorAuthPath = "\\x\\grok\\auth.json", <nil>; want "/x/grok/auth.json"
+```
+
+**Cause: the test, not the code.**
+* `vendorAuthPath` (`wizard/import.go`) joins `$CODEX_HOME` or `$GROK_HOME`
+  with `auth.json` using `filepath.Join`. On Windows that gives
+  `\x\codex\auth.json`, which is what each CLI resolves there, so it is
+  correct, and MADR §5.1 is unaffected.
+* O1's test hard-coded the Unix form for those two cases. It could pass only
+  on macOS and Linux. The default-home cases already used `filepath.Join`,
+  and they pass on Windows.
+* The §0.2 gate ran only on macOS, so no phase exercised Windows.
+
+**Change** (test only; no library code changes):
+
+```diff
+diff --git a/wizard/import_test.go b/wizard/import_test.go
+--- a/wizard/import_test.go
++++ b/wizard/import_test.go
+@@ -19,11 +19,11 @@ func TestVendorAuthPath(t *testing.T) {
+ 		env            map[string]string
+ 		want           string
+ 	}{
+-		{"codex home", llmprovider.ProviderOpenAI, map[string]string{"CODEX_HOME": "/x/codex"}, "/x/codex/auth.json"},
++		{"codex home", llmprovider.ProviderOpenAI, map[string]string{"CODEX_HOME": "/x/codex"}, filepath.Join("/x/codex", "auth.json")},
+ 		{"codex default", llmprovider.ProviderOpenAI, nil, filepath.Join(home, ".codex", "auth.json")},
+ 		{"grok auth path", llmprovider.ProviderGrok,
+ 			map[string]string{"GROK_AUTH_PATH": "/y/login.json", "GROK_HOME": "/x/grok"}, "/y/login.json"},
+-		{"grok home", llmprovider.ProviderGrok, map[string]string{"GROK_HOME": "/x/grok"}, "/x/grok/auth.json"},
++		{"grok home", llmprovider.ProviderGrok, map[string]string{"GROK_HOME": "/x/grok"}, filepath.Join("/x/grok", "auth.json")},
+ 		{"grok default", llmprovider.ProviderGrok, nil, filepath.Join(home, ".grok", "auth.json")},
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
+```
+
+`GROK_AUTH_PATH` keeps its literal expectation, because `vendorAuthPath`
+returns that path unchanged.
+
+**Proof** (2026-09-28, on `a27da70`):
+* **Windows** (Go 1.26.6, `windows/amd64`, in a temporary clone):
+  * **Red.** Base fails exactly as CI does, on `codex_home` and `grok_home`.
+  * **Green.** With the change, all five cases pass.
+  * **Mutant.** `vendorAuthPath` changed to `dir + "/auth.json"` fails the
+    changed test: `vendorAuthPath = "/x/codex/auth.json", <nil>; want
+    "\\x\\codex\\auth.json"`. On macOS and Linux this mutant is equivalent
+    (the separator is `/`), so only a Windows run can kill it.
+  * **Full suite.** `wizard` and every other package pass except
+    `selfupdate`. There, `TestNativeReplaceRunningCopy` fails on the laptop
+    with `replace target: Access is denied.` It passes on CI's Windows
+    runner, so it is recorded as an open observation and is out of scope
+    here (§9).
+* **macOS** (a scratch clone): the §0.2 gate passes, and `gofmt` and
+  `golint` pass on `wizard/import_test.go`.
+
+**Steps.**
+1. Confirm `main` is at `a27da70`, or a descendant that has not changed
+   `wizard/import_test.go`.
+2. Apply the diff above with `git apply`, and check the diff is exactly this
+   one.
+3. Run the §0.2 gate on macOS, and `go test -count=1 ./wizard` on a Windows
+   host.
+4. Commit with `git commit --no-edit`.
+5. After the owner pushes, confirm CI's `validate (windows-2025)` job passes
+   on that commit. Record it in §10, and set this plan to `status: complete`.
+
 ## 7. Acceptance criteria
 
 * Every Appendix A red test fails before its fix and passes after it.
@@ -309,6 +386,8 @@ Record its output in §10. If it fails, stop and prompt: the redirect stays
     contacted;
   * the exact Grok scope is chosen in all 50 iterations.
 * O6's owner-run login passes before O6 lands.
+* Amended 2026-09-28 (O8): CI passes on all three runners (Linux, macOS and
+  Windows), not only the macOS gate.
 
 ## 8. Rollout and rollback
 
@@ -327,7 +406,18 @@ Record its output in §10. If it fails, stop and prompt: the redirect stays
 
 ## 9. Deviation log
 
-None yet.
+* **2026-09-28: `TestVendorAuthPath` fails on Windows CI.**
+  * **Found:** CI's `validate (windows-2025)` job has failed on every push
+    since O1 reached `origin`: two cases expected `/`-separated paths.
+  * **Decision:** fix the test's expectations with `filepath.Join`. The code
+    is correct and stays unchanged.
+  * **Scope added:** Phase O8, `wizard/import_test.go` only.
+  * **Status:** returned from `complete` to `in-progress` until O8 lands and
+    CI's Windows job passes.
+  * **Not addressed:** `TestNativeReplaceRunningCopy` (`selfupdate`) fails
+    with `Access is denied.` on the owner's Windows laptop, but passes on
+    CI's Windows runner. It is not part of this plan. It needs its own
+    investigation if it is to be pursued.
 
 ## 10. Execution record
 
