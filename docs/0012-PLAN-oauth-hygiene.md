@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-09-28
 associated-madr: "0012-MADR-conform-providers-to-reference-clients.md"
 decision-makers: mcplib maintainers
@@ -435,7 +435,7 @@ document, and checked equal to the proven diff.
   * The fix applied the Phase O8 diff with `git apply`, taken from this document and checked equal to the diff proven on Windows.
   * On macOS the §0.2 gate passed: `gofmt`, `golint` on `wizard/import_test.go`, `go vet` (both), `make lint`, `go test`, and `-race`.
   * On Windows (the owner's laptop, Go 1.26.6, in a temporary clone of `a27da70` plus this diff), `TestVendorAuthPath` passed all 5 cases, and `go test ./wizard` passed.
-  * **Pending:** CI's `validate (windows-2025)` job on the pushed commit. The commits are not pushed yet. This plan stays `in-progress` until that job passes.
+  * **CI** (2026-09-28): the owner approved the push of `fd5dd43`..`845bc21`. Run `36447286477` on `845bc21` passed on all three runners: `validate (ubuntu-24.04)`, `validate (macos-15)` and `validate (windows-2025)`. That meets §7's amended criterion, and this plan is complete.
 
 **Live** (`-tags live_gateways`, this plan's tests, on the executed tree): 4 passed, 0 skipped, 0 failed.
 
