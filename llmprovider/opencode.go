@@ -191,7 +191,7 @@ func (p *OpencodeProvider) messagesBody(input []Item, tool *Tool, thinking bool)
 		jsonKeyModel:    p.model,
 		jsonKeyMessages: claudeItemsToMessages(input),
 	}
-	if system := claudeSystemPrompt(input); system != "" {
+	if system := systemPrompt(input); system != "" {
 		body[jsonKeySystem] = system
 	}
 	if thinking {
@@ -223,6 +223,9 @@ func (p *OpencodeProvider) googleBody(input []Item, tool *Tool, thinking bool) m
 	body := map[string]any{
 		"contents":         geminiItemsToContents(input),
 		"generationConfig": genCfg,
+	}
+	if system := geminiSystemInstruction(input); system != nil {
+		body["systemInstruction"] = system
 	}
 	if tool != nil {
 		body[jsonKeyTools] = []map[string]any{{

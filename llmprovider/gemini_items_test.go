@@ -91,7 +91,7 @@ func TestGemini_GenerateItems_InterleavedParts(t *testing.T) {
 			"candidates": [{
 				"content": {
 					"parts": [
-						{"thought": "pondering the question"},
+						{"thought": true, "text": "pondering the question"},
 						{"text": "the solution is 42"}
 					]
 				}

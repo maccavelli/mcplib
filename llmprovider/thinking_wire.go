@@ -107,13 +107,18 @@ func addMessagesThinking(body map[string]any, model, effort string, budget, maxT
 // lowEffortThinkingBudget budget on 1.x and 2.x, and any other effort keeps
 // the dynamic budget.
 func geminiThinkingConfig(model, effort string, budget int) map[string]any {
+	// Thought summaries come back only when asked for, as OpenCode's client
+	// asks (transform.ts:1280-1288, MADR 0014 §3).
+	cfg := map[string]any{"includeThoughts": true}
 	switch {
 	case budget > 0:
-		return map[string]any{jsonKeyThinkingBudget: budget}
+		cfg[jsonKeyThinkingBudget] = budget
 	case effort != effortLow:
-		return map[string]any{jsonKeyThinkingBudget: dynamicGeminiThinkingBudget}
+		cfg[jsonKeyThinkingBudget] = dynamicGeminiThinkingBudget
 	case geminiLegacyRE.MatchString(model):
-		return map[string]any{jsonKeyThinkingBudget: lowEffortThinkingBudget}
+		cfg[jsonKeyThinkingBudget] = lowEffortThinkingBudget
+	default:
+		cfg["thinkingLevel"] = effortLow
 	}
-	return map[string]any{"thinkingLevel": effortLow}
+	return cfg
 }

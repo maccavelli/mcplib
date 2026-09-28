@@ -131,6 +131,16 @@ func (p *GeminiProvider) Continue(ctx context.Context, previousInteractionID str
 	return p.doGenerateItems(ctx, input, nil, false, previousInteractionID)
 }
 
+// geminiSystemInstruction is generateContent's systemInstruction for the
+// system items, or nil when there are none (MADR 0014 §3).
+func geminiSystemInstruction(items []Item) map[string]any {
+	system := systemPrompt(items)
+	if system == "" {
+		return nil
+	}
+	return map[string]any{"parts": []map[string]any{{jsonKeyText: system}}}
+}
+
 func geminiItemsToContents(items []Item) []map[string]any {
 	// Gemini pairs a functionResponse with its functionCall by name, so a
 	// result takes the name of the call it answers (MADR 0012 §2).
@@ -154,6 +164,9 @@ func geminiItemsToContents(items []Item) []map[string]any {
 	for _, item := range items {
 		switch v := item.(type) {
 		case MessageItem:
+			if v.Role == jsonRoleSystem {
+				continue // systemInstruction; see geminiSystemInstruction
+			}
 			role := v.Role
 			if role == "" || role == jsonRoleUser {
 				role = jsonRoleUser
@@ -197,6 +210,9 @@ func (p *GeminiProvider) doGenerateItems(ctx context.Context, input []Item, tool
 	body := map[string]any{
 		"contents":         geminiItemsToContents(input),
 		"generationConfig": p.genConfig(thinking),
+	}
+	if system := geminiSystemInstruction(input); system != nil {
+		body["systemInstruction"] = system
 	}
 
 	if tool != nil {
@@ -263,7 +279,7 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 			Content struct {
 				Parts []struct {
 					Text         string `json:"text"`
-					Thought      string `json:"thought"`
+					Thought      bool   `json:"thought"`
 					FunctionCall *struct {
 						Name string         `json:"name"`
 						Args map[string]any `json:"args"`
@@ -288,8 +304,12 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 
 	result := &Response{ID: id}
 	for _, part := range raw.Candidates[0].Content.Parts {
-		if part.Thought != "" {
-			result.Output = append(result.Output, ReasoningItem{Text: part.Thought})
+		// A thought summary is flagged thought: true, with its text in text.
+		if part.Thought {
+			if part.Text != "" {
+				result.Output = append(result.Output, ReasoningItem{Text: part.Text})
+			}
+			continue
 		}
 		if part.Text != "" {
 			result.Output = append(result.Output, MessageItem{Role: jsonRoleAssistant, Text: part.Text})

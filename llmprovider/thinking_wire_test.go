@@ -68,11 +68,11 @@ func TestThinkingWire_Claude(t *testing.T) {
 // is HTTP 400 there); other efforts keep the dynamic budget; a budget wins.
 func TestThinkingWire_Gemini(t *testing.T) {
 	for _, tc := range []thinkingCase{
-		{"gemini-3.7-flash", effortLow, 0, map[string]any{"thinkingConfig": map[string]any{"thinkingLevel": "low"}}},
-		{"gemini-2.5-flash", effortLow, 0, map[string]any{"thinkingConfig": map[string]any{"thinkingBudget": float64(1024)}}},
-		{"gemini-3.7-flash", "", 0, map[string]any{"thinkingConfig": map[string]any{"thinkingBudget": float64(-1)}}},
-		{"gemini-3.7-flash", effortHigh, 0, map[string]any{"thinkingConfig": map[string]any{"thinkingBudget": float64(-1)}}},
-		{"gemini-2.5-flash", effortLow, 512, map[string]any{"thinkingConfig": map[string]any{"thinkingBudget": float64(512)}}},
+		{"gemini-3.7-flash", effortLow, 0, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingLevel": "low"}}},
+		{"gemini-2.5-flash", effortLow, 0, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingBudget": float64(1024)}}},
+		{"gemini-3.7-flash", "", 0, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingBudget": float64(-1)}}},
+		{"gemini-3.7-flash", effortHigh, 0, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingBudget": float64(-1)}}},
+		{"gemini-2.5-flash", effortLow, 512, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingBudget": float64(512)}}},
 	} {
 		t.Run(tc.model+"/"+tc.effort, func(t *testing.T) {
 			var body map[string]any
@@ -104,7 +104,7 @@ func TestThinkingWire_OpencodeRoutes(t *testing.T) {
 		{ProviderOpencodeGo, "qwen3.8-flash", fxOpencodeMessages, false, map[string]any{
 			"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(1024)}}},
 		{ProviderOpencodeZen, "gemini-3.8-flash", fxOpencodeGoogle, true, map[string]any{
-			"thinkingConfig": map[string]any{"thinkingLevel": "low"}}},
+			"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingLevel": "low"}}},
 	} {
 		t.Run(tc.gateway+"/"+tc.model, func(t *testing.T) {
 			var body map[string]any

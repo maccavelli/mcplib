@@ -152,7 +152,7 @@ func claudeItemsToMessages(items []Item) []map[string]any {
 		case MessageItem:
 			role := v.Role
 			if role == jsonRoleSystem {
-				continue // top-level system field; see claudeSystemPrompt
+				continue // top-level system field; see systemPrompt
 			}
 			if role == "" || role == jsonRoleUser {
 				role = jsonRoleUser
@@ -188,7 +188,7 @@ func (p *ClaudeProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		"max_tokens":    maxTokens,
 		jsonKeyMessages: claudeItemsToMessages(input),
 	}
-	if system := claudeSystemPrompt(input); system != "" {
+	if system := systemPrompt(input); system != "" {
 		body[jsonKeySystem] = system
 	}
 
