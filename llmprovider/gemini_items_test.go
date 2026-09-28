@@ -8,16 +8,13 @@ import (
 	"testing"
 )
 
-// TestGemini_GenerateItems_TextParts verifies text candidate parts are decoded to MessageItem.
+// TestGemini_GenerateItems_TextParts verifies a model_output step is decoded to MessageItem.
 func TestGemini_GenerateItems_TextParts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
-			"id": "gemini_resp_1",
-			"candidates": [{
-				"content": {
-					"parts": [{"text": "hello from gemini"}]
-				}
-			}]
+			"id": "v1_int_text",
+			"status": "completed",
+			"steps": [{"type": "model_output", "content": [{"type": "text", "text": "hello from gemini"}]}]
 		}`))
 	}))
 	defer srv.Close()
@@ -37,25 +34,18 @@ func TestGemini_GenerateItems_TextParts(t *testing.T) {
 	if resp.OutputText() != "hello from gemini" {
 		t.Errorf("OutputText() = %q, want %q", resp.OutputText(), "hello from gemini")
 	}
-	if resp.ID != "gemini_resp_1" {
-		t.Errorf("Response.ID = %q, want gemini_resp_1", resp.ID)
+	if resp.ID != "v1_int_text" {
+		t.Errorf("Response.ID = %q, want v1_int_text", resp.ID)
 	}
 }
 
-// TestGemini_GenerateItems_FunctionCallPart verifies functionCall candidate parts are decoded.
+// TestGemini_GenerateItems_FunctionCallPart verifies a function_call step is decoded.
 func TestGemini_GenerateItems_FunctionCallPart(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
-			"candidates": [{
-				"content": {
-					"parts": [{
-						"functionCall": {
-							"name": "lookup",
-							"args": {"query": "weather"}
-						}
-					}]
-				}
-			}]
+			"id": "v1_int_call",
+			"status": "requires_action",
+			"steps": [{"type": "function_call", "id": "call_1", "name": "lookup", "arguments": {"query": "weather"}}]
 		}`))
 	}))
 	defer srv.Close()
@@ -70,7 +60,7 @@ func TestGemini_GenerateItems_FunctionCallPart(t *testing.T) {
 		t.Fatalf("expected 1 output item, got %d", len(resp.Output))
 	}
 	fc, ok := resp.Output[0].(FunctionCallItem)
-	if !ok || fc.Name != "lookup" || fc.Arguments != `{"query":"weather"}` {
+	if !ok || fc.CallID != "call_1" || fc.Name != "lookup" || fc.Arguments != `{"query":"weather"}` {
 		t.Errorf("FunctionCallItem = %+v", resp.Output[0])
 	}
 
@@ -84,18 +74,16 @@ func TestGemini_GenerateItems_FunctionCallPart(t *testing.T) {
 	}
 }
 
-// TestGemini_GenerateItems_InterleavedParts verifies thought and text parts are decoded.
+// TestGemini_GenerateItems_InterleavedParts verifies thought and model_output steps are decoded.
 func TestGemini_GenerateItems_InterleavedParts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
-			"candidates": [{
-				"content": {
-					"parts": [
-						{"thought": true, "text": "pondering the question"},
-						{"text": "the solution is 42"}
-					]
-				}
-			}]
+			"id": "v1_int_thought",
+			"status": "completed",
+			"steps": [
+				{"type": "thought", "signature": "sig", "summary": [{"type": "text", "text": "pondering the question"}]},
+				{"type": "model_output", "content": [{"type": "text", "text": "the solution is 42"}]}
+			]
 		}`))
 	}))
 	defer srv.Close()
@@ -119,18 +107,19 @@ func TestGemini_GenerateItems_InterleavedParts(t *testing.T) {
 	}
 }
 
-// TestGemini_Continue verifies previous_interaction_id is sent in request body.
+// TestGemini_Continue verifies a stored provider sends previous_interaction_id.
 func TestGemini_Continue(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"id":"interaction_2","candidates":[{"content":{"parts":[{"text":"more text"}]}}]}`)
+	srv := captureServer(t, &body, `{"id":"interaction_2","status":"completed","steps":[`+
+		`{"type":"model_output","content":[{"type":"text","text":"more text"}]}]}`)
 
-	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL))
+	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL), WithStore(true))
 	resp, err := p.Continue(context.Background(), "interaction_1", MessageItem{Role: "user", Text: "go on"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body["previous_interaction_id"] != "interaction_1" {
-		t.Errorf("previous_interaction_id = %v, want interaction_1", body["previous_interaction_id"])
+	if body["previous_interaction_id"] != "interaction_1" || body["store"] != true {
+		t.Errorf("previous_interaction_id = %v, store = %v; want interaction_1, true", body["previous_interaction_id"], body["store"])
 	}
 	if resp.ID != "interaction_2" {
 		t.Errorf("Response.ID = %q, want interaction_2", resp.ID)
@@ -153,7 +142,8 @@ func TestGeminiInterfaceSatisfaction(t *testing.T) {
 
 func TestGemini_GenerateItems_FunctionCallOutput(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"text":"received output"}]}}]}`)
+	srv := captureServer(t, &body, `{"id":"v1_int_out","status":"completed","steps":[`+
+		`{"type":"model_output","content":[{"type":"text","text":"received output"}]}]}`)
 
 	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL))
 	items := []Item{

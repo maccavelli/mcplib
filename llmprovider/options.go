@@ -29,9 +29,10 @@ type ProviderConfig struct {
 	MaxTokens  int
 	BaseURL    string // For Ollama URL and test injection
 	// ThinkingBudget is the token budget for extended thinking / reasoning, used
-	// by the GenerateThinking paths of providers that reason via a token budget
-	// (Claude "thinking", Gemini "thinkingConfig"). Zero leaves the per-provider
-	// default in effect.
+	// by the GenerateThinking paths of wires that reason via a token budget
+	// (Claude "thinking", OpenCode's google route "thinkingConfig"). The Gemini
+	// provider's Interactions API has no budget (MADR 0014). Zero leaves the
+	// per-provider default in effect.
 	ThinkingBudget int
 	// ReasoningEffort selects the reasoning effort ("low"|"medium"|"high") for
 	// the GenerateThinking path of every provider. Effort APIs send it as is;
@@ -57,8 +58,8 @@ type ProviderConfig struct {
 	// KiloOrganization scopes Kilo requests to an organization; see
 	// WithKiloOrganization. Ignored by all other providers.
 	KiloOrganization string
-	// Store sets the Responses API store field for OpenAI API-key mode and
-	// Grok; nil leaves the service default. See WithStore.
+	// Store sets whether OpenAI API-key mode, Grok and Gemini store responses;
+	// nil leaves each provider's default. See WithStore.
 	Store *bool
 	// ModelProfile selects how the recommended models of the open catalogs
 	// (Kilo, OpenCode Zen and Go, Hugging Face) are ranked. The zero value is
@@ -103,8 +104,10 @@ func WithBaseURL(url string) ProviderOption {
 }
 
 // WithThinkingBudget sets the extended-thinking/reasoning token budget used by the
-// provider's GenerateThinking path (Claude, Gemini). A non-positive value leaves the
-// per-provider default in effect.
+// provider's GenerateThinking path (Claude, OpenCode's google route). The Gemini
+// provider ignores it: the Interactions API has no budget; use
+// WithReasoningEffort (MADR 0014). A non-positive value leaves the per-provider
+// default in effect.
 func WithThinkingBudget(n int) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.ThinkingBudget = n
@@ -167,11 +170,12 @@ func WithKiloOrganization(id string) ProviderOption {
 	}
 }
 
-// WithStore sets whether OpenAI (API-key mode) and Grok store responses
-// (MADR 0012 §6). Without it the service default applies, which keeps
-// Continue working; callers under zero-data-retention pass false, after
-// which Continue has nothing to chain from. A ChatGPT session always sends
-// false. Ignored by all other providers.
+// WithStore sets whether OpenAI (API-key mode), Grok and Gemini store
+// responses (MADR 0012 §6, MADR 0014 §2). For OpenAI and Grok, without it
+// the service default applies, which keeps Continue working; callers under
+// zero-data-retention pass false, after which Continue has nothing to chain
+// from. Gemini stores nothing unless given true, and its Continue needs
+// true. A ChatGPT session always sends false. Ignored by all other providers.
 func WithStore(store bool) ProviderOption {
 	return func(cfg *ProviderConfig) {
 		cfg.Store = &store

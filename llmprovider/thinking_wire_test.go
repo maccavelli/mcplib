@@ -63,9 +63,10 @@ func TestThinkingWire_Claude(t *testing.T) {
 	}
 }
 
-// TestThinkingWire_Gemini pins MADR 0013 Q1 on the Gemini wire: "low" is
-// thinkingLevel on Gemini 3 and later and a 1024 budget on 2.x (thinkingLevel
-// is HTTP 400 there); other efforts keep the dynamic budget; a budget wins.
+// TestThinkingWire_Gemini pins MADR 0013 Q1 on the generateContent wire, which
+// only OpenCode's google route speaks since MADR 0014: "low" is thinkingLevel
+// on Gemini 3 and later and a 1024 budget on 2.x (thinkingLevel is HTTP 400
+// there); other efforts keep the dynamic budget; a budget wins.
 func TestThinkingWire_Gemini(t *testing.T) {
 	for _, tc := range []thinkingCase{
 		{"gemini-3.7-flash", effortLow, 0, map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true, "thinkingLevel": "low"}}},
@@ -77,7 +78,7 @@ func TestThinkingWire_Gemini(t *testing.T) {
 		t.Run(tc.model+"/"+tc.effort, func(t *testing.T) {
 			var body map[string]any
 			srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`)
-			p, err := NewGemini(context.Background(), "k", tc.model, WithBaseURL(srv.URL),
+			p, err := NewOpencode(ProviderOpencodeZen, "k", tc.model, WithBaseURL(srv.URL),
 				WithReasoningEffort(tc.effort), WithThinkingBudget(tc.budget))
 			if err != nil {
 				t.Fatal(err)

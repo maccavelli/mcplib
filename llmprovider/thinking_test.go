@@ -137,13 +137,14 @@ func TestOpenAINonThinking_UsesMaxTokens(t *testing.T) {
 	}
 }
 
-// TestGeminiThinking_RequestBody verifies a thinkingConfig is nested in generationConfig
-// with the configured budget, and that the default path omits it.
-func TestGeminiThinking_RequestBody(t *testing.T) {
+// TestGoogleRouteThinking_RequestBody verifies a thinkingConfig is nested in
+// generationConfig with the configured budget on OpenCode's google route, and
+// that the default path omits it. GeminiProvider has no budget (MADR 0014).
+func TestGoogleRouteThinking_RequestBody(t *testing.T) {
 	var body map[string]any
 	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`)
 
-	p, _ := NewGemini(context.Background(), "k", "gemini-x", WithBaseURL(srv.URL), WithThinkingBudget(1234))
+	p, _ := NewOpencode(ProviderOpencodeZen, "k", "gemini-x", WithBaseURL(srv.URL), WithThinkingBudget(1234))
 	if _, err := p.GenerateThinking(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}
@@ -170,12 +171,13 @@ func TestGeminiThinking_RequestBody(t *testing.T) {
 	}
 }
 
-// TestGeminiThinking_DynamicBudgetDefault verifies an unset budget maps to -1 (dynamic).
-func TestGeminiThinking_DynamicBudgetDefault(t *testing.T) {
+// TestGoogleRouteThinking_DynamicBudgetDefault verifies an unset budget maps to
+// -1 (dynamic) on OpenCode's google route.
+func TestGoogleRouteThinking_DynamicBudgetDefault(t *testing.T) {
 	var body map[string]any
 	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`)
 
-	p, _ := NewGemini(context.Background(), "k", "gemini-x", WithBaseURL(srv.URL))
+	p, _ := NewOpencode(ProviderOpencodeZen, "k", "gemini-x", WithBaseURL(srv.URL))
 	if _, err := p.GenerateThinking(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}
@@ -207,9 +209,10 @@ func TestOpenAIThinkingTool(t *testing.T) {
 
 func TestGeminiThinkingTool(t *testing.T) {
 	var body map[string]any
-	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"test"}}}]}}]}`)
+	srv := captureServer(t, &body, `{"id":"v1_t","status":"requires_action","steps":[{"type":"thought","signature":"s"},`+
+		`{"type":"function_call","id":"c1","name":"lookup","arguments":{"q":"test"}}]}`)
 
-	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL), WithThinkingBudget(1000))
+	p, _ := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL), WithReasoningEffort(effortHigh))
 	tool := Tool{Name: "lookup", Description: "lookup", Schema: map[string]any{"type": "object"}}
 	args, err := p.GenerateWithToolThinking(context.Background(), "hi", tool)
 	if err != nil {
@@ -218,10 +221,9 @@ func TestGeminiThinkingTool(t *testing.T) {
 	if args != `{"q":"test"}` {
 		t.Errorf("expected '{\"q\":\"test\"}', got %q", args)
 	}
-	gc := body["generationConfig"].(map[string]any)
-	tc := gc["thinkingConfig"].(map[string]any)
-	if b := tc["thinkingBudget"].(float64); int(b) != 1000 {
-		t.Errorf("thinkingBudget = %v, want 1000", b)
+	gc, _ := body["generation_config"].(map[string]any)
+	if gc["thinking_level"] != effortHigh || gc["tool_choice"] == nil {
+		t.Errorf("generation_config = %v, want thinking_level high and a tool_choice", gc)
 	}
 }
 

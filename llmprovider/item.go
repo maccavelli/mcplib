@@ -57,7 +57,8 @@ func (ReasoningItem) itemKind() string { return itemTypeReasoning }
 // Response is the canonical result of an item-based generation call.
 type Response struct {
 	// ID is the provider-issued response identifier, used for server-side
-	// conversation chaining (OpenAI/xAI: response ID, Gemini: interaction ID).
+	// conversation chaining (OpenAI/xAI: response ID, Gemini: interaction ID,
+	// which can be continued only when stored; see WithStore).
 	// Empty for providers that do not support server-side state (Claude).
 	ID string
 

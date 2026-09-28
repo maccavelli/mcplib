@@ -31,22 +31,18 @@ func TestGeminiDecode_ThoughtSummaryPart(t *testing.T) {
 	}
 }
 
-// geminiWireBodies returns the request bodies GeminiProvider and OpenCode's
-// google route send for one call.
+// geminiWireBodies returns the request body OpenCode's google route sends for
+// one call; GeminiProvider speaks the Interactions API (MADR 0014 §1).
 func geminiWireBodies(t *testing.T, thinking bool, items ...Item) map[string]map[string]any {
 	t.Helper()
 	out := map[string]map[string]any{}
 	var body map[string]any
 	srv := captureServer(t, &body, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`)
-	gp, err := NewGemini(context.Background(), "k", "gemini-3.7-flash", WithBaseURL(srv.URL))
-	if err != nil {
-		t.Fatal(err)
-	}
 	op, err := NewOpencode(ProviderOpencodeZen, "k", "gemini-3.7-flash", WithBaseURL(srv.URL))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, p := range map[string]ItemThinkingProvider{"gemini": gp, "opencode-google": op} {
+	for name, p := range map[string]ItemThinkingProvider{"opencode-google": op} {
 		body = nil
 		if thinking {
 			_, err = p.GenerateItemsThinking(context.Background(), items...)

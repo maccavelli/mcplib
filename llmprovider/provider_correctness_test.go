@@ -59,18 +59,18 @@ func TestOpenAI_WithMaxTokens(t *testing.T) {
 
 // TestGemini_WithMaxTokens is the regression for Gemini's generationConfig.
 func TestGemini_WithMaxTokens(t *testing.T) {
-	srv, body := bodyCapture(t, `{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`)
+	srv, body := bodyCapture(t, interactionText)
 	defer srv.Close()
 	p, _ := NewGemini(context.Background(), "k", "gemini-x", WithBaseURL(srv.URL), WithMaxTokens(123))
 	if _, err := p.Generate(context.Background(), "hi"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	gc, ok := (*body)["generationConfig"].(map[string]any)
+	gc, ok := (*body)["generation_config"].(map[string]any)
 	if !ok {
-		t.Fatalf("generationConfig missing: %v", *body)
+		t.Fatalf("generation_config missing: %v", *body)
 	}
-	if mt, ok := gc["maxOutputTokens"].(float64); !ok || int(mt) != 123 {
-		t.Errorf("maxOutputTokens not sent: %v", gc["maxOutputTokens"])
+	if mt, ok := gc["max_output_tokens"].(float64); !ok || int(mt) != 123 {
+		t.Errorf("max_output_tokens not sent: %v", gc["max_output_tokens"])
 	}
 }
 

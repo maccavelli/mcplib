@@ -9,15 +9,17 @@ import (
 	"net/http"
 )
 
-// GeminiProvider implements Provider using the Google Gemini API via standard http client.
+// GeminiProvider implements Provider over the Gemini Interactions API
+// (gemini_interactions.go, MADR 0014). It stores no interaction unless
+// WithStore(true), which Continue requires.
 type GeminiProvider struct {
 	apiKey          string
 	model           string
 	baseURL         string // For testing
 	client          *http.Client
 	maxTokens       int
-	thinkingBudget  int    // thinkingConfig budget for the GenerateThinking path
-	reasoningEffort string // effort for the GenerateThinking path (see geminiThinkingConfig)
+	reasoningEffort string // effort for the GenerateThinking path (see geminiThinkingLevel)
+	store           bool   // WithStore(true): interactions are stored and Continue works
 	// identity names the client on every request (MADR 0012 §1.4).
 	identity clientIdentity
 }
@@ -40,19 +42,9 @@ func NewGemini(ctx context.Context, apiKey, model string, opts ...ProviderOption
 		client:          cfg.HTTPClient,
 		identity:        identityOf(cfg),
 		maxTokens:       cfg.MaxTokens,
-		thinkingBudget:  cfg.ThinkingBudget,
 		reasoningEffort: cfg.ReasoningEffort,
+		store:           cfg.Store != nil && *cfg.Store,
 	}, nil
-}
-
-// genConfig builds the generationConfig map, adding a thinkingConfig when the thinking
-// path is requested (see geminiThinkingConfig).
-func (p *GeminiProvider) genConfig(thinking bool) map[string]any {
-	cfg := map[string]any{"maxOutputTokens": p.maxTokens}
-	if thinking {
-		cfg["thinkingConfig"] = geminiThinkingConfig(p.model, p.reasoningEffort, p.thinkingBudget)
-	}
-	return cfg
 }
 
 // Name returns the provider's unique identifier "gemini".
@@ -126,8 +118,14 @@ func (p *GeminiProvider) GenerateItemsWithToolThinking(ctx context.Context, tool
 	return p.doGenerateItems(ctx, input, &tool, true, "")
 }
 
-// Continue sends items to the Gemini API, chaining from a previous interaction.
+// Continue sends the new items, chaining from a stored interaction. Gemini
+// requires store true to chain, so a provider made without WithStore(true)
+// returns ErrInvalidRequest without a request (MADR 0014 §2).
 func (p *GeminiProvider) Continue(ctx context.Context, previousInteractionID string, input ...Item) (*Response, error) {
+	if !p.store {
+		return nil, fmt.Errorf("%w: gemini: Continue needs stored interactions; create the provider "+
+			"WithStore(true), or replay the items", ErrInvalidRequest)
+	}
 	return p.doGenerateItems(ctx, input, nil, false, previousInteractionID)
 }
 
@@ -141,6 +139,8 @@ func geminiSystemInstruction(items []Item) map[string]any {
 	return map[string]any{"parts": []map[string]any{{jsonKeyText: system}}}
 }
 
+// geminiItemsToContents is generateContent's contents, for OpenCode's google
+// route; GeminiProvider uses interactionsInput.
 func geminiItemsToContents(items []Item) []map[string]any {
 	// Gemini pairs a functionResponse with its functionCall by name, so a
 	// result takes the name of the call it answers (MADR 0012 §2).
@@ -207,45 +207,12 @@ func geminiItemsToContents(items []Item) []map[string]any {
 }
 
 func (p *GeminiProvider) doGenerateItems(ctx context.Context, input []Item, tool *Tool, thinking bool, prevInteractionID string) (*Response, error) {
-	body := map[string]any{
-		"contents":         geminiItemsToContents(input),
-		"generationConfig": p.genConfig(thinking),
-	}
-	if system := geminiSystemInstruction(input); system != nil {
-		body["systemInstruction"] = system
-	}
-
-	if tool != nil {
-		body[jsonKeyTools] = []map[string]any{
-			{
-				"functionDeclarations": []map[string]any{
-					{
-						jsonKeyName:        tool.Name,
-						jsonKeyDescription: tool.Description,
-						jsonKeyParameters:  tool.Schema,
-					},
-				},
-			},
-		}
-		body["toolConfig"] = map[string]any{
-			"functionCallingConfig": map[string]any{
-				"mode":                 "ANY",
-				"allowedFunctionNames": []string{tool.Name},
-			},
-		}
-	}
-
-	if prevInteractionID != "" {
-		body["previous_interaction_id"] = prevInteractionID
-	}
-
-	reqBody, err := json.Marshal(body)
+	reqBody, err := json.Marshal(p.interactionsBody(input, tool, thinking, prevInteractionID))
 	if err != nil {
 		return nil, fmt.Errorf("gemini: marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/models/%s:generateContent", p.baseURL, p.model)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+interactionsPath, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
 	}
@@ -268,14 +235,12 @@ func (p *GeminiProvider) doGenerateItems(ctx context.Context, input []Item, tool
 		return nil, err
 	}
 
-	return decodeGeminiResponse(limitedBody)
+	return decodeInteraction(limitedBody)
 }
 
 func decodeGeminiResponse(body io.Reader) (*Response, error) {
 	var raw struct {
-		ID            string `json:"id"`
-		InteractionID string `json:"interaction_id"`
-		Candidates    []struct {
+		Candidates []struct {
 			Content struct {
 				Parts []struct {
 					Text         string `json:"text"`
@@ -297,12 +262,7 @@ func decodeGeminiResponse(body io.Reader) (*Response, error) {
 		return nil, fmt.Errorf("gemini returned no content")
 	}
 
-	id := raw.ID
-	if id == "" {
-		id = raw.InteractionID
-	}
-
-	result := &Response{ID: id}
+	result := &Response{}
 	for _, part := range raw.Candidates[0].Content.Parts {
 		// A thought summary is flagged thought: true, with its text in text.
 		if part.Thought {

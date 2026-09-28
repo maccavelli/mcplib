@@ -20,6 +20,10 @@ func closeResponseBody(resp *http.Response) {
 	}
 }
 
+// statusIncomplete is the status of a truncated Responses or Interactions
+// answer.
+const statusIncomplete = "incomplete"
+
 // decodeResponsesAPIOutput decodes a Responses API JSON body into a Response.
 // Shared by providers using the Responses API envelope (OpenAI, Grok).
 func decodeResponsesAPIOutput(body io.Reader) (*Response, error) {
@@ -35,7 +39,7 @@ func decodeResponsesAPIOutput(body io.Reader) (*Response, error) {
 		return nil, err
 	}
 	// A truncated answer is an error, never an empty success (MADR 0012 §1.5).
-	if raw.Status == "incomplete" {
+	if raw.Status == statusIncomplete {
 		return nil, incompleteResponse(raw.IncompleteDetails.Reason)
 	}
 

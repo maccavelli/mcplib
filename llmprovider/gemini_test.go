@@ -16,7 +16,7 @@ func TestGemini_KeyInHeaderNotURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKeyHeader = r.Header.Get("x-goog-api-key")
 		gotRawQuery = r.URL.RawQuery
-		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+		_, _ = w.Write([]byte(interactionText))
 	}))
 	defer srv.Close()
 
