@@ -295,3 +295,19 @@ The next number stays the highest ever used plus one (after this record:
 * **Revisit** if an importer outside the fleet surfaces before `v1.7.0`, in
   which case option B for one release is the fallback. Revisit also if a
   consumer's migration record is abandoned.
+
+## Amendment 2026-09-29: the SDK's v1 API differs from `v1.6.0`
+
+On 2026-09-29, go-llmprovider-sdk
+`docs/decisions/0015-MADR-canonical-sdk-api-and-module-layout.md` (proposed)
+decided that the SDK's v1 API keeps functional parity with `mcplib` `v1.6.0`,
+but not its identifiers or signatures. The package names `llmprovider` and
+`wizard` stay. This changes two things here and nothing else above.
+
+* **§2.** The deprecation paragraph also names the migration guide:
+  `Deprecated: use github.com/maccavelli/go-llmprovider-sdk/<pkg>; see its
+  `docs/guides/migrating-from-mcplib.md`.` An importer needs the guide, because its calls change as well as
+  its import path.
+* **Timing.** The SDK tags `v1.0.0` only after its 0015 PLAN is complete. So
+  `v1.6.1` (R1) and `v1.7.0` (R2) move later. Their preconditions are
+  unchanged.

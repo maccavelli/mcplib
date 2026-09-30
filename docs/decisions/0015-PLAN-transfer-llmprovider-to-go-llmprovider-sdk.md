@@ -103,6 +103,10 @@ continue.
    // Deprecated: use github.com/maccavelli/go-llmprovider-sdk/wizard.
    ```
 
+   *Amended 2026-09-29:* each paragraph ends
+   `; see its docs/guides/migrating-from-mcplib.md.` in place of the
+   final period. See the MADR's amendment of the same date.
+
    The package docs are at `llmprovider/provider.go:1-3` and in
    `wizard/prompter.go` (`// Package wizard …`, the only file with one at
    `4e1f9a5`; neither package has a `doc.go`).
@@ -239,3 +243,6 @@ None.
     before the commit: no match.
   * The commit contains this pair only (bootstrap exception).
 * **R1:** waits for go-llmprovider-sdk `v1.0.0`, per its precondition.
+  Since 2026-09-29, that tag follows the SDK's
+  `0015-PLAN-canonical-sdk-api-and-module-layout.md` (see the MADR's
+  amendment).
