@@ -87,6 +87,10 @@ continue.
 
 ## Phase R1: `v1.6.1` deprecation
 
+*Amended 2026-09-29 (the MADR's second amendment):* waits, by the owner's
+decision, until `mcp-server-magictools` and `mcp-server-magicdev` can
+migrate. The precondition below is no longer sufficient.
+
 **Precondition:**
 `go list -m github.com/maccavelli/go-llmprovider-sdk@v1.0.0` resolves.
 
@@ -129,6 +133,10 @@ continue.
 * The migration records of `prepare-commit-msg` (0008),
   `mcp-server-magictools` (0005) and `mcp-server-magicdev` (0001) are
   `complete`.
+  *Amended 2026-09-29 (the MADR's second amendment):*
+  `prepare-commit-msg` drops `mcplib` entirely under its 0008. The other
+  two are deferred until the orchestrator code leaves `mcplib`, so this
+  phase is deferred.
 * This finds nothing:
 
   ```bash
@@ -246,3 +254,9 @@ None.
   Since 2026-09-29, that tag follows the SDK's
   `0015-PLAN-canonical-sdk-api-and-module-layout.md` (see the MADR's
   amendment).
+* **2026-09-29, the MADR's second amendment.** The owner decided that R1
+  waits and R2 is deferred until `mcp-server-magictools` and
+  `mcp-server-magicdev` can migrate, and that `prepare-commit-msg` drops
+  `mcplib` entirely. R1 and R2 are annotated. The amendment was written from
+  go-llmprovider-sdk and committed here on the owner's request ("Commit all
+  and push").

@@ -311,3 +311,50 @@ but not its identifiers or signatures. The package names `llmprovider` and
 * **Timing.** The SDK tags `v1.0.0` only after its 0015 PLAN is complete. So
   `v1.6.1` (R1) and `v1.7.0` (R2) move later. Their preconditions are
   unchanged.
+
+## Amendment 2026-09-29 (second): `prepare-commit-msg` leaves `mcplib`; `v1.6.1` and `v1.7.0` wait
+
+Status: **accepted** 2026-09-29, by the owner's decisions below. Recorded
+from go-llmprovider-sdk, where the same decisions are in
+`docs/decisions/0002-MADR-migrate-llmprovider-from-mcplib.md`, "Amendment
+2026-09-29 (sixth)" and its "further decisions".
+
+The owner:
+
+> I do not want to bring over the orchestrator code. that is specific to
+> mcplib and will remain in mcplib. we will only be migrating
+> prepare-commit-msg to this new sdk initially until i can clean up the
+> orchestrator stuff and move it out of mcplib.
+
+Then, asked about this record: "1. wait, 2. drop prepare-commit-msg as a
+mcplib consumer", meaning `mcplib` is removed from `prepare-commit-msg`
+entirely. For its self-update: "i am going to extract it into a new
+additional go shared library package i already have the repo for as a
+separate project named go-core-lib on my github".
+
+### What changes in this record
+
+* **Importers.** Only `prepare-commit-msg` migrates now, and it stops
+  importing `mcplib` altogether: `llmprovider` and `wizard` from
+  go-llmprovider-sdk, `selfupdate` from `go-core-lib` (`github.com/maccavelli/go-core-lib`).
+  `mcp-server-magictools` and `mcp-server-magicdev` keep importing
+  `llmprovider` and `wizard` here until the owner moves the orchestrator
+  code out of `mcplib`, under a later record.
+* **§2, `v1.6.1`, waits** until those two can migrate. It would otherwise
+  mark deprecated two packages they must keep using.
+* **§3, `v1.7.0`, is deferred** with them, without a date. Its precondition
+  now names `mcp-server-magictools` and `mcp-server-magicdev` only.
+* **Orchestration.** The SDK's `wizard` drops `Options.Orchestrated` and
+  `ErrOrchestrated` rather than keeping a caller-set flag. §6 is unchanged:
+  `backplane.go` and `IsOrchestratorOwned` stay here, and `wizard` here keeps
+  its orchestration check while it remains.
+* **`selfupdate`.** §6 lists it as untouched by this decision, and it still
+  is. Its extraction to `go-core-lib` is a separate decision, recorded here
+  when it is made. `magic-cli-remote` also imports it.
+
+### Consequences of the amendment
+
+* Good, because `prepare-commit-msg` ends with no `mcplib` dependency.
+* Bad, because the freeze of §1 lasts until the orchestrator work is done,
+  and `mcplib` stays two-purpose until then.
+* Bad, because neither `v1.6.1` nor `v1.7.0` has a date.
