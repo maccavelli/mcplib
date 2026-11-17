@@ -6,7 +6,7 @@ wins only where it is more specific than this file.
 
 `mcplib` is the shared Go library (`github.com/maccavelli/mcplib`) for the
 fleet. It is a library only: no packaged binary. LLM providers live in
-`llmprovider/`; the configuration wizard lives in `wizard/`. Requires Go 1.26.6.
+`llmprovider/`; the configuration wizard lives in `wizard/`. Requires Go 1.26.11; built and tested with Go 1.27.4.
 
 ## MADR and PLAN before mutating work
 

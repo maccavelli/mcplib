@@ -14,7 +14,7 @@ The module path is `github.com/maccavelli/mcplib`. It is a library only: no
 binary, no `build`/`install` target. Consumers import packages; they do not
 vendor copies of the same primitives.
 
-Requires Go 1.26.6.
+Requires Go 1.26.11; built and tested with Go 1.27.4.
 
 ## Why
 

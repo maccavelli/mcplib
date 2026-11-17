@@ -3,7 +3,6 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -65,12 +64,73 @@ func TestResolveTargetExtraRoot(t *testing.T) {
 }
 
 func TestCanonicalizeRootRejectsFilesystemRoot(t *testing.T) {
-	root := "/"
-	if runtime.GOOS == "windows" {
-		root = os.Getenv("SystemDrive") + `\`
-	}
+	// The root of the volume that holds a temporary directory: "/" on Unix,
+	// the drive root on Windows. It is derived from the filesystem, not from
+	// an environment variable, so the test does not depend on SystemDrive.
+	root := filepath.VolumeName(t.TempDir()) + string(filepath.Separator)
 	if _, err := canonicalizeRoot(root); err == nil {
 		t.Fatal("accepted filesystem root")
+	}
+}
+
+func TestCanonicalizeRootContract(t *testing.T) {
+	base := t.TempDir()
+	want, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(base, "file")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dirLink := filepath.Join(base, "dirlink")
+	dirLinked := os.Symlink(want, dirLink) == nil
+	fileLink := filepath.Join(base, "filelink")
+	fileLinked := os.Symlink(file, fileLink) == nil
+
+	t.Run("rejects a relative path that names an existing directory", func(t *testing.T) {
+		if err := os.Mkdir(filepath.Join(base, "sub"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(base)
+		if got, err := canonicalizeRoot("sub"); err == nil {
+			t.Fatalf("accepted %q", got)
+		}
+	})
+	t.Run("accepts a directory", func(t *testing.T) {
+		got, err := canonicalizeRoot(base)
+		if err != nil || got != want {
+			t.Fatalf("got %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("accepts a symlink to a directory and resolves it", func(t *testing.T) {
+		if !dirLinked {
+			t.Skip("symlinks unavailable")
+		}
+		got, err := canonicalizeRoot(dirLink)
+		if err != nil || got != want {
+			t.Fatalf("got %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("rejects a symlink to a file", func(t *testing.T) {
+		if !fileLinked {
+			t.Skip("symlinks unavailable")
+		}
+		if got, err := canonicalizeRoot(fileLink); err == nil {
+			t.Fatalf("accepted %q", got)
+		}
+	})
+	for name, path := range map[string]string{
+		"empty":          "",
+		"relative":       "rel",
+		"a file":         file,
+		"a missing path": filepath.Join(base, "missing"),
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			if got, err := canonicalizeRoot(path); err == nil {
+				t.Fatalf("accepted %q", got)
+			}
+		})
 	}
 }
 
