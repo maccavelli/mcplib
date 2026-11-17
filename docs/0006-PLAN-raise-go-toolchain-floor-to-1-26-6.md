@@ -433,3 +433,7 @@ Consumers may stay on v1.3.0, which remains published and immutable.
 **If a repository fails on 1.26.6.** Stop that phase and report it as a
 deviation with the failure output. Do not lower that repository alone; a split
 floor is the condition this plan exists to remove.
+
+## Amendment A1 (2026-11-17): floor moved
+
+The floor this plan raised to 1.26.6 was later moved to 1.26.11 by [0016-PLAN-move-toolchain-to-go-1-27-4-and-floor-to-1-26-11.md](decisions/0016-PLAN-move-toolchain-to-go-1-27-4-and-floor-to-1-26-11.md). The text above is unchanged history.

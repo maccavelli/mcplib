@@ -249,3 +249,7 @@ a re-run and not a rediscovery.
   `mcp-server-filesystem/go.mod`, `mcp-server-go-modernizer/go.mod`,
   `mcp-server-magicdev/go.mod`, `mcp-server-magicskills/go.mod`,
   `mcp-server-sequential-thinking/go.mod`
+
+## Amendment A1 (2026-11-17): the floor is go 1.26.11
+
+The floor this record set, 1.26.6, was superseded on 2026-11-17: `go.mod` now says `go 1.26.11` and `toolchain go1.27.4`, because Go 1.26.10 and 1.27.3 carry GO-2026-6859. See [0016-MADR-move-toolchain-to-go-1-27-4-and-floor-to-1-26-11.md](decisions/0016-MADR-move-toolchain-to-go-1-27-4-and-floor-to-1-26-11.md). The text above is unchanged history.
