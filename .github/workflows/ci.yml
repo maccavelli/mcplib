@@ -35,3 +35,27 @@ jobs:
         run: |
           ./scripts/refuse-existing-release_test.sh
           ./scripts/check-workflow-gh-repo.sh
+
+
+  # The module's floor, go 1.26.11. GOTOOLCHAIN=local stops the `toolchain`
+  # line switching to 1.27.4, and go-version, not go-version-file, keeps
+  # setup-go from reading it, so this job builds and tests exactly the
+  # floor go.mod declares
+  # (docs/decisions/0016-MADR-move-toolchain-to-go-1-27-4-and-floor-to-1-26-11.md,
+  # Amendment A2). Linux only; no lint here (the lint step runs in validate).
+  go126:
+    runs-on: ubuntu-24.04
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.11'
+      - name: the floor toolchain
+        run: test "$(go env GOVERSION)" = go1.26.11
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -count=1 ./...
