@@ -103,6 +103,22 @@ Gates (this Mac, exit status before any filter):
 
 Not done: no CI floor job (named gap), no tag, no release, no workflow edit.
 
+### 2026-11-17: the floor job (MADR A2)
+
+By the owner's ruling D4 (MADR A2), `.github/workflows/ci.yml` gains the
+`go126` job, after `validate`; no other line of `ci.yml` changes. The
+version-agreement check also asserts the job's `go-version` equals `go.mod`'s
+`go` line, its `GOVERSION` test names the same version and `GOTOOLCHAIN` is
+`local`; planted `go-version: '1.26.10'` and a planted `= go1.26.10` test each
+fail it (exit 1, "go126: go-version is not exactly 1.26.11", "go126: GOVERSION
+test is not go1.26.11"). `actionlint` on `ci.yml` exits 0 and
+`scripts/check-workflow-gh-repo.sh` passes. The job's steps ran locally
+under `GOTOOLCHAIN=go1.26.11 GOPROXY=off` (the 14:27 to 15:03 gate above; the
+edit changes no Go code); `GOTOOLCHAIN=local` on a 1.26.11 SDK was not run,
+because no 1.26.11 SDK is installed on this Mac. The run on `6a139d6`
+succeeded on all three operating systems (MADR A2 quotes it); the first run
+that includes the new job is its proof and is not yet observed.
+
 ## Deviations
 
 ### 2026-11-17: the lint gate fails, and CI's lint step is expected to fail

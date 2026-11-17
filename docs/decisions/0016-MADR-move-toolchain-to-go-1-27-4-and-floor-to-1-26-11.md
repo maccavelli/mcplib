@@ -280,6 +280,48 @@ pushes to `main` for this plan only. Tags and releases wait.
   source is in the test, and changing production code to satisfy it would
   be changing the code to move the analyser, not to fix anything.
 
+#### A2 (2026-11-17): a floor job in CI
+
+* **Ruling D4.** Chosen label: "Only for the two libraries (mcplib,
+  mcp-buntdb)". Asked: none of the repositories moved to floor `go 1.26.11`
+  had a CI job that builds and tests on the floor, so CI proved the floor
+  only by a one-off local run; go-selfupdate-lib and acp-go-sdk2 already
+  have one; should the others get one? As put: the floor matters most where
+  other programs depend on it; the server binaries are always built with
+  the toolchain. This closes the "CI has no floor job" gap named in
+  Consequences, for this repository.
+* **The job.** `.github/workflows/ci.yml` gains `go126`, in the form of
+  go-selfupdate-lib's job of the same name: Linux (`ubuntu-24.04`),
+  `GOTOOLCHAIN: local`, `actions/setup-go` with `go-version: '1.26.11'`
+  (not `go-version-file`, so the `toolchain` line is not read), a step
+  asserting `go env GOVERSION` is `go1.26.11`, then `go build ./...`,
+  `go vet ./...` and `go test -count=1 ./...`. Actions are pinned by the
+  same commits the workflow already uses. It has no lint step: lint runs in
+  `validate` under the toolchain, and v2.15.0 was shown to type-check under
+  1.26.11 locally (A1), so a lint run there would add a second view of the
+  same code, not a different one. It has no `govulncheck` step because this
+  workflow runs none in any job.
+* **What it proves.** That the module builds, vets and passes its tests with
+  exactly Go 1.26.11 on Linux. **What it does not:** nothing on macOS or
+  Windows runs at the floor; and an edit that only fails the lint rule set
+  under 1.26.11 would not show.
+* **No required checks.** `ci.yml` has no summary or required-check job to
+  extend, and `gh api repos/<owner>/mcplib/branches/main/protection` answers
+  "Branch not protected" (404) with no rulesets, so nothing lists the job.
+  Nothing was changed on the repository's settings.
+* **Proof.** The first CI run on the push that adds the job is the proof;
+  until it runs, the job is verified only by `actionlint` and by running
+  its build, vet and test steps locally under `GOTOOLCHAIN=go1.26.11`
+  (A1's gates), not as a `local` toolchain.
+* **CI observed before this amendment** (run on `6a139d6`, `success`): all
+  three `validate` jobs ran `setup-go` with `go-version-file: go.mod` and
+  installed Go 1.27.4 (`go version go1.27.4 linux/amd64`, `windows/amd64`,
+  `darwin/arm64`); the Linux lint step installed golangci-lint v2.15.0 and
+  printed "0 issues."; `go test ./...` printed `ok
+  github.com/maccavelli/mcplib/selfupdate` on Linux (0.446s), Windows
+  (0.939s) and macOS (0.524s), which is the changed
+  `selfupdate/target_test.go` running on Windows for the first time.
+
 ### Relation to earlier records
 
 Amends [0006-MADR-raise-go-toolchain-floor-to-1-26-6.md](../0006-MADR-raise-go-toolchain-floor-to-1-26-6.md)
